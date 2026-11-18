@@ -1,2 +1,3 @@
 /Users/xavier/projetos/aporia-tracking-service/src/test/java/software/aporia/tracking/AppTest.java
 /Users/xavier/projetos/aporia-tracking-service/src/test/java/software/aporia/tracking/core/RawPacketTest.java
+/Users/xavier/projetos/aporia-tracking-service/src/test/java/software/aporia/tracking/storage/JdbcRawPacketRepositoryIT.java
