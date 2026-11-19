@@ -12,7 +12,7 @@ import java.util.UUID;
 
 import software.aporia.tracking.core.ReceivedFrame;
 
-class JdbcPacketIngestion {
+public class JdbcPacketIngestion {
 
     // Implementation details for JDBC packet ingestion
     private final String url;
