@@ -1,5 +1,0 @@
-software/aporia/tracking/storage/RawPacketRepository.class
-software/aporia/tracking/storage/DatabaseMigration.class
-software/aporia/tracking/App.class
-software/aporia/tracking/storage/JdbcRawPacketRepository.class
-software/aporia/tracking/core/RawPacket.class
