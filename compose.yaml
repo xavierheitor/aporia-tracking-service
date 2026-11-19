@@ -1,20 +1,21 @@
 services:
   postgres:
-    image: postgres:16
-    container_name: aporia-tracking-postgres
+    image: aporia-postgres-postgis:16
+    platform: linux/arm64
+    container_name: aporia-tracking-postgis
     environment:
-      POSTGRES_DB: aporia_tracking
+      POSTGRES_DB: postgres
       POSTGRES_USER: tracking
       POSTGRES_PASSWORD: tracking_dev
     ports:
-      - "127.0.0.1:55432:5432"
+      - "127.0.0.1:55434:5432"
     volumes:
-      - tracking_postgres_data:/var/lib/postgresql/data
+      - tracking_postgis_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tracking -d aporia_tracking"]
+      test: ["CMD-SHELL", "pg_isready -U tracking -d postgres"]
       interval: 5s
       timeout: 3s
       retries: 10
 
 volumes:
-  tracking_postgres_data:
+  tracking_postgis_data:
