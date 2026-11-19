@@ -3,31 +3,29 @@ package software.aporia.tracking.storage;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HexFormat;
 import java.util.UUID;
 
+import javax.sql.DataSource;
+
 import software.aporia.tracking.core.ReceivedFrame;
+
 
 public class JdbcPacketIngestion {
 
     // Implementation details for JDBC packet ingestion
-    private final String url;
-    private final String username;
-    private final String password;
+    private final DataSource dataSource;
 
-    public JdbcPacketIngestion(String url, String username, String password) {
-        this.url = url;
-        this.username = username;
-        this.password = password;
+    public JdbcPacketIngestion(DataSource dataSource) {
+        this.dataSource = java.util.Objects.requireNonNull(dataSource, "dataSource must not be null");
     }
 
     public UUID accept(ReceivedFrame frame) {
         //try to create a connection to the database and accept the frame
-        try (Connection connection = DriverManager.getConnection(url, username, password)) {
+        try (Connection connection = dataSource.getConnection()) {
             // Disable auto-commit for transaction management
             connection.setAutoCommit(false);
 

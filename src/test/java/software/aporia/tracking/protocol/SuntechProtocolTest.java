@@ -119,11 +119,16 @@ class SuntechProtocolTest {
 
         // Test that the SuntechProtocol throws an IllegalArgumentException when
         // attempting to identify a frame with an invalid identity.
-        assertThrows(
+        var exception = assertThrows(
                 IllegalArgumentException.class,
                 () -> protocol.identify(
                         ascii("ALV;ABC\r")
                 )
+        );
+
+        assertEquals(
+                "INVALID_IDENTITY",
+                exception.getMessage()
         );
     }
 

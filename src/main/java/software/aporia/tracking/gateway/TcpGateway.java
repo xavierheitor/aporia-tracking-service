@@ -10,6 +10,7 @@ import java.util.concurrent.Executors;
 
 import software.aporia.tracking.core.ReceivedFrame;
 import software.aporia.tracking.protocol.SuntechProtocol;
+import software.aporia.tracking.storage.Database;
 import software.aporia.tracking.storage.JdbcPacketIngestion;
 
 public class TcpGateway {
@@ -18,32 +19,18 @@ public class TcpGateway {
     private static final int READ_TIMEOUT_MS = 30_000;
 
     public static void main(String[] args) throws IOException {
-        String dbUrl = System.getenv().getOrDefault("TRACKING_DB_URL", "jdbc:postgresql://localhost:55432/aporia_tracking_v2");
-        String dbUser = System.getenv().getOrDefault(
-                "TRACKING_DB_USER",
-                "tracking"
-        );
 
-        String dbPassword = System.getenv("TRACKING_DB_PASSWORD");
-
-        if (dbPassword == null || dbPassword.isBlank()) {
-            throw new IllegalStateException(
-                    "TRACKING_DB_PASSWORD is required"
-            );
-        }
-
-        JdbcPacketIngestion ingestion = new JdbcPacketIngestion(
-                dbUrl,
-                dbUser,
-                dbPassword
-        );
         try (
-                ServerSocket server = new ServerSocket(
-                        PORT,
-                        50,
-                        InetAddress.getLoopbackAddress()
-                ); var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                var dataSource = Database.createDataSource(); ServerSocket server = new ServerSocket(
+                PORT,
+                50,
+                InetAddress.getLoopbackAddress()
+        ); var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             {
+
+                JdbcPacketIngestion ingestion
+                        = new JdbcPacketIngestion(dataSource);
+
                 System.out.println(
                         "Tracking TCP Gateway listening on 127.0.0.1:" + PORT
                 );
