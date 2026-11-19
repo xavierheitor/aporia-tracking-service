@@ -1,4 +1,5 @@
 /Users/xavier/projetos/aporia-tracking-service/src/main/java/software/aporia/tracking/App.java
 /Users/xavier/projetos/aporia-tracking-service/src/main/java/software/aporia/tracking/core/RawPacket.java
+/Users/xavier/projetos/aporia-tracking-service/src/main/java/software/aporia/tracking/storage/DatabaseMigration.java
 /Users/xavier/projetos/aporia-tracking-service/src/main/java/software/aporia/tracking/storage/JdbcRawPacketRepository.java
 /Users/xavier/projetos/aporia-tracking-service/src/main/java/software/aporia/tracking/storage/RawPacketRepository.java
