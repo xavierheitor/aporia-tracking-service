@@ -1,0 +1,21 @@
+# Maven build output
+/target/
+
+# Runtime logs and JVM diagnostics
+*.log
+*.hprof
+*.jfr
+hs_err_pid*
+replay_pid*
+*.dump
+*.dumpstream
+
+# Local IDE files
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+
+# macOS
+.DS_Store
