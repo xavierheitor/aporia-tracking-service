@@ -1,0 +1,50 @@
+package software.aporia.tracking.storage;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.util.UUID;
+
+public class OutboxRepository {
+
+    public UUID savePositionEvent(
+            Connection connection,
+            UUID tenantId,
+            UUID assetId,
+            UUID positionId
+    ) throws SQLException {
+
+        UUID eventId = UUID.randomUUID();
+
+        String sql = """
+            INSERT INTO outbox_events (
+                id,
+                tenant_id,
+                event_type,
+                aggregate_id,
+                payload
+            )
+            VALUES (
+                ?, ?, 'tracking.position.created', ?,
+                jsonb_build_object(
+                    'positionId', ?::text,
+                    'assetId', ?::text
+                )
+            )
+            """;
+
+        try (PreparedStatement statement
+                = connection.prepareStatement(sql)) {
+
+            statement.setObject(1, eventId);
+            statement.setObject(2, tenantId);
+            statement.setObject(3, assetId);
+            statement.setObject(4, positionId);
+            statement.setObject(5, assetId);
+
+            statement.executeUpdate();
+        }
+
+        return eventId;
+    }
+}
