@@ -8,12 +8,18 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.util.concurrent.Executors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import software.aporia.tracking.core.ReceivedFrame;
 import software.aporia.tracking.protocol.SuntechProtocol;
 import software.aporia.tracking.storage.Database;
 import software.aporia.tracking.storage.JdbcPacketIngestion;
 
 public class TcpGateway {
+
+    private static final Logger log
+            = LoggerFactory.getLogger(TcpGateway.class);
 
     private static final int PORT = Integer.parseInt(
             System.getenv().getOrDefault("TRACKING_TCP_PORT", "5500")
@@ -33,7 +39,7 @@ public class TcpGateway {
                 JdbcPacketIngestion ingestion
                         = new JdbcPacketIngestion(dataSource);
 
-                System.out.println(
+                log.info(
                         "Tracking TCP Gateway listening on 0.0.0.0:" + PORT
                 );
 
@@ -47,6 +53,10 @@ public class TcpGateway {
     }
 
     private static void handleClient(Socket client, JdbcPacketIngestion ingestion) {
+        log.debug(
+                "TCP connection accepted: remote={}",
+                client.getRemoteSocketAddress()
+        );
 
         SuntechProtocol protocol = new SuntechProtocol();
 
@@ -71,7 +81,7 @@ public class TcpGateway {
 
                     var packetId = ingestion.accept(receivedFrame);
 
-                    System.out.printf(
+                    log.info(
                             "Packet persisted: id=%s, identity=%s, bytes=%d%n",
                             packetId,
                             identity,
@@ -81,19 +91,19 @@ public class TcpGateway {
             }
 
         } catch (SocketTimeoutException e) {
-            System.out.println("TCP session timed out");
+            log.error("TCP session timed out");
 
         } catch (IllegalArgumentException e) {
-            System.err.println(
+            log.error(
                     "Invalid Suntech frame: " + e.getMessage()
             );
 
         } catch (IOException e) {
-            System.err.println(
+            log.error(
                     "TCP connection error: " + e.getMessage()
             );
         } catch (IllegalStateException e) {
-            System.err.println(
+            log.error(
                     "Packet persistence failed: " + e.getMessage()
             );
         }

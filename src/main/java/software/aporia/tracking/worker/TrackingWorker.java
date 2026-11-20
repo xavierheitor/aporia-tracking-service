@@ -13,6 +13,9 @@ import java.util.UUID;
 
 import javax.sql.DataSource;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import software.aporia.tracking.core.InvalidPacketException;
 import software.aporia.tracking.core.Telemetry;
 import software.aporia.tracking.protocol.SuntechDecoder;
@@ -36,6 +39,9 @@ public class TrackingWorker {
     private final OutboxRepository outboxRepository;
 
     private final UUID tenantFilter;
+
+    private static final Logger log
+            = LoggerFactory.getLogger(TrackingWorker.class);
 
     public TrackingWorker(DataSource dataSource) {
         this(dataSource, null);
@@ -66,11 +72,15 @@ public class TrackingWorker {
             connection.setAutoCommit(false);
 
             try {
-                boolean handled = processInTransaction(connection);
+                ProcessingResult result
+                        = processInTransaction(connection);
 
                 connection.commit();
 
-                return handled;
+                logResult(result);
+
+                return result.status()
+                        != ProcessingResult.Status.EMPTY;
 
             } catch (SQLException | RuntimeException e) {
 
@@ -93,7 +103,7 @@ public class TrackingWorker {
     /**
      * Executa todo o processamento utilizando a mesma transação JDBC.
      */
-    private boolean processInTransaction(
+    private ProcessingResult processInTransaction(
             Connection connection
     ) throws SQLException {
 
@@ -143,7 +153,7 @@ public class TrackingWorker {
             try (ResultSet result = statement.executeQuery()) {
 
                 if (!result.next()) {
-                    return false;
+                    return ProcessingResult.empty();
                 }
 
                 packetId = result.getObject("id", UUID.class);
@@ -199,8 +209,11 @@ public class TrackingWorker {
                     packetId,
                     e.getErrorCode()
             );
-
-            return true;
+            return ProcessingResult.rejected(
+                    packetId,
+                    e.getErrorCode(),
+                    1
+            );
         }
 
         // 4. Registrar a mensagem.
@@ -259,8 +272,7 @@ public class TrackingWorker {
             }
 
             markProcessed(connection, packetId);
-
-            return true;
+            return ProcessingResult.processed(packetId);
 
         } catch (RetryableProcessingException e) {
 
@@ -268,13 +280,12 @@ public class TrackingWorker {
             connection.rollback(savepoint);
 
             // Registrar a falha e agendar nova tentativa.
-            scheduleRetry(
+            return scheduleRetry(
                     connection,
                     packetId,
                     e.getErrorCode()
             );
 
-            return true;
         }
 
     }
@@ -385,7 +396,7 @@ public class TrackingWorker {
         }
     }
 
-    private void scheduleRetry(
+    private ProcessingResult scheduleRetry(
             Connection connection,
             UUID packetId,
             String errorCode
@@ -444,7 +455,11 @@ public class TrackingWorker {
                 }
             }
 
-            return;
+            return ProcessingResult.rejected(
+                    packetId,
+                    errorCode,
+                    attempts
+            );
         }
 
         // Calcular o intervalo antes da próxima tentativa.
@@ -473,6 +488,46 @@ public class TrackingWorker {
                         "Failed to schedule retry: " + packetId
                 );
             }
+        }
+        return ProcessingResult.retryScheduled(
+                packetId,
+                errorCode,
+                attempts,
+                delay.toSeconds()
+        );
+    }
+
+    private void logResult(ProcessingResult result) {
+
+        switch (result.status()) {
+
+            case EMPTY -> {
+                // Fila vazia: não gerar logs.
+            }
+
+            case PROCESSED ->
+                log.info(
+                        "Packet processed: packetId={}",
+                        result.packetId()
+                );
+
+            case REJECTED ->
+                log.warn(
+                        "Packet rejected: packetId={}, errorCode={}, attempts={}",
+                        result.packetId(),
+                        result.errorCode(),
+                        result.attempts()
+                );
+
+            case RETRY_SCHEDULED ->
+                log.warn(
+                        "Packet retry scheduled: packetId={}, errorCode={}, "
+                        + "attempts={}, delaySeconds={}",
+                        result.packetId(),
+                        result.errorCode(),
+                        result.attempts(),
+                        result.retryDelaySeconds()
+                );
         }
     }
 
