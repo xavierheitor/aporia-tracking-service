@@ -5,14 +5,26 @@ import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.SocketTimeoutException;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import software.aporia.tracking.core.ReceivedFrame;
-import software.aporia.tracking.protocol.SuntechProtocol;
+import software.aporia.tracking.protocol.ProtocolAdapter;
+import software.aporia.tracking.protocol.ProtocolFrame;
+import software.aporia.tracking.protocol.ProtocolRegistry;
+import software.aporia.tracking.protocol.ProtocolSession;
+import software.aporia.tracking.protocol.SuntechAdapter;
 import software.aporia.tracking.storage.Database;
 import software.aporia.tracking.storage.JdbcPacketIngestion;
 
@@ -24,9 +36,17 @@ public class TcpGateway {
     private static final int PORT = Integer.parseInt(
             System.getenv().getOrDefault("TRACKING_TCP_PORT", "5500")
     );
+
     private static final int READ_TIMEOUT_MS = 30_000;
+    private static final int SHUTDOWN_TIMEOUT_SECONDS = 10;
 
     public static void main(String[] args) throws IOException {
+
+        AtomicBoolean running = new AtomicBoolean(true);
+        CountDownLatch gatewayFinished = new CountDownLatch(1);
+
+        Set<Socket> activeClients
+                = ConcurrentHashMap.newKeySet();
 
         try (
                 var dataSource = Database.createDataSource(); ServerSocket server = new ServerSocket(
@@ -34,33 +54,153 @@ public class TcpGateway {
                 50,
                 InetAddress.getByName("0.0.0.0")
         ); var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            {
 
-                JdbcPacketIngestion ingestion
-                        = new JdbcPacketIngestion(dataSource);
+            JdbcPacketIngestion ingestion
+                    = new JdbcPacketIngestion(dataSource);
+
+            ProtocolRegistry registry = new ProtocolRegistry(
+                    List.of(new SuntechAdapter())
+            );
+
+            String protocolId = System.getenv()
+                    .getOrDefault("TRACKING_PROTOCOL", "suntech");
+
+            ProtocolAdapter adapter = registry.get(protocolId);
+
+            log.info(
+                    "TCP listener configured: protocol={}, decoder={}",
+                    adapter.protocolId(),
+                    adapter.decoderVersion()
+            );
+
+            Thread shutdownHook = new Thread(() -> {
+
+                log.info("Shutdown requested for TCP Gateway");
+                running.set(false);
+
+                try {
+                    server.close();
+                } catch (IOException e) {
+                    log.warn("Error closing TCP listener", e);
+                }
+
+                try {
+                    if (!gatewayFinished.await(
+                            SHUTDOWN_TIMEOUT_SECONDS,
+                            TimeUnit.SECONDS
+                    )) {
+                        log.warn("Gateway shutdown timeout exceeded");
+
+                        for (Socket client : activeClients) {
+                            try {
+                                client.close();
+                            } catch (IOException e) {
+                                log.debug(
+                                        "Error closing client socket",
+                                        e
+                                );
+                            }
+                        }
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+
+            }, "tracking-gateway-shutdown");
+
+            Runtime.getRuntime().addShutdownHook(shutdownHook);
+
+            try {
 
                 log.info(
-                        "Tracking TCP Gateway listening on 0.0.0.0:" + PORT
+                        "Tracking TCP Gateway listening on 0.0.0.0:{}",
+                        PORT
                 );
 
-                while (!Thread.currentThread().isInterrupted()) {
-                    Socket client = server.accept();
+                while (running.get()) {
 
-                    executor.submit(() -> handleClient(client, ingestion));
+                    try {
+                        Socket client = server.accept();
+
+                        if (!running.get()) {
+                            client.close();
+                            break;
+                        }
+
+                        activeClients.add(client);
+
+                        try {
+                            executor.submit(() -> {
+                                try {
+                                    handleClient(
+                                            client,
+                                            ingestion,
+                                            running,
+                                            adapter
+                                    );
+                                } finally {
+                                    activeClients.remove(client);
+                                }
+                            });
+
+                        } catch (RuntimeException e) {
+                            activeClients.remove(client);
+                            client.close();
+                            throw e;
+                        }
+
+                    } catch (SocketException e) {
+
+                        if (!running.get()) {
+                            break;
+                        }
+
+                        throw e;
+                    }
+                }
+
+            } finally {
+
+                log.info("TCP Gateway stopping");
+
+                // Desbloqueia as leituras TCP das sessões ativas.
+                for (Socket client : activeClients) {
+                    try {
+                        client.close();
+                    } catch (IOException e) {
+                        log.debug(
+                                "Error closing client socket",
+                                e
+                        );
+                    }
                 }
             }
+
+            // O try-with-resources aguarda as virtual threads
+            // antes de fechar o DataSource.
+        } finally {
+            gatewayFinished.countDown();
+            log.info("TCP Gateway stopped");
         }
     }
 
-    private static void handleClient(Socket client, JdbcPacketIngestion ingestion) {
+    private static void handleClient(
+            Socket client,
+            JdbcPacketIngestion ingestion,
+            AtomicBoolean running,
+            ProtocolAdapter adapter
+    ) {
+
         log.debug(
                 "TCP connection accepted: remote={}",
                 client.getRemoteSocketAddress()
         );
 
-        SuntechProtocol protocol = new SuntechProtocol();
+        ProtocolSession session = adapter.newSession();
 
-        try (client; InputStream input = client.getInputStream()) {
+        try (
+                client;
+                InputStream input = client.getInputStream()) {
 
             client.setSoTimeout(READ_TIMEOUT_MS);
 
@@ -69,44 +209,55 @@ public class TcpGateway {
 
             while ((bytesRead = input.read(buffer)) != -1) {
 
-                byte[] received = java.util.Arrays.copyOf(
-                        buffer,
-                        bytesRead
-                );
+                byte[] received
+                        = Arrays.copyOf(buffer, bytesRead);
 
-                for (byte[] frame : protocol.receive(received)) {
-                    String identity = protocol.identify(frame);
+                for (ProtocolFrame frame : session.receive(received)) {
 
-                    ReceivedFrame receivedFrame = new ReceivedFrame("suntech", identity, frame);
+                    ReceivedFrame receivedFrame
+                            = new ReceivedFrame(
+                                    adapter.protocolId(),
+                                    frame.deviceIdentity(),
+                                    frame.payload(),
+                                    adapter.decoderVersion()
+                            );
 
                     var packetId = ingestion.accept(receivedFrame);
 
                     log.info(
-                            "Packet persisted: id=%s, identity=%s, bytes=%d%n",
+                            "Packet persisted: id={}, protocol={}, identity={}, bytes={}",
                             packetId,
-                            identity,
-                            frame.length
+                            adapter.protocolId(),
+                            frame.deviceIdentity(),
+                            frame.payload().length
                     );
                 }
             }
 
         } catch (SocketTimeoutException e) {
-            log.error("TCP session timed out");
+
+            log.debug("TCP session timed out");
 
         } catch (IllegalArgumentException e) {
-            log.error(
-                    "Invalid Suntech frame: " + e.getMessage()
+
+            log.warn(
+                    "Invalid Suntech frame: {}",
+                    e.getMessage()
             );
 
         } catch (IOException e) {
-            log.error(
-                    "TCP connection error: " + e.getMessage()
-            );
+
+            if (!running.get() && e instanceof SocketException) {
+                log.debug(
+                        "TCP connection closed during gateway shutdown"
+                );
+            } else {
+                log.warn("TCP connection error", e);
+            }
+
         } catch (IllegalStateException e) {
-            log.error(
-                    "Packet persistence failed: " + e.getMessage()
-            );
+
+            log.error("Packet persistence failed", e);
         }
     }
-
 }

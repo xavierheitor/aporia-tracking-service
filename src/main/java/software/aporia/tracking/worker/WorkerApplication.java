@@ -1,51 +1,80 @@
-
 package software.aporia.tracking.worker;
+
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import software.aporia.tracking.storage.Database;
 
 public class WorkerApplication {
 
+    private static final Logger log
+            = LoggerFactory.getLogger(WorkerApplication.class);
+
     public static void main(String[] args) {
 
-        try (var dataSource = Database.createDataSource()) {
+        AtomicBoolean running = new AtomicBoolean(true);
+        var workerFinished = new java.util.concurrent.CountDownLatch(1);
 
-            TrackingWorker worker = new TrackingWorker(dataSource);
-
-            System.out.println("Aporia Tracking Worker started");
-
-            while (!Thread.currentThread().isInterrupted()) {
-
-                try {
-                    boolean handled = worker.processOne();
-
-                    if (!handled) {
-                        // Evita consultas contínuas quando
-                        // não existem pacotes disponíveis.
-                        Thread.sleep(1000);
-                    }
-
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-
-                } catch (RuntimeException e) {
-
-                    System.err.println(
-                        "Worker processing failed: "
-                        + e.getMessage()
-                    );
-
-                    // Evita um loop de falhas sem intervalo.
+        Runtime.getRuntime().addShutdownHook(
+                new Thread(() -> {
+                    log.info("Shutdown requested for Tracking Worker");
+                    running.set(false);
                     try {
-                        Thread.sleep(3000);
-                    } catch (InterruptedException interrupted) {
+                        if (!workerFinished.await(
+                                10, java.util.concurrent.TimeUnit.SECONDS)) {
+                            log.warn("Worker shutdown timeout exceeded");
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }, "tracking-worker-shutdown")
+        );
+
+        try {
+            try (var dataSource = Database.createDataSource()) {
+
+                TrackingWorker worker = new TrackingWorker(dataSource);
+
+                log.info("Aporia Tracking Worker started");
+
+                while (running.get()) {
+
+                    try {
+                        boolean handled = worker.processOne();
+
+                        if (!handled) {
+                            Thread.sleep(1000);
+                        }
+
+                    } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         break;
+
+                    } catch (RuntimeException e) {
+
+                        log.error("Worker processing failed", e);
+
+                        if (!running.get()) {
+                            break;
+                        }
+
+                        try {
+                            Thread.sleep(3000);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
                     }
                 }
+
+                log.info("Aporia Tracking Worker stopped");
             }
 
-            System.out.println("Aporia Tracking Worker stopped");
+        } finally {
+            workerFinished.countDown();
         }
+
     }
 }

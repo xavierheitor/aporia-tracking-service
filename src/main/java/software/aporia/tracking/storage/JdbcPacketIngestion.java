@@ -13,7 +13,6 @@ import javax.sql.DataSource;
 
 import software.aporia.tracking.core.ReceivedFrame;
 
-
 public class JdbcPacketIngestion {
 
     // Implementation details for JDBC packet ingestion
@@ -150,7 +149,7 @@ public class JdbcPacketIngestion {
             statement.setBytes(4, payload);
             statement.setString(5, payloadHash);
             statement.setString(
-                    6, "suntech-ascii-v3"
+                    6, frame.decoderVersion()
             );
             statement.setString(7, "pending");
             statement.setObject(

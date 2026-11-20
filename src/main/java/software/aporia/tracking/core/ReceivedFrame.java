@@ -1,3 +1,4 @@
+
 package software.aporia.tracking.core;
 
 import java.util.Objects;
@@ -5,25 +6,69 @@ import java.util.Objects;
 public record ReceivedFrame(
         String protocol,
         String identity,
-        byte[] payload
-        ) {
+        byte[] payload,
+        String decoderVersion
+) {
 
     public ReceivedFrame {
-        if (protocol == null || protocol.isEmpty()) {
-            throw new IllegalArgumentException("Invalid protocol");
+
+        if (protocol == null || protocol.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Invalid protocol"
+            );
         }
-        if (identity == null || identity.isEmpty()) {
-            throw new IllegalArgumentException("Invalid identity");
+
+        if (identity == null || identity.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Invalid identity"
+            );
+        }
+
+        if (decoderVersion == null
+                || decoderVersion.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Invalid decoder version"
+            );
         }
 
         Objects.requireNonNull(payload, "payload");
 
         if (payload.length == 0 || payload.length > 65536) {
-            throw new IllegalArgumentException("Invalid payload size");
+            throw new IllegalArgumentException(
+                    "Invalid payload size"
+            );
         }
 
         payload = payload.clone();
+    }
 
+    // Compatibilidade com os testes e chamadas existentes.
+    // Uso temporário, restrito ao protocolo Suntech.
+    @Deprecated
+    public ReceivedFrame(
+            String protocol,
+            String identity,
+            byte[] payload
+    ) {
+        this(
+                protocol,
+                identity,
+                payload,
+                legacyDecoderVersion(protocol)
+        );
+    }
+
+    private static String legacyDecoderVersion(
+            String protocol
+    ) {
+        if (!"suntech".equals(protocol)) {
+            throw new IllegalArgumentException(
+                    "Decoder version required for protocol: "
+                            + protocol
+            );
+        }
+
+        return "suntech-ascii-v3";
     }
 
     @Override

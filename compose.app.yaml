@@ -19,6 +19,7 @@ services:
     environment:
       TRACKING_DB_URL: jdbc:postgresql://postgres-postgis:5432/aporia_tracking_v2
       TRACKING_TCP_PORT: "5500"
+      TRACKING_PROTOCOL: "suntech"
 
     ports:
       - "127.0.0.1:5500:5500"

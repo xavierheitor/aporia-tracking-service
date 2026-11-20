@@ -1,5 +1,6 @@
 package software.aporia.tracking.core;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -61,5 +62,22 @@ class RawPacketTest {
 
         assertEquals(0x06, returned[0]);
         assertEquals(0x01, packet.payload()[0]);
+    }
+
+    @Test
+    void shouldPreserveDecoderVersion() {
+
+        ReceivedFrame frame = new ReceivedFrame(
+                "suntech",
+                "1234567890",
+                "ALV;1234567890\r"
+                        .getBytes(StandardCharsets.US_ASCII),
+                "suntech-ascii-v3"
+        );
+
+        assertEquals(
+                "suntech-ascii-v3",
+                frame.decoderVersion()
+        );
     }
 }

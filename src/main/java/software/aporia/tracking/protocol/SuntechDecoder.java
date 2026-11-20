@@ -9,7 +9,12 @@ import java.util.regex.Pattern;
 
 import software.aporia.tracking.core.Telemetry;
 
-public class SuntechDecoder {
+public class SuntechDecoder implements TelemetryDecoder {
+
+    @Override
+    public String decoderVersion() {
+        return "suntech-ascii-v3";
+    }
 
     private static final String[] FIELDS = {
         "map", "model", "firmware", "realtime",
@@ -26,6 +31,8 @@ public class SuntechDecoder {
 
     private final SuntechProtocol protocol = new SuntechProtocol();
 
+
+    @Override
     public Telemetry decode(byte[] frame) {
 
         String identity = protocol.identify(frame);

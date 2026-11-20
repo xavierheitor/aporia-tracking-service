@@ -9,6 +9,7 @@ import java.sql.SQLException;
 import java.sql.Savepoint;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
 import javax.sql.DataSource;
@@ -18,7 +19,9 @@ import org.slf4j.LoggerFactory;
 
 import software.aporia.tracking.core.InvalidPacketException;
 import software.aporia.tracking.core.Telemetry;
+import software.aporia.tracking.protocol.DecoderRegistry;
 import software.aporia.tracking.protocol.SuntechDecoder;
+import software.aporia.tracking.protocol.TelemetryDecoder;
 import software.aporia.tracking.storage.AssignmentRepository;
 import software.aporia.tracking.storage.LastPositionRepository;
 import software.aporia.tracking.storage.MessageRepository;
@@ -27,10 +30,9 @@ import software.aporia.tracking.storage.PositionRepository;
 
 public class TrackingWorker {
 
-    private static final String SUPPORTED_DECODER = "suntech-ascii-v3";
+    private final DecoderRegistry decoderRegistry;
 
     private final DataSource dataSource;
-    private final SuntechDecoder decoder;
 
     private final MessageRepository messageRepository;
     private final AssignmentRepository assignmentRepository;
@@ -48,15 +50,28 @@ public class TrackingWorker {
     }
 
     public TrackingWorker(DataSource dataSource, UUID tenantFilter) {
-        this.dataSource = dataSource;
+        this(dataSource, tenantFilter, defaultDecoderRegistry());
+    }
+
+    public TrackingWorker(
+            DataSource dataSource,
+            UUID tenantFilter,
+            DecoderRegistry decoderRegistry
+    ) {
+        this.dataSource = java.util.Objects.requireNonNull(dataSource);
         this.tenantFilter = tenantFilter;
-        this.decoder = new SuntechDecoder();
+        this.decoderRegistry
+                = java.util.Objects.requireNonNull(decoderRegistry);
 
         this.messageRepository = new MessageRepository();
         this.assignmentRepository = new AssignmentRepository();
         this.positionRepository = new PositionRepository();
         this.lastPositionRepository = new LastPositionRepository();
         this.outboxRepository = new OutboxRepository();
+    }
+
+    private static DecoderRegistry defaultDecoderRegistry() {
+        return new DecoderRegistry(List.of(new SuntechDecoder()));
     }
 
     /**
@@ -173,9 +188,14 @@ public class TrackingWorker {
         }
 
         // 2. Verificar a versão do decoder.
-        if (!SUPPORTED_DECODER.equals(decoderVersion)) {
+        TelemetryDecoder decoder;
+
+        try {
+            decoder = decoderRegistry.get(decoderVersion);
+        } catch (IllegalArgumentException e) {
             throw new IllegalStateException(
-                    "DECODER_UNAVAILABLE: " + decoderVersion
+                    "DECODER_UNAVAILABLE: " + decoderVersion,
+                    e
             );
         }
 
