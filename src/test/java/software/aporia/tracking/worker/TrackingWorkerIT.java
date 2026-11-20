@@ -12,38 +12,38 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
-import software.aporia.tracking.storage.Database;
+import software.aporia.tracking.support.TestDatabase;
+import software.aporia.tracking.support.TestFixtures;
 
 class TrackingWorkerIT {
-  @Test
+
+    @Test
     void shouldRejectPacketWithDifferentDeviceIdentity()
             throws Exception {
 
-        UUID tenantId = UUID.fromString(
-            "11111111-1111-1111-1111-111111111111"
-        );
+        try (
+                //cria a conexão com o banco de testes
+                var dataSource = TestDatabase.createDataSource(); //cria os recursos para testar
+                 var fixtures = new TestFixtures(
+                        dataSource,
+                        "1234567890"
+                )) {
+            //cria um uuid aleatorio para id 
+            UUID packetId = UUID.randomUUID();
 
-        UUID deviceId = UUID.fromString(
-            "22222222-2222-2222-2222-222222222222"
-        );
+            //payload mock
+            byte[] payload = ("ALV;9999999999\r").getBytes(StandardCharsets.US_ASCII);
 
-        UUID packetId = UUID.randomUUID();
+            String hash = HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256")
+                            .digest(payload)
+            );
 
-        byte[] payload = (
-            "ALV;9999999999\r"
-        ).getBytes(StandardCharsets.US_ASCII);
+            // Inserir o pacote no banco de testes.
+            try (Connection connection
+                    = dataSource.getConnection()) {
 
-        String hash = HexFormat.of().formatHex(
-            MessageDigest.getInstance("SHA-256")
-                .digest(payload)
-        );
-
-        try (var dataSource = Database.createDataSource()) {
-
-            try (Connection connection =
-                    dataSource.getConnection()) {
-
-                String insertSql = """
+                String sql = """
                     INSERT INTO raw_packets (
                         id,
                         tenant_id,
@@ -57,12 +57,12 @@ class TrackingWorkerIT {
                             'suntech-ascii-v3', ?)
                     """;
 
-                try (PreparedStatement statement =
-                        connection.prepareStatement(insertSql)) {
+                try (PreparedStatement statement
+                        = connection.prepareStatement(sql)) {
 
                     statement.setObject(1, packetId);
-                    statement.setObject(2, tenantId);
-                    statement.setObject(3, deviceId);
+                    statement.setObject(2, fixtures.tenantId());
+                    statement.setObject(3, fixtures.deviceId());
                     statement.setBytes(4, payload);
                     statement.setString(5, hash);
                     statement.setObject(6, UUID.randomUUID());
@@ -71,12 +71,17 @@ class TrackingWorkerIT {
                 }
             }
 
-            TrackingWorker worker = new TrackingWorker(dataSource);
+            // Executar o worker.
+            TrackingWorker worker = new TrackingWorker(
+                    dataSource,
+                    fixtures.tenantId()
+            );
 
             assertTrue(worker.processOne());
 
-            try (Connection connection =
-                    dataSource.getConnection()) {
+            // Verificar a rejeição.
+            try (Connection connection
+                    = dataSource.getConnection()) {
 
                 String sql = """
                     SELECT status, error_code, attempts
@@ -84,29 +89,29 @@ class TrackingWorkerIT {
                     WHERE id = ?
                     """;
 
-                try (PreparedStatement statement =
-                        connection.prepareStatement(sql)) {
+                try (PreparedStatement statement
+                        = connection.prepareStatement(sql)) {
 
                     statement.setObject(1, packetId);
 
-                    try (ResultSet result =
-                            statement.executeQuery()) {
+                    try (ResultSet result
+                            = statement.executeQuery()) {
 
                         assertTrue(result.next());
 
                         assertEquals(
-                            "rejected",
-                            result.getString("status")
+                                "rejected",
+                                result.getString("status")
                         );
 
                         assertEquals(
-                            "DEVICE_IDENTITY_MISMATCH",
-                            result.getString("error_code")
+                                "DEVICE_IDENTITY_MISMATCH",
+                                result.getString("error_code")
                         );
 
                         assertEquals(
-                            1,
-                            result.getInt("attempts")
+                                1,
+                                result.getInt("attempts")
                         );
                     }
                 }

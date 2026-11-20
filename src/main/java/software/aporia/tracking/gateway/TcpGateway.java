@@ -15,7 +15,9 @@ import software.aporia.tracking.storage.JdbcPacketIngestion;
 
 public class TcpGateway {
 
-    private static final int PORT = 5500;
+    private static final int PORT = Integer.parseInt(
+            System.getenv().getOrDefault("TRACKING_TCP_PORT", "5500")
+    );
     private static final int READ_TIMEOUT_MS = 30_000;
 
     public static void main(String[] args) throws IOException {
@@ -24,7 +26,7 @@ public class TcpGateway {
                 var dataSource = Database.createDataSource(); ServerSocket server = new ServerSocket(
                 PORT,
                 50,
-                InetAddress.getLoopbackAddress()
+                InetAddress.getByName("0.0.0.0")
         ); var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             {
 
@@ -32,7 +34,7 @@ public class TcpGateway {
                         = new JdbcPacketIngestion(dataSource);
 
                 System.out.println(
-                        "Tracking TCP Gateway listening on 127.0.0.1:" + PORT
+                        "Tracking TCP Gateway listening on 0.0.0.0:" + PORT
                 );
 
                 while (!Thread.currentThread().isInterrupted()) {

@@ -1,0 +1,9 @@
+.git
+.vscode
+.mvn
+target
+backups
+.env
+.env.*
+.envrc
+*.log

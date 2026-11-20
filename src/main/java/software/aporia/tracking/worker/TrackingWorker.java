@@ -6,6 +6,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Savepoint;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.UUID;
@@ -34,8 +35,15 @@ public class TrackingWorker {
     private final LastPositionRepository lastPositionRepository;
     private final OutboxRepository outboxRepository;
 
+    private final UUID tenantFilter;
+
     public TrackingWorker(DataSource dataSource) {
+        this(dataSource, null);
+    }
+
+    public TrackingWorker(DataSource dataSource, UUID tenantFilter) {
         this.dataSource = dataSource;
+        this.tenantFilter = tenantFilter;
         this.decoder = new SuntechDecoder();
 
         this.messageRepository = new MessageRepository();
@@ -103,9 +111,10 @@ public class TrackingWorker {
             FROM raw_packets rp
             JOIN devices d
               ON d.id = rp.device_id
-             AND d.tenant_id = rp.tenant_id
+              AND d.tenant_id = rp.tenant_id
             WHERE rp.status = 'pending'
               AND rp.available_at <= clock_timestamp()
+              AND (?::uuid IS NULL OR rp.tenant_id = ?::uuid)
             ORDER BY rp.received_at, rp.id
             FOR UPDATE OF rp SKIP LOCKED
             LIMIT 1
@@ -123,27 +132,34 @@ public class TrackingWorker {
 
         Instant receivedAt;
 
-        try (
-                PreparedStatement statement
-                = connection.prepareStatement(selectSql); ResultSet result = statement.executeQuery()) {
+        try (PreparedStatement statement
+                = connection.prepareStatement(selectSql)) {
 
-            if (!result.next()) {
-                return false;
+            // Configurar os parâmetros ANTES da consulta.
+            statement.setObject(1, tenantFilter);
+            statement.setObject(2, tenantFilter);
+
+            // Executar a consulta depois de configurar.
+            try (ResultSet result = statement.executeQuery()) {
+
+                if (!result.next()) {
+                    return false;
+                }
+
+                packetId = result.getObject("id", UUID.class);
+                tenantId = result.getObject("tenant_id", UUID.class);
+                deviceId = result.getObject("device_id", UUID.class);
+
+                payload = result.getBytes("payload");
+
+                storedHash = result.getString("payload_hash");
+                decoderVersion = result.getString("decoder_version");
+                registeredIdentity = result.getString("registered_identity");
+
+                receivedAt = result.getTimestamp(
+                        "received_at"
+                ).toInstant();
             }
-
-            packetId = result.getObject("id", UUID.class);
-            tenantId = result.getObject("tenant_id", UUID.class);
-            deviceId = result.getObject("device_id", UUID.class);
-
-            payload = result.getBytes("payload");
-
-            storedHash = result.getString("payload_hash");
-            decoderVersion = result.getString("decoder_version");
-            registeredIdentity = result.getString("registered_identity");
-
-            receivedAt = result.getTimestamp(
-                    "received_at"
-            ).toInstant();
         }
 
         // 2. Verificar a versão do decoder.
@@ -189,66 +205,78 @@ public class TrackingWorker {
 
         // 4. Registrar a mensagem.
         // Se o conteúdo já existir, o método retorna null.
-        UUID messageId = messageRepository.save(
-                connection,
-                tenantId,
-                deviceId,
-                packetId,
-                storedHash
+        // Criar um ponto de recuperação antes da persistência.
+        Savepoint savepoint = connection.setSavepoint(
+                "processing_start"
         );
 
-        // 5. Persistir posição somente quando:
-        // - a mensagem for nova;
-        // - a telemetria possuir posição válida.
-        if (messageId != null && telemetry.hasPosition()) {
-
-            // Identificar o veículo associado ao dispositivo
-            // no instante da leitura GPS.
-            UUID assetId = assignmentRepository.findAssetId(
+        try {
+            // Registrar mensagem e detectar duplicidade.
+            UUID messageId = messageRepository.save(
                     connection,
                     tenantId,
                     deviceId,
-                    telemetry.recordedAt()
-            ).orElseThrow(() -> new IllegalStateException(
-                    "ASSIGNMENT_NOT_FOUND"
-            ));
-
-            // 6. Gravar posição geográfica.
-            UUID positionId = positionRepository.save(
-                    connection,
-                    tenantId,
-                    assetId,
-                    deviceId,
-                    messageId,
-                    telemetry,
-                    receivedAt
+                    packetId,
+                    storedHash
             );
 
-            // 7. Atualizar a última posição conhecida.
-            // O repositório impede que uma leitura antiga
-            // substitua uma posição mais recente.
-            lastPositionRepository.update(
+            if (messageId != null && telemetry.hasPosition()) {
+
+                UUID assetId = assignmentRepository.findAssetId(
+                        connection,
+                        tenantId,
+                        deviceId,
+                        telemetry.recordedAt()
+                ).orElseThrow(() -> new RetryableProcessingException(
+                        "ASSIGNMENT_NOT_FOUND"
+                ));
+
+                UUID positionId = positionRepository.save(
+                        connection,
+                        tenantId,
+                        assetId,
+                        deviceId,
+                        messageId,
+                        telemetry,
+                        receivedAt
+                );
+
+                lastPositionRepository.update(
+                        connection,
+                        tenantId,
+                        assetId,
+                        positionId,
+                        telemetry.recordedAt(),
+                        receivedAt
+                );
+
+                outboxRepository.savePositionEvent(
+                        connection,
+                        tenantId,
+                        assetId,
+                        positionId
+                );
+            }
+
+            markProcessed(connection, packetId);
+
+            return true;
+
+        } catch (RetryableProcessingException e) {
+
+            // Desfazer gravações parciais.
+            connection.rollback(savepoint);
+
+            // Registrar a falha e agendar nova tentativa.
+            scheduleRetry(
                     connection,
-                    tenantId,
-                    assetId,
-                    positionId,
-                    telemetry.recordedAt(),
-                    receivedAt
+                    packetId,
+                    e.getErrorCode()
             );
 
-            // 8. Registrar evento na outbox.
-            outboxRepository.savePositionEvent(
-                    connection,
-                    tenantId,
-                    assetId,
-                    positionId
-            );
+            return true;
         }
 
-        // 9. Marcar o pacote como processado.
-        markProcessed(connection, packetId);
-
-        return true;
     }
 
     /**
@@ -356,4 +384,96 @@ public class TrackingWorker {
             }
         }
     }
+
+    private void scheduleRetry(
+            Connection connection,
+            UUID packetId,
+            String errorCode
+    ) throws SQLException {
+
+        int attempts;
+
+        // A linha já está bloqueada pela transação atual.
+        String selectSql = """
+            SELECT attempts
+            FROM raw_packets
+            WHERE id = ?
+              AND status = 'pending'
+            """;
+
+        try (PreparedStatement statement
+                = connection.prepareStatement(selectSql)) {
+
+            statement.setObject(1, packetId);
+
+            try (ResultSet result = statement.executeQuery()) {
+
+                if (!result.next()) {
+                    throw new SQLException(
+                            "Pending packet not found: " + packetId
+                    );
+                }
+
+                attempts = result.getInt("attempts") + 1;
+            }
+        }
+
+        if (attempts >= RetryPolicy.MAX_ATTEMPTS) {
+
+            String rejectSql = """
+                UPDATE raw_packets
+                SET status = 'rejected',
+                    error_code = ?,
+                    attempts = ?,
+                    processed_at = clock_timestamp()
+                WHERE id = ?
+                  AND status = 'pending'
+                """;
+
+            try (PreparedStatement statement
+                    = connection.prepareStatement(rejectSql)) {
+
+                statement.setString(1, errorCode);
+                statement.setInt(2, attempts);
+                statement.setObject(3, packetId);
+
+                if (statement.executeUpdate() != 1) {
+                    throw new SQLException(
+                            "Failed to reject packet: " + packetId
+                    );
+                }
+            }
+
+            return;
+        }
+
+        // Calcular o intervalo antes da próxima tentativa.
+        var delay = RetryPolicy.delayForAttempt(attempts);
+
+        String retrySql = """
+            UPDATE raw_packets
+            SET attempts = ?,
+                error_code = ?,
+                available_at = clock_timestamp()
+                               + (? * INTERVAL '1 second')
+            WHERE id = ?
+              AND status = 'pending'
+            """;
+
+        try (PreparedStatement statement
+                = connection.prepareStatement(retrySql)) {
+
+            statement.setInt(1, attempts);
+            statement.setString(2, errorCode);
+            statement.setLong(3, delay.toSeconds());
+            statement.setObject(4, packetId);
+
+            if (statement.executeUpdate() != 1) {
+                throw new SQLException(
+                        "Failed to schedule retry: " + packetId
+                );
+            }
+        }
+    }
+
 }
