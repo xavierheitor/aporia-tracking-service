@@ -12,7 +12,7 @@ public class SuntechProtocol {
     private static final byte DELIMITER = '\r';
 
     private static final Set<String> HEADERS
-            = Set.of("ALV", "STT", "ASTT", "RES");
+            = Set.of("ALV", "STT", "ASTT", "RES", "RPR");
 
     private byte[] buffer = new byte[0];
 

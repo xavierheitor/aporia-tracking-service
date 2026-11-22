@@ -26,7 +26,9 @@ import software.aporia.tracking.protocol.ProtocolRegistry;
 import software.aporia.tracking.protocol.ProtocolSession;
 import software.aporia.tracking.protocol.SuntechAdapter;
 import software.aporia.tracking.storage.Database;
+import software.aporia.tracking.storage.JdbcDeviceLookup;
 import software.aporia.tracking.storage.JdbcPacketIngestion;
+import software.aporia.tracking.storage.RegisteredDevice;
 
 public class TcpGateway {
 
@@ -57,6 +59,12 @@ public class TcpGateway {
 
             JdbcPacketIngestion ingestion
                     = new JdbcPacketIngestion(dataSource);
+
+            JdbcDeviceLookup deviceLookup
+                    = new JdbcDeviceLookup(dataSource);
+
+            SessionRegistry sessionRegistry
+                    = new SessionRegistry();
 
             ProtocolRegistry registry = new ProtocolRegistry(
                     List.of(new SuntechAdapter())
@@ -136,7 +144,9 @@ public class TcpGateway {
                                             client,
                                             ingestion,
                                             running,
-                                            adapter
+                                            adapter,
+                                            deviceLookup,
+                                            sessionRegistry
                                     );
                                 } finally {
                                     activeClients.remove(client);
@@ -188,7 +198,9 @@ public class TcpGateway {
             Socket client,
             JdbcPacketIngestion ingestion,
             AtomicBoolean running,
-            ProtocolAdapter adapter
+            ProtocolAdapter adapter,
+            JdbcDeviceLookup deviceLookup,
+            SessionRegistry sessionRegistry
     ) {
 
         log.debug(
@@ -197,6 +209,7 @@ public class TcpGateway {
         );
 
         ProtocolSession session = adapter.newSession();
+        DeviceSession registeredSession = null;
 
         try (
                 client;
@@ -221,8 +234,40 @@ public class TcpGateway {
                                     frame.payload(),
                                     adapter.decoderVersion()
                             );
+                    if (registeredSession != null) {
+                        registeredSession.validateIdentity(
+                                frame.deviceIdentity()
+                        );
+                    }
 
                     var packetId = ingestion.accept(receivedFrame);
+                    if (registeredSession == null) {
+
+                        RegisteredDevice device = deviceLookup.findEnabled(
+                                adapter.protocolId(),
+                                frame.deviceIdentity()
+                        ).orElseThrow(()
+                                -> new IllegalArgumentException(
+                                        "UNKNOWN_OR_DISABLED_DEVICE"
+                                )
+                        );
+
+                        registeredSession = new DeviceSession(
+                                device.tenantId(),
+                                device.deviceId(),
+                                device.protocol(),
+                                device.identity(),
+                                client
+                        );
+
+                        sessionRegistry.register(registeredSession);
+
+                        log.info(
+                                "Device session registered: tenantId={}, deviceId={}",
+                                device.tenantId(),
+                                device.deviceId()
+                        );
+                    }
 
                     log.info(
                             "Packet persisted: id={}, protocol={}, identity={}, bytes={}",
@@ -258,6 +303,10 @@ public class TcpGateway {
         } catch (IllegalStateException e) {
 
             log.error("Packet persistence failed", e);
+        } finally {
+            if (registeredSession != null) {
+                sessionRegistry.unregister(registeredSession);
+            }
         }
     }
 }

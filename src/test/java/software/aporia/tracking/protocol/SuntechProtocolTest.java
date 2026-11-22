@@ -204,4 +204,17 @@ class SuntechProtocolTest {
         assertEquals(8192, frames.get(0).length);
     }
 
+    @Test
+    void shouldIdentifyProgrammingResponse() {
+
+        SuntechProtocol protocol = new SuntechProtocol();
+
+        byte[] frame = ("RPR;1234567890;OK;16;70#60\r").getBytes(StandardCharsets.US_ASCII);
+
+        assertEquals(
+                "1234567890",
+                protocol.identify(frame)
+        );
+    }
+
 }
