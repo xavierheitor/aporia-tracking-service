@@ -1,5 +1,6 @@
 package software.aporia.tracking.worker;
 
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
@@ -20,9 +21,13 @@ import org.slf4j.LoggerFactory;
 import software.aporia.tracking.core.InvalidPacketException;
 import software.aporia.tracking.core.Telemetry;
 import software.aporia.tracking.protocol.DecoderRegistry;
+import software.aporia.tracking.protocol.MessageProcessingPlan;
 import software.aporia.tracking.protocol.SuntechDecoder;
+import software.aporia.tracking.protocol.SuntechMessageRouter;
+import software.aporia.tracking.protocol.SuntechProtocol;
 import software.aporia.tracking.protocol.TelemetryDecoder;
 import software.aporia.tracking.storage.AssignmentRepository;
+import software.aporia.tracking.storage.DeviceCommandResponseRepository;
 import software.aporia.tracking.storage.LastPositionRepository;
 import software.aporia.tracking.storage.MessageRepository;
 import software.aporia.tracking.storage.OutboxRepository;
@@ -44,6 +49,9 @@ public class TrackingWorker {
 
     private static final Logger log
             = LoggerFactory.getLogger(TrackingWorker.class);
+
+    private final SuntechMessageRouter messageRouter;
+    private final DeviceCommandResponseRepository responseRepository;
 
     public TrackingWorker(DataSource dataSource) {
         this(dataSource, null);
@@ -68,6 +76,8 @@ public class TrackingWorker {
         this.positionRepository = new PositionRepository();
         this.lastPositionRepository = new LastPositionRepository();
         this.outboxRepository = new OutboxRepository();
+        this.messageRouter = new SuntechMessageRouter();
+        this.responseRepository = new DeviceCommandResponseRepository();
     }
 
     private static DecoderRegistry defaultDecoderRegistry() {
@@ -199,36 +209,63 @@ public class TrackingWorker {
             );
         }
 
-        // 3. Validar o pacote e decodificar.
-        Telemetry telemetry;
+        // 3. Validar integridade e determinar os processamentos.
+        Telemetry telemetry = null;
+        MessageProcessingPlan plan;
 
         try {
             validateHash(payload, storedHash);
 
+            // Nesta etapa, o roteador ainda é específico do Suntech.
+            // Não devemos aplicá-lo silenciosamente a outros protocolos.
+            if (!"suntech-ascii-v3".equals(decoderVersion)) {
+                throw new IllegalStateException(
+                        "MESSAGE_ROUTER_UNAVAILABLE: " + decoderVersion
+                );
+            }
+
             try {
-                telemetry = decoder.decode(payload);
+                plan = messageRouter.route(payload);
             } catch (IllegalArgumentException e) {
                 throw new InvalidPacketException(
                         "INVALID_PROTOCOL_FRAME", e
                 );
             }
 
-            if (!registeredIdentity.equals(
-                    telemetry.deviceIdentity())) {
+            String responseIdentity = new SuntechProtocol().identify(payload);
 
+            if (!registeredIdentity.equals(responseIdentity)) {
                 throw new InvalidPacketException(
                         "DEVICE_IDENTITY_MISMATCH"
                 );
             }
 
+            if (plan.processTelemetry() || plan.processHeartbeat()) {
+                try {
+                    telemetry = decoder.decode(payload);
+                } catch (IllegalArgumentException e) {
+                    throw new InvalidPacketException(
+                            "INVALID_PROTOCOL_FRAME", e
+                    );
+                }
+
+                if (!registeredIdentity.equals(
+                        telemetry.deviceIdentity()
+                )) {
+                    throw new InvalidPacketException(
+                            "DEVICE_IDENTITY_MISMATCH"
+                    );
+                }
+            }
+
         } catch (InvalidPacketException e) {
 
-            // Erro permanente de validação.
             rejectPacket(
                     connection,
                     packetId,
                     e.getErrorCode()
             );
+
             return ProcessingResult.rejected(
                     packetId,
                     e.getErrorCode(),
@@ -253,7 +290,9 @@ public class TrackingWorker {
                     storedHash
             );
 
-            if (messageId != null && telemetry.hasPosition()) {
+            if (messageId != null
+                    && telemetry != null
+                    && telemetry.hasPosition()) {
 
                 UUID assetId = assignmentRepository.findAssetId(
                         connection,
@@ -288,6 +327,24 @@ public class TrackingWorker {
                         tenantId,
                         assetId,
                         positionId
+                );
+            }
+
+            if (plan.processCommandResponse()) {
+
+                String responseType = new String(
+                        payload,
+                        StandardCharsets.US_ASCII
+                ).split(";", 2)[0];
+
+                responseRepository.save(
+                        connection,
+                        tenantId,
+                        deviceId,
+                        packetId,
+                        "suntech",
+                        responseType,
+                        payload
                 );
             }
 

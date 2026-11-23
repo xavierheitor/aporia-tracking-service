@@ -1,4 +1,3 @@
-
 package software.aporia.tracking.support;
 
 import java.sql.Connection;
@@ -31,64 +30,64 @@ public final class TestFixtures implements AutoCloseable {
 
     private void create() throws SQLException {
 
-        try (Connection connection =
-                dataSource.getConnection()) {
+        try (Connection connection
+                = dataSource.getConnection()) {
 
             connection.setAutoCommit(false);
 
             try {
                 execute(
-                    connection,
-                    "INSERT INTO tenants (id, name) VALUES (?, ?)",
-                    tenantId,
-                    "Integration Test"
+                        connection,
+                        "INSERT INTO tenants (id, name) VALUES (?, ?)",
+                        tenantId,
+                        "Integration Test"
                 );
 
                 execute(
-                    connection,
-                    """
+                        connection,
+                        """
                     INSERT INTO devices (
                         id, tenant_id, protocol, identity
                     )
                     VALUES (?, ?, ?, ?)
                     """,
-                    deviceId,
-                    tenantId,
-                    "suntech",
-                    deviceIdentity
+                        deviceId,
+                        tenantId,
+                        "suntech",
+                        deviceIdentity
                 );
 
                 execute(
-                    connection,
-                    """
+                        connection,
+                        """
                     INSERT INTO assets (
                         id, tenant_id, name
                     )
                     VALUES (?, ?, ?)
                     """,
-                    assetId,
-                    tenantId,
-                    "Test Vehicle"
+                        assetId,
+                        tenantId,
+                        "Test Vehicle"
                 );
 
                 execute(
-                    connection,
-                    """
+                        connection,
+                        """
                     INSERT INTO assignments (
                         id, tenant_id, device_id,
                         asset_id, starts_at
                     )
                     VALUES (?, ?, ?, ?, ?)
                     """,
-                    UUID.randomUUID(),
-                    tenantId,
-                    deviceId,
-                    assetId,
-                    java.sql.Timestamp.from(
-                        java.time.Instant.parse(
-                            "2026-01-01T00:00:00Z"
+                        UUID.randomUUID(),
+                        tenantId,
+                        deviceId,
+                        assetId,
+                        java.sql.Timestamp.from(
+                                java.time.Instant.parse(
+                                        "2026-01-01T00:00:00Z"
+                                )
                         )
-                    )
                 );
 
                 connection.commit();
@@ -106,8 +105,8 @@ public final class TestFixtures implements AutoCloseable {
             Object... parameters
     ) throws SQLException {
 
-        try (PreparedStatement statement =
-                connection.prepareStatement(sql)) {
+        try (PreparedStatement statement
+                = connection.prepareStatement(sql)) {
 
             for (int i = 0; i < parameters.length; i++) {
                 statement.setObject(i + 1, parameters[i]);
@@ -136,71 +135,99 @@ public final class TestFixtures implements AutoCloseable {
     @Override
     public void close() throws SQLException {
 
-        try (Connection connection =
-                dataSource.getConnection()) {
+        try (Connection connection = dataSource.getConnection()) {
 
             connection.setAutoCommit(false);
 
             try {
-                // Limpar os registros criados pelos testes.
+
+                // 1. Respostas de comandos
                 execute(
-                    connection,
-                    "DELETE FROM outbox_events WHERE tenant_id = ?",
-                    tenantId
+                        connection,
+                        "DELETE FROM device_command_responses WHERE tenant_id = ?",
+                        tenantId
                 );
 
+                // 2. Eventos de integração
                 execute(
-                    connection,
-                    "DELETE FROM last_positions WHERE tenant_id = ?",
-                    tenantId
+                        connection,
+                        "DELETE FROM outbox_events WHERE tenant_id = ?",
+                        tenantId
                 );
 
+                // 3. Últimas posições
                 execute(
-                    connection,
-                    "DELETE FROM positions WHERE tenant_id = ?",
-                    tenantId
+                        connection,
+                        "DELETE FROM last_positions WHERE tenant_id = ?",
+                        tenantId
                 );
 
+                // 4. Histórico de posições
                 execute(
-                    connection,
-                    "DELETE FROM messages WHERE tenant_id = ?",
-                    tenantId
+                        connection,
+                        "DELETE FROM positions WHERE tenant_id = ?",
+                        tenantId
                 );
 
+                // 5. Mensagens processadas
                 execute(
-                    connection,
-                    "DELETE FROM raw_packets WHERE tenant_id = ?",
-                    tenantId
+                        connection,
+                        "DELETE FROM messages WHERE tenant_id = ?",
+                        tenantId
                 );
 
+                // 6. Pacotes recebidos
                 execute(
-                    connection,
-                    "DELETE FROM assignments WHERE tenant_id = ?",
-                    tenantId
+                        connection,
+                        "DELETE FROM raw_packets WHERE tenant_id = ?",
+                        tenantId
                 );
 
+                // 7. Comandos enviados
                 execute(
-                    connection,
-                    "DELETE FROM assets WHERE tenant_id = ?",
-                    tenantId
+                        connection,
+                        "DELETE FROM device_commands WHERE tenant_id = ?",
+                        tenantId
                 );
 
+                // 8. Associações dispositivo/ativo
                 execute(
-                    connection,
-                    "DELETE FROM devices WHERE tenant_id = ?",
-                    tenantId
+                        connection,
+                        "DELETE FROM assignments WHERE tenant_id = ?",
+                        tenantId
                 );
 
+                // 9. Ativos
                 execute(
-                    connection,
-                    "DELETE FROM tenants WHERE id = ?",
-                    tenantId
+                        connection,
+                        "DELETE FROM assets WHERE tenant_id = ?",
+                        tenantId
+                );
+
+                // 10. Dispositivos
+                execute(
+                        connection,
+                        "DELETE FROM devices WHERE tenant_id = ?",
+                        tenantId
+                );
+
+                // 11. Tenant de teste
+                execute(
+                        connection,
+                        "DELETE FROM tenants WHERE id = ?",
+                        tenantId
                 );
 
                 connection.commit();
 
             } catch (SQLException | RuntimeException e) {
-                connection.rollback();
+
+                try {
+                    connection.rollback();
+                } catch (SQLException rollbackError) {
+                    e.addSuppressed(rollbackError);
+                }
+
                 throw e;
             }
         }
