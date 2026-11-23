@@ -11,6 +11,8 @@ import software.aporia.tracking.core.Telemetry;
 
 public class SuntechDecoder implements TelemetryDecoder {
 
+    @Override public String protocolId() { return "suntech"; }
+
     @Override
     public String decoderVersion() {
         return "suntech-ascii-v3";
@@ -32,6 +34,15 @@ public class SuntechDecoder implements TelemetryDecoder {
     private final SuntechProtocol protocol = new SuntechProtocol();
 
     @Override
+    public DecodedPacket decodePacket(byte[] frame, String registeredIdentity) {
+        String identity = protocol.identify(frame);
+        var plan = new SuntechMessageRouter().route(frame);
+        var readings = plan.processTelemetry() || plan.processHeartbeat()
+                ? java.util.List.of(decode(frame)) : java.util.List.<Telemetry>of();
+        String response = plan.processCommandResponse() ? new String(frame, 0, 3, StandardCharsets.US_ASCII) : null;
+        return new DecodedPacket(identity, readings, response);
+    }
+
     public Telemetry decode(byte[] frame) {
 
         String identity = protocol.identify(frame);
@@ -105,7 +116,7 @@ public class SuntechDecoder implements TelemetryDecoder {
 
         int map = Integer.parseInt(parts[2], 16);
 
-        if ((map & 1) == 0 || map > 0x3FFFFF) {
+        if ((map & 1) == 0 || (map & ~0xBFFFFF) != 0) {
             throw invalid("UNSUPPORTED_MAP");
         }
 
@@ -119,6 +130,12 @@ public class SuntechDecoder implements TelemetryDecoder {
                 }
                 values.put(FIELDS[bit], parts[index++]);
             }
+        }
+
+        if ((map & 0x800000) != 0) {
+            if (index >= parts.length || !parts[index].matches("[0-9a-fA-F]{8}")) throw invalid("INVALID_EXTENSION_MAP");
+            int fields = Long.bitCount(Long.parseLong(parts[index++], 16));
+            index += fields;
         }
 
         // O protocolo permite um delimitador ; opcional

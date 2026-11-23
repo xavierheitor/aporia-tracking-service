@@ -15,7 +15,7 @@ public class PositionRepository {
             UUID tenantId,
             UUID assetId,
             UUID deviceId,
-            UUID messageId,
+            UUID messageId, int readingIndex,
             Telemetry telemetry,
             Instant receivedAt
     ) throws SQLException {
@@ -38,12 +38,12 @@ public class PositionRepository {
                 speed_kph,
                 heading,
                 satellites,
-                ignition
+                ignition, reading_index
             )
             VALUES (
                 ?, ?, ?, ?, ?, ?, ?,
                 ST_SetSRID(ST_MakePoint(?, ?), 4326),
-                ?, ?, ?, ?
+                ?, ?, ?, ?, ?
             )
             """;
 
@@ -72,6 +72,7 @@ public class PositionRepository {
             statement.setObject(12, telemetry.satellites());
             statement.setObject(13, telemetry.ignition());
 
+            statement.setInt(14, readingIndex);
             statement.executeUpdate();
         }
 

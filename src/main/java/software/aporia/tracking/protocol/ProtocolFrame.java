@@ -19,6 +19,8 @@ public record ProtocolFrame(
         payload = Arrays.copyOf(payload, payload.length);
     }
 
+    public boolean isLogin() { return "LOGIN".equals(messageType); }
+
     @Override
     public byte[] payload() {
         return Arrays.copyOf(payload, payload.length);

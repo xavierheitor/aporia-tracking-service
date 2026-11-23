@@ -176,7 +176,7 @@ class TcpClientHandlerIT {
                     sessionRegistry.find(tenantId, deviceId).isPresent()
             );
 
-            tracker.close();
+            tracker.shutdownOutput();
 
             task.get();
 
@@ -254,8 +254,7 @@ class TcpClientHandlerIT {
             assertFalse(firstSession.isConnected());
             assertTrue(gateway1.isClosed());
 
-            tracker1.close();
-            tracker2.close();
+            tracker2.shutdownOutput();
 
             task1.get();
             task2.get();

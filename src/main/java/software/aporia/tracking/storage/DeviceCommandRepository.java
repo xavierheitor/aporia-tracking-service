@@ -66,7 +66,10 @@ public final class DeviceCommandRepository {
         }
     }
 
-    public static final class QueueFullException extends IllegalStateException {}
+    public static final class QueueFullException extends IllegalStateException {
+        @java.io.Serial
+        private static final long serialVersionUID = 1L;
+    }
 
     private UUID enqueue(Connection connection, UUID tenantId, UUID deviceId, String protocol,
                          byte[] payload, Instant expiresAt, UUID principalId, UUID requestKey) throws SQLException {

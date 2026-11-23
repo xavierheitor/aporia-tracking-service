@@ -27,7 +27,7 @@ class JdbcPacketIngestionIT {
             ReceivedFrame frame = new ReceivedFrame(
                     "suntech",
                     identity,
-                    ("ALV;" + identity + "\r").getBytes(StandardCharsets.US_ASCII)
+                    ("ALV;" + identity + "\r").getBytes(StandardCharsets.US_ASCII), "suntech-ascii-v3"
             );
 
             UUID packetId = new JdbcPacketIngestion(dataSource).accept(frame);
@@ -48,7 +48,7 @@ class JdbcPacketIngestionIT {
                 "9999999999",
                 "ALV;9999999999\r".getBytes(
                         StandardCharsets.US_ASCII
-                )
+                ), "suntech-ascii-v3"
         );
 
         try (var dataSource = TestDatabase.createDataSource()) {

@@ -28,6 +28,7 @@ class TeltonikaAdapterTest {
         assertFalse(new TeltonikaAvl().decodePacket(packet.payload(), packet.deviceIdentity()).readings().getFirst().hasPosition());
         byte[] corrupt = packet.payload();
         corrupt[corrupt.length - 1] ^= 1;
-        assertThrows(IllegalArgumentException.class, () -> session.receive(corrupt));
+        var error = assertThrows(IllegalArgumentException.class, () -> session.receive(corrupt));
+        assertEquals("INVALID_TELTONIKA_AVL", error.getMessage());
     }
 }

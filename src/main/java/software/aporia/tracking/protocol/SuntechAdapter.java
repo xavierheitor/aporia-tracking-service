@@ -6,6 +6,8 @@ import java.util.List;
 
 public final class SuntechAdapter implements ProtocolAdapter {
 
+    @Override public boolean acceptsFirstByte(int first) { return first == 'S' || first == 'A' || first == 'R'; }
+
     @Override
     public String protocolId() {
         return "suntech";

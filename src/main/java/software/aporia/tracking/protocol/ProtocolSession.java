@@ -6,6 +6,8 @@ public interface ProtocolSession {
 
     List<ProtocolFrame> receive(byte[] incoming);
 
+    default byte[] rejectLogin() { return new byte[0]; }
+
     default byte[] acknowledge(ProtocolFrame frame) {
         return new byte[0];
     }

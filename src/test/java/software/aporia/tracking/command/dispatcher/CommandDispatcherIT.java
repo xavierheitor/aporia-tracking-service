@@ -30,8 +30,11 @@ class CommandDispatcherIT {
 
     private CommandDispatcher dispatcher(DataSource db, DispatchOwner owner, TestFixtures device, Writer writer) {
         var endpoint = new CommandTransport.Endpoint() {
+            @Override
             public String protocol() { return "suntech"; }
+            @Override
             public String identity() { return device.deviceIdentity(); }
+            @Override
             public void send(byte[] bytes) throws IOException { writer.send(bytes); }
         };
         return new CommandDispatcher(db, new DeviceCommandDispatchRepository(), (tenant, id) ->
@@ -123,7 +126,8 @@ class CommandDispatcherIT {
             UUID command = requestFirmware(db, fixture);
             var bytes = new ByteArrayOutputStream();
             try (var owner = DispatchOwner.open(ownerFile); var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                assertThrows(IOException.class, () -> DispatchOwner.open(ownerFile));
+                var unavailable = assertThrows(IOException.class, () -> DispatchOwner.open(ownerFile));
+                assertEquals("DISPATCH_OWNER_UNAVAILABLE", unavailable.getMessage());
                 var authorized = new CountDownLatch(1);
                 var resume = new CountDownLatch(1);
                 var dispatcher = dispatcher(db, owner, fixture, payload -> {
@@ -156,7 +160,8 @@ class CommandDispatcherIT {
                     resume.countDown();
                 }
                 var crash = assertThrows(java.util.concurrent.ExecutionException.class, () -> run.get(5, TimeUnit.SECONDS));
-                assertInstanceOf(IllegalStateException.class, crash.getCause());
+                var cause = assertInstanceOf(IllegalStateException.class, crash.getCause());
+                assertEquals("simulated process death after write", cause.getMessage());
                 assertArrayEquals(valid, bytes.toByteArray());
             }
             try (var restarted = DispatchOwner.open(ownerFile)) {

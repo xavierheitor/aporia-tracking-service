@@ -48,9 +48,10 @@ class DeviceSessionIdentityTest {
     void shouldRejectNullIdentity() {
         DeviceSession session = createSession();
 
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> session.validateIdentity(null)
         );
+        assertEquals("SESSION_IDENTITY_MISMATCH", error.getMessage());
     }
 }

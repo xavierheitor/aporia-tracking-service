@@ -1,6 +1,5 @@
 package software.aporia.tracking.worker;
 
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
@@ -21,10 +20,9 @@ import org.slf4j.LoggerFactory;
 import software.aporia.tracking.core.InvalidPacketException;
 import software.aporia.tracking.core.Telemetry;
 import software.aporia.tracking.protocol.DecoderRegistry;
-import software.aporia.tracking.protocol.MessageProcessingPlan;
 import software.aporia.tracking.protocol.SuntechDecoder;
-import software.aporia.tracking.protocol.SuntechMessageRouter;
-import software.aporia.tracking.protocol.SuntechProtocol;
+import software.aporia.tracking.protocol.TeltonikaAvl;
+import software.aporia.tracking.protocol.DecodedPacket;
 import software.aporia.tracking.protocol.TelemetryDecoder;
 import software.aporia.tracking.storage.AssignmentRepository;
 import software.aporia.tracking.storage.DeviceCommandResponseRepository;
@@ -50,7 +48,6 @@ public class TrackingWorker {
     private static final Logger log
             = LoggerFactory.getLogger(TrackingWorker.class);
 
-    private final SuntechMessageRouter messageRouter;
     private final DeviceCommandResponseRepository responseRepository;
 
     public TrackingWorker(DataSource dataSource) {
@@ -76,12 +73,11 @@ public class TrackingWorker {
         this.positionRepository = new PositionRepository();
         this.lastPositionRepository = new LastPositionRepository();
         this.outboxRepository = new OutboxRepository();
-        this.messageRouter = new SuntechMessageRouter();
         this.responseRepository = new DeviceCommandResponseRepository();
     }
 
     private static DecoderRegistry defaultDecoderRegistry() {
-        return new DecoderRegistry(List.of(new SuntechDecoder()));
+        return new DecoderRegistry(List.of(new SuntechDecoder(), new TeltonikaAvl()));
     }
 
     /**
@@ -142,7 +138,7 @@ public class TrackingWorker {
                 rp.payload_hash,
                 rp.decoder_version,
                 rp.received_at,
-                d.identity AS registered_identity
+                d.protocol, d.identity AS registered_identity
             FROM raw_packets rp
             JOIN devices d
               ON d.id = rp.device_id
@@ -163,6 +159,7 @@ public class TrackingWorker {
 
         String storedHash;
         String decoderVersion;
+        String protocol;
         String registeredIdentity;
 
         Instant receivedAt;
@@ -189,6 +186,7 @@ public class TrackingWorker {
 
                 storedHash = result.getString("payload_hash");
                 decoderVersion = result.getString("decoder_version");
+                protocol = result.getString("protocol");
                 registeredIdentity = result.getString("registered_identity");
 
                 receivedAt = result.getTimestamp(
@@ -210,54 +208,18 @@ public class TrackingWorker {
         }
 
         // 3. Validar integridade e determinar os processamentos.
-        Telemetry telemetry = null;
-        MessageProcessingPlan plan;
-
+        DecodedPacket decoded;
         try {
             validateHash(payload, storedHash);
-
-            // Nesta etapa, o roteador ainda é específico do Suntech.
-            // Não devemos aplicá-lo silenciosamente a outros protocolos.
-            if (!"suntech-ascii-v3".equals(decoderVersion)) {
-                throw new IllegalStateException(
-                        "MESSAGE_ROUTER_UNAVAILABLE: " + decoderVersion
-                );
-            }
-
+            if (!protocol.equals(decoder.protocolId())) throw new InvalidPacketException("DEVICE_PROTOCOL_MISMATCH");
             try {
-                plan = messageRouter.route(payload);
+                decoded = decoder.decodePacket(payload, registeredIdentity);
             } catch (IllegalArgumentException e) {
-                throw new InvalidPacketException(
-                        "INVALID_PROTOCOL_FRAME", e
-                );
+                throw new InvalidPacketException("INVALID_PROTOCOL_FRAME", e);
             }
-
-            String responseIdentity = new SuntechProtocol().identify(payload);
-
-            if (!registeredIdentity.equals(responseIdentity)) {
-                throw new InvalidPacketException(
-                        "DEVICE_IDENTITY_MISMATCH"
-                );
+            if (!registeredIdentity.equals(decoded.identity())) {
+                throw new InvalidPacketException("DEVICE_IDENTITY_MISMATCH");
             }
-
-            if (plan.processTelemetry() || plan.processHeartbeat()) {
-                try {
-                    telemetry = decoder.decode(payload);
-                } catch (IllegalArgumentException e) {
-                    throw new InvalidPacketException(
-                            "INVALID_PROTOCOL_FRAME", e
-                    );
-                }
-
-                if (!registeredIdentity.equals(
-                        telemetry.deviceIdentity()
-                )) {
-                    throw new InvalidPacketException(
-                            "DEVICE_IDENTITY_MISMATCH"
-                    );
-                }
-            }
-
         } catch (InvalidPacketException e) {
 
             rejectPacket(
@@ -290,9 +252,9 @@ public class TrackingWorker {
                     storedHash
             );
 
-            if (messageId != null
-                    && telemetry != null
-                    && telemetry.hasPosition()) {
+            for (int index = 0; messageId != null && index < decoded.readings().size(); index++) {
+                Telemetry telemetry = decoded.readings().get(index);
+                if (!telemetry.hasPosition()) continue;
 
                 UUID assetId = assignmentRepository.findAssetId(
                         connection,
@@ -308,7 +270,7 @@ public class TrackingWorker {
                         tenantId,
                         assetId,
                         deviceId,
-                        messageId,
+                        messageId, index,
                         telemetry,
                         receivedAt
                 );
@@ -330,20 +292,14 @@ public class TrackingWorker {
                 );
             }
 
-            if (plan.processCommandResponse()) {
-
-                String responseType = new String(
-                        payload,
-                        StandardCharsets.US_ASCII
-                ).split(";", 2)[0];
-
+            if (decoded.responseType() != null) {
                 responseRepository.save(
                         connection,
                         tenantId,
                         deviceId,
                         packetId,
-                        "suntech",
-                        responseType,
+                        protocol,
+                        decoded.responseType(),
                         payload
                 );
             }

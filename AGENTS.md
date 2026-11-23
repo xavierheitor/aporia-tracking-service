@@ -8,6 +8,8 @@
 
 O fluxo de homologação para consulta de firmware inclui dispatcher com recuperação por proprietário, gateway, worker e migrations V7–V8. A decisão de arquitetura, o contrato da fila, o ensaio de integração e o procedimento operacional estão em [docs/comandos.md](docs/comandos.md). O Compose de comandos é opt-in. O Marco C preserva RES/RPR sem vínculo nos formatos disponíveis. A API ficou para implementação posterior pelo mantenedor. A homologação física, a evidência para correlação positiva e a ativação em produção continuam pendentes. As seções de estado e roadmap abaixo registram o planejamento original.
 
+O gateway também recebe telemetria Teltonika AVL Codec 8 e 8 Extended por TCP, com detecção por conexão. O cadastro, a configuração do FMB900 e as garantias de persistência estão em [docs/gateway-tcp.md](docs/gateway-tcp.md).
+
 ## 1. Missão e escopo
 
 O **Aporia Tracking Service** é um serviço backend Java para rastreamento de dispositivos GPS, com isolamento multi-tenant, comunicação TCP com rastreadores, ingestão e processamento de telemetria, persistência geoespacial e envio controlado de comandos. O protocolo implementado inicialmente é **Suntech**, com foco no ST8310R; a arquitetura deve permitir protocolos adicionais sem contaminar o núcleo de domínio com particularidades de um fabricante. Esse serviço servirá de base para uma api que fornece os dados e interface do serviço para clientes.
@@ -188,6 +190,9 @@ Evitar uma sequência interminável de “etapas” artificiais. Organizar o tra
 ## 8. Comandos de validação
 
 ```bash
+# Lint Java de produção e testes (sem executar testes ou acessar banco)
+mvn -Plint clean test-compile
+
 # Compilação
 mvn clean compile
 

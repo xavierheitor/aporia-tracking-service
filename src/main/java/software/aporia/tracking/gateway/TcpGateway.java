@@ -23,6 +23,7 @@ import software.aporia.tracking.command.dispatcher.SessionCommandTransport;
 import software.aporia.tracking.protocol.ProtocolAdapter;
 import software.aporia.tracking.protocol.ProtocolRegistry;
 import software.aporia.tracking.protocol.SuntechAdapter;
+import software.aporia.tracking.protocol.TeltonikaAdapter;
 import software.aporia.tracking.storage.Database;
 import software.aporia.tracking.storage.DeviceCommandDispatchRepository;
 import software.aporia.tracking.storage.JdbcDeviceLookup;
@@ -67,27 +68,27 @@ public class TcpGateway {
                     = new SessionRegistry();
 
             ProtocolRegistry registry = new ProtocolRegistry(
-                    List.of(new SuntechAdapter())
+                    List.of(new SuntechAdapter(), new TeltonikaAdapter())
             );
 
             String protocolId = System.getenv()
-                    .getOrDefault("TRACKING_PROTOCOL", "suntech");
+                    .getOrDefault("TRACKING_PROTOCOL", "auto");
 
-            ProtocolAdapter adapter = registry.get(protocolId);
+            java.util.function.IntFunction<ProtocolAdapter> select = registry::detect;
+            if (!"auto".equals(protocolId)) {
+                var fixed = registry.get(protocolId);
+                select = first -> fixed;
+            }
 
             TcpClientHandler clientHandler = new TcpClientHandler(
                     ingestion,
                     deviceLookup,
                     sessionRegistry,
-                    adapter,
+                    select,
                     running
             );
 
-            log.info(
-                    "TCP listener configured: protocol={}, decoder={}",
-                    adapter.protocolId(),
-                    adapter.decoderVersion()
-            );
+            log.info("TCP listener configured for {}", protocolId);
 
             if (owner != null) {
                 var dispatcher = new CommandDispatcher(
@@ -96,40 +97,9 @@ public class TcpGateway {
                 polling.scheduleWithFixedDelay(() -> poll(dispatcher, sessionRegistry, running),
                         0, 1, TimeUnit.SECONDS);
             }
-            Thread shutdownHook = new Thread(() -> {
-
-                log.info("Shutdown requested for TCP Gateway");
-                running.set(false);
-
-                try {
-                    server.close();
-                } catch (IOException e) {
-                    log.warn("Error closing TCP listener", e);
-                }
-
-                try {
-                    if (!gatewayFinished.await(
-                            SHUTDOWN_TIMEOUT_SECONDS,
-                            TimeUnit.SECONDS
-                    )) {
-                        log.warn("Gateway shutdown timeout exceeded");
-
-                        for (Socket client : activeClients) {
-                            try {
-                                client.close();
-                            } catch (IOException e) {
-                                log.debug(
-                                        "Error closing client socket",
-                                        e
-                                );
-                            }
-                        }
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-
-            }, "tracking-gateway-shutdown");
+            Thread shutdownHook = new Thread(
+                    () -> shutdown(server, running, gatewayFinished, activeClients),
+                    "tracking-gateway-shutdown");
 
             Runtime.getRuntime().addShutdownHook(shutdownHook);
 
@@ -198,6 +168,40 @@ public class TcpGateway {
         } finally {
             gatewayFinished.countDown();
             log.info("TCP Gateway stopped");
+        }
+    }
+
+    private static void shutdown(ServerSocket server, AtomicBoolean running,
+                                 CountDownLatch gatewayFinished, Set<Socket> activeClients) {
+        log.info("Shutdown requested for TCP Gateway");
+        running.set(false);
+
+        try {
+            server.close();
+        } catch (IOException e) {
+            log.warn("Error closing TCP listener", e);
+        }
+
+        try {
+            if (!gatewayFinished.await(
+                    SHUTDOWN_TIMEOUT_SECONDS,
+                    TimeUnit.SECONDS
+            )) {
+                log.warn("Gateway shutdown timeout exceeded");
+
+                for (Socket client : activeClients) {
+                    try {
+                        client.close();
+                    } catch (IOException e) {
+                        log.debug(
+                                "Error closing client socket",
+                                e
+                        );
+                    }
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 

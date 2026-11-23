@@ -131,4 +131,13 @@ class SuntechDecoderTest {
         assertEquals(expected, actual);
     }
 
+    @Test
+    void readsStatusReqExampleFromRevisionFour() {
+        var frame = ascii("RES;STT;1234567890;B9FFFF;201;1.1.11;0;20240317;15:07:40;000030A4;"
+                + "724;10;0207;34;-22.847418;-47.085902;0.00;0.00;0;0;0;0;0002;0380003F;4.1;2;+34.1;;;;;;\r");
+        var decoded = decoder.decodePacket(frame, "1234567890");
+        assertEquals("RES", decoded.responseType());
+        assertEquals(-22.847418, decoded.readings().getFirst().latitude());
+        assertFalse(decoded.readings().getFirst().hasPosition());
+    }
 }

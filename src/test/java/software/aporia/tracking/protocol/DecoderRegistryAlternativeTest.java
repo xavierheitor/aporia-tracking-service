@@ -16,14 +16,16 @@ class DecoderRegistryAlternativeTest {
 
         TelemetryDecoder alternative = new TelemetryDecoder() {
 
+            @Override public String protocolId() { return "example"; }
+
             @Override
             public String decoderVersion() {
                 return "example-protocol-v1";
             }
 
             @Override
-            public Telemetry decode(byte[] frame) {
-                return new Telemetry(
+            public DecodedPacket decodePacket(byte[] frame, String identity) {
+                return new DecodedPacket(identity, List.of(new Telemetry(
                         "1234567890",
                         null,
                         null,
@@ -33,7 +35,7 @@ class DecoderRegistryAlternativeTest {
                         null,
                         null,
                         null
-                );
+                )), null);
             }
         };
 
@@ -47,9 +49,9 @@ class DecoderRegistryAlternativeTest {
         TelemetryDecoder selected
                 = registry.get("example-protocol-v1");
 
-        Telemetry telemetry = selected.decode(
-                "EXAMPLE".getBytes(StandardCharsets.US_ASCII)
-        );
+        Telemetry telemetry = selected.decodePacket(
+                "EXAMPLE".getBytes(StandardCharsets.US_ASCII), "1234567890"
+        ).readings().getFirst();
 
         assertSame(alternative, selected);
         assertEquals(

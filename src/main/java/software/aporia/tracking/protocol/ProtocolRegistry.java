@@ -39,6 +39,18 @@ public final class ProtocolRegistry {
         this.adapters = Map.copyOf(registry);
     }
 
+    public ProtocolAdapter detect(int first) {
+        ProtocolAdapter selected = null;
+        for (var adapter : adapters.values()) {
+            if (adapter.acceptsFirstByte(first)) {
+                if (selected != null) throw new IllegalStateException("AMBIGUOUS_PROTOCOL_PREFIX");
+                selected = adapter;
+            }
+        }
+        if (selected == null) throw new IllegalArgumentException("UNKNOWN_PROTOCOL_PREFIX");
+        return selected;
+    }
+
     public ProtocolAdapter get(String protocolId) {
 
         ProtocolAdapter adapter = adapters.get(protocolId);

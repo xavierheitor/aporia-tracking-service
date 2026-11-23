@@ -6,5 +6,7 @@ public interface ProtocolAdapter {
 
     String decoderVersion();
 
+    boolean acceptsFirstByte(int first);
+
     ProtocolSession newSession();
 }

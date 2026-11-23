@@ -24,11 +24,17 @@ class GatewayCommandCycleIT {
     @TempDir Path runtime;
 
     private record Service(Process process) implements AutoCloseable {
-        @Override public void close() throws Exception {
+        @Override public void close() {
             process.destroy();
-            if (!process.waitFor(10, TimeUnit.SECONDS)) {
-                process.destroyForcibly().waitFor();
-                fail("Service did not shut down gracefully");
+            try {
+                if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                    process.destroyForcibly().waitFor();
+                    fail("Service did not shut down gracefully");
+                }
+            } catch (InterruptedException interrupted) {
+                process.destroyForcibly();
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while stopping test service", interrupted);
             }
         }
     }
@@ -43,11 +49,13 @@ class GatewayCommandCycleIT {
         env.put("TRACKING_DB_PASSWORD", db.getPassword());
         env.put("TRACKING_TCP_BIND", "127.0.0.1");
         env.put("TRACKING_TCP_PORT", "0");
-        env.put("TRACKING_PROTOCOL", "suntech");
+        env.put("TRACKING_PROTOCOL", "auto");
         env.put("TRACKING_DISPATCH_OWNER_FILE", runtime.resolve("owner").toString());
         return new Service(builder.redirectErrorStream(true).redirectOutput(log.toFile()).start());
     }
 
+    // Os processos são externos à JVM de teste. A espera intercala consultas até o prazo de dez segundos.
+    @SuppressWarnings("SleepWhileInLoop")
     private void await(String description, Callable<Boolean> predicate) throws Exception {
         long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < end) {
@@ -93,6 +101,9 @@ class GatewayCommandCycleIT {
             var match = listener.matcher(Files.readString(log));
             assertTrue(match.find());
             int port = Integer.parseInt(match.group(1));
+            try (var teltonika = new TestFixtures(db)) {
+                verifyAvl(port, c, teltonika);
+            }
             UUID tenant = fixture.tenantId();
             UUID principal = UUID.randomUUID();
             UUID key = UUID.randomUUID();
@@ -150,6 +161,58 @@ class GatewayCommandCycleIT {
                     responses.next();
                     assertEquals(4, responses.getInt(1));
                 }
+            }
+        }
+    }
+    private void verifyAvl(int port, Connection c, TestFixtures fixture) throws Exception {
+        String imei = "35000" + fixture.deviceIdentity();
+        var hex = java.util.HexFormat.of();
+        byte[] login = java.nio.ByteBuffer.allocate(17).putShort((short)15)
+                .put(imei.getBytes(StandardCharsets.US_ASCII)).array();
+        try (var denied = new Socket("127.0.0.1", port)) {
+            denied.setSoTimeout(3000);
+            denied.getOutputStream().write(login);
+            assertEquals(0, denied.getInputStream().read());
+        }
+        try (var update = c.prepareStatement("UPDATE devices SET identity=?,protocol='teltonika' WHERE tenant_id=? AND id=?")) {
+            update.setString(1, imei);
+            update.setObject(2, fixture.tenantId());
+            update.setObject(3, fixture.deviceId());
+            assertEquals(1, update.executeUpdate());
+        }
+        // Two fixes per batch, southern/western coordinates, ignition and extended variable-size IO.
+        byte[] codec8 = hex.parseHex("00000000000000430802000001a3185c500000e3fc5e80f268ff00007b001f070019000101ef01000000000001a3185c500100e3fc5e80f268ff00007b001f070019000101ef010000000200005a0c");
+        byte[] extended = hex.parseHex("00000000000000638e02000001a3185c500000e3fc5e80f268ff00007b001f07001900000002000100ef01000000000000000101000003616263000001a3185c500100e3fc5e80f268ff00007b001f07001900000002000100ef01000000000000000101000003616263020000dd1a");
+        try (var tracker = new Socket("127.0.0.1", port)) {
+            tracker.setSoTimeout(5000);
+            tracker.getOutputStream().write(login);
+            assertEquals(1, tracker.getInputStream().read());
+            tracker.getOutputStream().write(0xff);
+            for (byte[] bytes : new byte[][]{codec8, extended, extended}) {
+                tracker.getOutputStream().write(bytes);
+                assertArrayEquals(new byte[]{0,0,0,2}, tracker.getInputStream().readNBytes(4));
+            }
+            // Revalidation at ingest must fail closed even after a successful login.
+            try (var disable = c.prepareStatement("UPDATE devices SET enabled=false WHERE tenant_id=? AND id=?")) {
+                disable.setObject(1, fixture.tenantId());
+                disable.setObject(2, fixture.deviceId());
+                assertEquals(1, disable.executeUpdate());
+            }
+            tracker.getOutputStream().write(codec8);
+            assertEquals(-1, tracker.getInputStream().read());
+        }
+        await("Worker did not persist both batches", () -> count(c, "positions", fixture.tenantId()) == 4);
+        assertEquals(3, count(c, "raw_packets", fixture.tenantId()));
+        assertEquals(2, count(c, "messages", fixture.tenantId()));
+        try (var s = c.prepareStatement("""
+                SELECT count(*),count(DISTINCT reading_index) FROM positions WHERE tenant_id=?
+                AND ignition AND ST_X(geom)=-47 AND ST_Y(geom)=-22.8
+                """)) {
+            s.setObject(1, fixture.tenantId());
+            try (var rows = s.executeQuery()) {
+                rows.next();
+                assertEquals(4, rows.getInt(1));
+                assertEquals(2, rows.getInt(2));
             }
         }
     }

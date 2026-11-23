@@ -24,12 +24,19 @@ public final class TcpClientHandler {
     private static final Logger log
             = LoggerFactory.getLogger(TcpClientHandler.class);
 
-    private static final int READ_TIMEOUT_MS = 30_000;
+    private static final int LOGIN_TIMEOUT_MS = 30_000;
+    private static final int SESSION_IDLE_MS = sessionIdleMillis();
+
+    private static int sessionIdleMillis() {
+        int seconds = Integer.parseInt(System.getenv().getOrDefault("TRACKING_TCP_SESSION_IDLE_SECONDS", "180"));
+        if (seconds <= 0) throw new IllegalArgumentException("INVALID_TCP_SESSION_IDLE_SECONDS");
+        return Math.multiplyExact(seconds, 1000);
+    }
 
     private final JdbcPacketIngestion ingestion;
     private final JdbcDeviceLookup deviceLookup;
     private final SessionRegistry sessionRegistry;
-    private final ProtocolAdapter adapter;
+    private final java.util.function.IntFunction<ProtocolAdapter> selectAdapter;
     private final AtomicBoolean running;
 
     public TcpClientHandler(
@@ -39,28 +46,35 @@ public final class TcpClientHandler {
             ProtocolAdapter adapter,
             AtomicBoolean running
     ) {
+        this(ingestion, deviceLookup, sessionRegistry, first -> adapter, running);
+    }
+
+    public TcpClientHandler(JdbcPacketIngestion ingestion, JdbcDeviceLookup deviceLookup,
+                            SessionRegistry sessionRegistry, java.util.function.IntFunction<ProtocolAdapter> selectAdapter,
+                            AtomicBoolean running) {
         this.ingestion = java.util.Objects.requireNonNull(ingestion);
         this.deviceLookup = java.util.Objects.requireNonNull(deviceLookup);
         this.sessionRegistry = java.util.Objects.requireNonNull(sessionRegistry);
-        this.adapter = java.util.Objects.requireNonNull(adapter);
+        this.selectAdapter = java.util.Objects.requireNonNull(selectAdapter);
         this.running = java.util.Objects.requireNonNull(running);
     }
 
     public void handle(Socket client) {
 
-        ProtocolSession protocolSession = adapter.newSession();
         DeviceSession registeredSession = null;
 
         try (client; InputStream input = client.getInputStream()) {
 
-            client.setSoTimeout(READ_TIMEOUT_MS);
+            client.setSoTimeout(LOGIN_TIMEOUT_MS);
 
             byte[] buffer = new byte[4096];
-            int bytesRead;
+            if (!running.get()) return;
+            int bytesRead = input.read(buffer);
+            if (bytesRead == -1) return;
 
-            while (running.get()
-                    && (bytesRead = input.read(buffer)) != -1) {
-
+            ProtocolAdapter adapter = selectAdapter.apply(Byte.toUnsignedInt(buffer[0]));
+            ProtocolSession protocolSession = adapter.newSession();
+            do {
                 byte[] received = Arrays.copyOf(buffer, bytesRead);
 
                 for (ProtocolFrame frame
@@ -79,16 +93,14 @@ public final class TcpClientHandler {
                         }
 
                     } else {
-                        RegisteredDevice device
-                                = deviceLookup.findEnabled(
-                                        adapter.protocolId(),
-                                        frame.deviceIdentity()
-                                ).orElseThrow(()
-                                        -> new IllegalArgumentException(
-                                                "UNKNOWN_OR_DISABLED_DEVICE"
-                                        )
-                                );
+                        var found = deviceLookup.findEnabled(adapter.protocolId(), frame.deviceIdentity());
+                        if (found.isEmpty()) {
+                            if (frame.isLogin()) client.getOutputStream().write(protocolSession.rejectLogin());
+                            throw new IllegalArgumentException("UNKNOWN_OR_DISABLED_DEVICE");
+                        }
+                        RegisteredDevice device = found.get();
 
+                        client.setSoTimeout(SESSION_IDLE_MS);
                         registeredSession = new DeviceSession(
                                 device.tenantId(),
                                 device.deviceId(),
@@ -125,6 +137,10 @@ public final class TcpClientHandler {
                         );
                     }
 
+                    if (frame.isLogin()) {
+                        registeredSession.send(protocolSession.acknowledge(frame));
+                        continue;
+                    }
                     ReceivedFrame receivedFrame = new ReceivedFrame(
                             adapter.protocolId(),
                             frame.deviceIdentity(),
@@ -134,13 +150,15 @@ public final class TcpClientHandler {
 
                     var packetId = ingestion.accept(receivedFrame, registeredSession.tenantId(), registeredSession.deviceId());
 
+                    if (frame.acknowledgmentRequired()) registeredSession.send(protocolSession.acknowledge(frame));
+
                     log.debug(
                             "Packet persisted: id={}, protocol={}",
                             packetId,
                             adapter.protocolId()
                     );
                 }
-            }
+            } while (running.get() && (bytesRead = input.read(buffer)) != -1);
 
         } catch (SocketTimeoutException e) {
             log.debug("TCP session timed out");

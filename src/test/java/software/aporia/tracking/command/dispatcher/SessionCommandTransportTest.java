@@ -222,7 +222,8 @@ class SessionCommandTransportTest {
             var selected = transport.connect(tenant, device).orElseThrow();
             registry.register(new DeviceSession(tenant, device, PROTOCOL, IDENTITY, newSocket));
             byte[] bytes = "test".getBytes(StandardCharsets.US_ASCII);
-            assertThrows(IOException.class, () -> selected.send(bytes));
+            var error = assertThrows(IOException.class, () -> selected.send(bytes));
+            assertEquals("DEVICE_DISCONNECTED", error.getMessage());
             oldSocket.shutdownOutput();
             newSocket.shutdownOutput();
             assertEquals(-1, oldPeer.getInputStream().read());
