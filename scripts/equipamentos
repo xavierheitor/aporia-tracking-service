@@ -8,6 +8,7 @@ case "${1:-}" in
         ;;
     autorizar)
         [ "$#" -eq 3 ] || { echo 'Uso: equipamentos autorizar UUID_DA_DESCOBERTA UUID_DO_TENANT' >&2; exit 2; }
+        # A função do banco vincula a descoberta ao tenant em uma única transação.
         exec psql -X -v ON_ERROR_STOP=1 -v discovery="$2" -v tenant="$3" <<'SQL'
 SELECT approve_device_discovery(:'discovery'::uuid, :'tenant'::uuid) AS device_id;
 SQL

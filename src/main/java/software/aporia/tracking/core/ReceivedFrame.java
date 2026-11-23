@@ -3,6 +3,14 @@ package software.aporia.tracking.core;
 
 import java.util.Objects;
 
+/**
+ * Leva os bytes recebidos e a identidade declarada pelo rastreador até a ingestão.
+ *
+ * @param protocol identificador do protocolo no cadastro
+ * @param identity identidade declarada pelo equipamento no protocolo
+ * @param payload bytes originais do quadro ou comando
+ * @param decoderVersion versão que o worker deve usar ao interpretar o conteúdo
+ */
 public record ReceivedFrame(
         String protocol,
         String identity,

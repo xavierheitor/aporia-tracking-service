@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
+/** Verifica a validação do pacote e a proteção dos bytes contra alterações externas. */
 class RawPacketTest {
 
     @Test

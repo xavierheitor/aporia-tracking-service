@@ -19,16 +19,19 @@ import org.slf4j.LoggerFactory;
 
 import software.aporia.tracking.command.dispatcher.CommandDispatcher;
 import software.aporia.tracking.command.dispatcher.DispatchOwner;
-import software.aporia.tracking.command.dispatcher.SessionCommandTransport;
 import software.aporia.tracking.protocol.ProtocolAdapter;
 import software.aporia.tracking.protocol.ProtocolRegistry;
-import software.aporia.tracking.protocol.SuntechAdapter;
-import software.aporia.tracking.protocol.TeltonikaAdapter;
+import software.aporia.tracking.protocol.suntech.SuntechAdapter;
+import software.aporia.tracking.protocol.teltonika.TeltonikaAdapter;
 import software.aporia.tracking.storage.Database;
-import software.aporia.tracking.storage.DeviceCommandDispatchRepository;
-import software.aporia.tracking.storage.JdbcDeviceLookup;
-import software.aporia.tracking.storage.JdbcPacketIngestion;
+import software.aporia.tracking.storage.command.DeviceCommandDispatchRepository;
+import software.aporia.tracking.storage.device.JdbcDeviceLookup;
+import software.aporia.tracking.storage.packet.JdbcPacketIngestion;
 
+/**
+ * Inicia o servidor TCP, distribui conexões entre tarefas e, quando configurado, executa o
+ * dispatcher junto às sessões.
+ */
 public class TcpGateway {
 
     private static final Logger log
@@ -40,6 +43,10 @@ public class TcpGateway {
 
     private static final int SHUTDOWN_TIMEOUT_SECONDS = 10;
 
+    /**
+     * Abre o listener, instala a rotina de encerramento e inicia o envio periódico se houver
+     * proprietário configurado.
+     */
     public static void main(String[] args) throws IOException {
 
         AtomicBoolean running = new AtomicBoolean(true);

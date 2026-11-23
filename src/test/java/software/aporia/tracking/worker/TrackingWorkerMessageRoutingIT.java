@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
+/** Verifica a persistência de respostas Suntech e o tratamento de telemetria presente na mesma mensagem. */
 class TrackingWorkerMessageRoutingIT {
 
     private static final String IDENTITY = "1234567890";

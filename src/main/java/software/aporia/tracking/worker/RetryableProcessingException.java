@@ -1,6 +1,10 @@
 
 package software.aporia.tracking.worker;
 
+/**
+ * Sinaliza uma condição de processamento que permite desfazer os efeitos parciais e reagendar o
+ * pacote.
+ */
 public class RetryableProcessingException
         extends RuntimeException {
 

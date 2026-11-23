@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
+/** Provoca falha na outbox e verifica o rollback das gravações anteriores na mesma transação. */
 class TrackingWorkerAtomicityIT {
 
     @Test

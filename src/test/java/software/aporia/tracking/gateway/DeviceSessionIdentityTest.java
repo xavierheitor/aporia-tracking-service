@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
+/** Verifica que uma conexão permanece vinculada à identidade declarada no início da sessão. */
 class DeviceSessionIdentityTest {
 
     private DeviceSession createSession() {

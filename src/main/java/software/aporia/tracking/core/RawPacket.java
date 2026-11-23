@@ -5,6 +5,15 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.UUID;
 
+/**
+ * Representa uma recepção persistida com seu conteúdo original e o instante de recepção.
+ *
+ * @param id identificador do registro
+ * @param protocol identificador do protocolo no cadastro
+ * @param deviceIdentity identidade do equipamento no protocolo
+ * @param payload bytes originais do quadro ou comando
+ * @param receivedAt instante em que o gateway recebeu o pacote
+ */
 public record RawPacket(
         UUID id,
         String protocol,

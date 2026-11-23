@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
+/** Executa consumidores concorrentes e verifica que cada pacote produz os efeitos esperados uma única vez. */
 class TrackingWorkerConcurrencyIT {
 
     @Test

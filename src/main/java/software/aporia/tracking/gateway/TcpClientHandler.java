@@ -6,8 +6,8 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.util.Arrays;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,10 +16,14 @@ import software.aporia.tracking.core.ReceivedFrame;
 import software.aporia.tracking.protocol.ProtocolAdapter;
 import software.aporia.tracking.protocol.ProtocolFrame;
 import software.aporia.tracking.protocol.ProtocolSession;
-import software.aporia.tracking.storage.JdbcDeviceLookup;
-import software.aporia.tracking.storage.JdbcPacketIngestion;
-import software.aporia.tracking.storage.RegisteredDevice;
+import software.aporia.tracking.storage.device.JdbcDeviceLookup;
+import software.aporia.tracking.storage.device.RegisteredDevice;
+import software.aporia.tracking.storage.packet.JdbcPacketIngestion;
 
+/**
+ * Conduz uma conexão da identificação do protocolo à descoberta do equipamento ou à ingestão dos
+ * pacotes de uma sessão autorizada.
+ */
 public final class TcpClientHandler {
 
     private static final Logger log
@@ -40,6 +44,7 @@ public final class TcpClientHandler {
     private final java.util.function.IntFunction<ProtocolAdapter> selectAdapter;
     private final AtomicBoolean running;
 
+    /** Restringe todas as conexões tratadas por esta instância ao adaptador fornecido. */
     public TcpClientHandler(
             JdbcPacketIngestion ingestion,
             JdbcDeviceLookup deviceLookup,
@@ -50,6 +55,7 @@ public final class TcpClientHandler {
         this(ingestion, deviceLookup, sessionRegistry, first -> adapter, running);
     }
 
+    /** Seleciona um adaptador pelo primeiro byte e mantém a escolha durante toda a conexão. */
     public TcpClientHandler(JdbcPacketIngestion ingestion, JdbcDeviceLookup deviceLookup,
                             SessionRegistry sessionRegistry, java.util.function.IntFunction<ProtocolAdapter> selectAdapter,
                             AtomicBoolean running) {
@@ -60,6 +66,10 @@ public final class TcpClientHandler {
         this.running = java.util.Objects.requireNonNull(running);
     }
 
+    /**
+     * Consome leituras até o encerramento da conexão e remove condicionalmente a sessão
+     * registrada na saída.
+     */
     public void handle(Socket client) {
 
         DeviceSession registeredSession = null;
@@ -98,7 +108,7 @@ public final class TcpClientHandler {
                         var found = deviceLookup.find(adapter.protocolId(), frame.deviceIdentity());
                         if (found.isEmpty()) {
                             if (frame.isLogin()) {
-                                // Permit the first AVL batch only to verify the wire format.
+                                // O login libera o primeiro lote para identificar o codec. A sessão de comandos depende da aprovação.
                                 client.getOutputStream().write(protocolSession.acknowledge(frame));
                                 continue;
                             }
@@ -161,6 +171,7 @@ public final class TcpClientHandler {
 
                     var packetId = ingestion.accept(receivedFrame, registeredSession.tenantId(), registeredSession.deviceId());
 
+                    // A confirmação do lote só segue para o rastreador depois que accept retorna com o commit concluído.
                     if (frame.acknowledgmentRequired()) registeredSession.send(protocolSession.acknowledge(frame));
 
                     log.debug(

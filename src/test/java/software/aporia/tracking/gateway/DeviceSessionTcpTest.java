@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
+/** Exercita a escrita no socket e a rejeição de novas escritas após desconexão ou invalidação. */
 class DeviceSessionTcpTest {
 
     @Test

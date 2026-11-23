@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import javax.sql.DataSource;
 
+/** Cria os registros de um tenant de teste e remove os dependentes em ordem compatível com as chaves estrangeiras. */
 public final class TestFixtures implements AutoCloseable {
 
     private final DataSource dataSource;

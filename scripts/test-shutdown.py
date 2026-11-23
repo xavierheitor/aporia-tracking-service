@@ -1,3 +1,4 @@
+"""Simula o desligamento do gateway enquanto um quadro Suntech ainda está incompleto."""
 
 import socket
 import time

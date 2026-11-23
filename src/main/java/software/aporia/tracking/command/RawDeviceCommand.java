@@ -3,6 +3,15 @@ package software.aporia.tracking.command;
 import java.util.Objects;
 import java.util.UUID;
 
+/**
+ * Agrupa os bytes de um comando com seu protocolo e os identificadores de comando, tenant e dispositivo.
+ *
+ * @param commandId identificador persistido do comando
+ * @param tenantId tenant ao qual pertence o equipamento
+ * @param deviceId identificador do equipamento no cadastro
+ * @param protocol identificador do protocolo no cadastro
+ * @param payload bytes originais do quadro ou comando
+ */
 public record RawDeviceCommand(
         UUID commandId,
         UUID tenantId,

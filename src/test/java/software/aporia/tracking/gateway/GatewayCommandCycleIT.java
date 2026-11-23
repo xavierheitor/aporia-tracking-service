@@ -12,14 +12,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import software.aporia.tracking.protocol.FirmwareVersionRequest;
-import software.aporia.tracking.storage.DeviceCommandRepository;
+import software.aporia.tracking.protocol.suntech.FirmwareVersionRequest;
+import software.aporia.tracking.storage.command.DeviceCommandRepository;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 import software.aporia.tracking.worker.WorkerApplication;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Inicia gateway e worker em processos separados para observar descoberta, aprovação, ingestão e envio de comandos pelo socket. */
 class GatewayCommandCycleIT {
     @TempDir Path runtime;
 
@@ -125,7 +126,7 @@ class GatewayCommandCycleIT {
                 await("First write was not committed", () -> repository.findStatus(c, tenant, first).orElseThrow().equals("sent"));
                 assertEquals("queued", repository.findStatus(c, tenant, second).orElseThrow());
             }
-            // Move the first response deadline into the past while the tracker is offline.
+            // Antecipa o vencimento para simular a espera pela resposta durante a desconexão.
             try (var s = c.prepareStatement("""
                     UPDATE device_commands SET created_at=now()-interval '3 minutes',
                     expires_at=now()-interval '1 second' WHERE tenant_id=? AND id=? AND status='sent'
@@ -169,7 +170,7 @@ class GatewayCommandCycleIT {
         var hex = java.util.HexFormat.of();
         byte[] login = java.nio.ByteBuffer.allocate(17).putShort((short)15)
                 .put(imei.getBytes(StandardCharsets.US_ASCII)).array();
-        // Two fixes per batch, southern/western coordinates, ignition and extended variable-size IO.
+        // Cada lote traz duas posições nos hemisférios sul e oeste. O lote estendido também inclui um campo de tamanho variável.
         byte[] codec8 = hex.parseHex("00000000000000430802000001a3185c500000e3fc5e80f268ff00007b001f070019000101ef01000000000001a3185c500100e3fc5e80f268ff00007b001f070019000101ef010000000200005a0c");
         byte[] extended = hex.parseHex("00000000000000638e02000001a3185c500000e3fc5e80f268ff00007b001f07001900000002000100ef01000000000000000101000003616263000001a3185c500100e3fc5e80f268ff00007b001f07001900000002000100ef01000000000000000101000003616263020000dd1a");
         UUID approved;
@@ -229,7 +230,7 @@ class GatewayCommandCycleIT {
                 tracker.getOutputStream().write(bytes);
                 assertArrayEquals(new byte[]{0,0,0,2}, tracker.getInputStream().readNBytes(4));
             }
-            // Revalidation at ingest must fail closed even after a successful login.
+            // Desabilitar o cadastro após o login deve impedir a confirmação do lote seguinte.
             try (var disable = c.prepareStatement("UPDATE devices SET enabled=false WHERE tenant_id=? AND id=?")) {
                 disable.setObject(1, fixture.tenantId());
                 disable.setObject(2, approved);

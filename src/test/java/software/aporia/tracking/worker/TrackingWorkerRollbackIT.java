@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
+/** Verifica que a ausência de associação ao ativo desfaz a mensagem parcial antes do reagendamento. */
 class TrackingWorkerRollbackIT {
 
     @Test

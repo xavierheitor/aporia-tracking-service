@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
+/** Verifica a rejeição de um pacote cuja identidade diverge da identidade cadastrada. */
 class TrackingWorkerIT {
 
     @Test

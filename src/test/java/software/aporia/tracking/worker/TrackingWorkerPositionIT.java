@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
+/** Verifica a consistência entre histórico de posições, última posição e evento na outbox. */
 class TrackingWorkerPositionIT {
 
     @Test

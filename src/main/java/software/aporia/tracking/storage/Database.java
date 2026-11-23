@@ -3,12 +3,13 @@ package software.aporia.tracking.storage;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
+/** Configura o pool JDBC usado pelos processos a partir das variáveis de ambiente do serviço. */
 public final class Database{
 
     private Database() {
-        // Private constructor to prevent instantiation
     }
 
+    /** Cria o pool JDBC com as credenciais e o endereço fornecidos pelo ambiente. */
     public static HikariDataSource createDataSource(){
        String url = System.getenv().getOrDefault(
             "TRACKING_DB_URL",

@@ -8,6 +8,8 @@ COPY src ./src
 
 RUN mvn -B -DskipTests package
 
+
+# A imagem de execução recebe o mesmo JAR usado pelo gateway e pelo worker.
 FROM eclipse-temurin:25-jre
 
 WORKDIR /app

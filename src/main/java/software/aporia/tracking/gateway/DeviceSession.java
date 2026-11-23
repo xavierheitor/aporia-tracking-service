@@ -12,6 +12,10 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * Representa a conexão de um dispositivo habilitado. A escrita e a invalidação compartilham o
+ * mesmo bloqueio.
+ */
 public final class DeviceSession implements Endpoint {
 
     private static final int WRITE_TIMEOUT_SECONDS = 5;
@@ -33,6 +37,7 @@ public final class DeviceSession implements Endpoint {
 
     private volatile boolean active = true;
 
+    /** Vincula o socket ao cadastro que o gateway identificou para esta conexão. */
     public DeviceSession(
             UUID tenantId,
             UUID deviceId,
@@ -65,6 +70,10 @@ public final class DeviceSession implements Endpoint {
         return protocol;
     }
 
+    /**
+     * Consulta o estado local do socket e da sessão. O equipamento remoto pode desconectar antes
+     * da próxima escrita.
+     */
     public boolean isConnected() {
         return active
                 && socket.isConnected()
@@ -72,6 +81,10 @@ public final class DeviceSession implements Endpoint {
                 && !socket.isOutputShutdown();
     }
 
+    /**
+     * Serializa as escritas no socket. O vencimento do prazo encerra a conexão e torna o
+     * resultado da tentativa incerto.
+     */
     @Override
     public void send(byte[] payload) throws IOException {
 
@@ -91,6 +104,7 @@ public final class DeviceSession implements Endpoint {
             }
 
             var writing = new AtomicBoolean(true);
+            // O temporizador fecha o socket para desbloquear uma escrita que excedeu o prazo.
             var deadline = deadlines.schedule(() -> {
                 if (writing.compareAndSet(true, false)) abortSocket();
             }, WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -126,6 +140,7 @@ public final class DeviceSession implements Endpoint {
         return identity;
     }
 
+    /** Rejeita a troca de identidade dentro da mesma conexão. */
     public void validateIdentity(String receivedIdentity) {
         if (!identity.equals(receivedIdentity)) {
             throw new IllegalArgumentException(
@@ -134,6 +149,7 @@ public final class DeviceSession implements Endpoint {
         }
     }
 
+    /** Impede novas escritas após aguardar a conclusão de uma escrita que já detenha o bloqueio. */
     public void invalidate() {
         writeLock.lock();
 
@@ -144,6 +160,7 @@ public final class DeviceSession implements Endpoint {
         }
     }
 
+    /** Invalida a sessão e fecha o socket para interromper as leituras. */
     @SuppressWarnings("ConvertToTryWithResources") // O socket pertence à sessão até o fechamento explícito.
     public void close() throws IOException {
         invalidate();

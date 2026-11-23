@@ -11,15 +11,20 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import software.aporia.tracking.protocol.FirmwareVersionRequest;
-import software.aporia.tracking.storage.*;
-import software.aporia.tracking.support.*;
+
+import software.aporia.tracking.protocol.suntech.FirmwareVersionRequest;
+import software.aporia.tracking.storage.command.DeviceCommandDispatchRepository;
+import software.aporia.tracking.storage.command.DeviceCommandRepository;
+import software.aporia.tracking.support.TestDatabase;
+import software.aporia.tracking.support.TestFixtures;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static software.aporia.tracking.command.dispatcher.CommandDispatcher.DispatchResult.*;
 
+/** Exercita a reserva e o resultado persistido da transmissão, inclusive quando a gravação da conclusão falha. */
 class CommandDispatcherIT {
     @TempDir Path directory;
 
@@ -95,7 +100,7 @@ class CommandDispatcherIT {
         try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
              var owner = DispatchOwner.open(directory.resolve("gateway")); var c = db.getConnection()) {
             UUID command = requestFirmware(db, fixture);
-            // Fail this command's completion UPDATE only, in the private test schema.
+            // O gatilho afeta somente a conclusão deste comando no schema isolado do teste.
             try (var sql = c.createStatement()) {
                 sql.execute("ALTER TABLE device_commands ADD CONSTRAINT it_fail_mark_sent "
                         + "CHECK (id <> '" + command + "'::uuid OR status <> 'sent')");

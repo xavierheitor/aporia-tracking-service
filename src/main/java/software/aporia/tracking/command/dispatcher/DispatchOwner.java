@@ -14,9 +14,12 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.UUID;
 
-/** The exclusive file lock outlives every socket write authorized by this owner. */
+/**
+ * Mantém o bloqueio exclusivo do emissor durante as escritas. O UUID persistido identifica suas
+ * tentativas na recuperação após reinício.
+ */
 public final class DispatchOwner implements AutoCloseable {
-    // Closing a second descriptor for the same inode can drop POSIX process locks.
+    // Fechar outro descritor do mesmo inode pode liberar o bloqueio POSIX do processo.
     private static final Set<Object> openFiles = new HashSet<>();
     private final Object fileKey;
     private final FileLock lock;
@@ -28,11 +31,12 @@ public final class DispatchOwner implements AutoCloseable {
         this.id = id;
     }
 
+    /** Abre o arquivo de propriedade com exclusividade e recupera o UUID persistido pelo emissor. */
     public static synchronized DispatchOwner open(Path path) throws IOException {
         try {
             Files.createFile(path);
         } catch (FileAlreadyExistsException existing) {
-            // Reuse the stable owner after a restart.
+            // O UUID no arquivo permite recuperar as transmissões deste emissor após reinício.
         }
         Object fileKey = Files.readAttributes(path,
                 BasicFileAttributes.class).fileKey();
@@ -64,12 +68,14 @@ public final class DispatchOwner implements AutoCloseable {
         }
     }
 
+    /** Fornece o UUID do proprietário enquanto o bloqueio está válido. */
     public UUID id() {
         if (!Thread.holdsLock(this)) throw new IllegalStateException("DISPATCH_OWNER_LOCK_REQUIRED");
         if (!lock.isValid()) throw new IllegalStateException("DISPATCH_OWNER_CLOSED");
         return id;
     }
 
+    /** Libera o arquivo de propriedade ao encerrar o emissor. */
     @Override
     public synchronized void close() throws IOException {
         synchronized (DispatchOwner.class) {

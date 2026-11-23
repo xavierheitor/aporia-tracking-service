@@ -1,5 +1,7 @@
 package software.aporia.tracking.protocol;
 
+import software.aporia.tracking.protocol.suntech.SuntechDecoder;
+
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -9,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import software.aporia.tracking.core.Telemetry;
 
+/** Demonstra o registro de um decodificador alternativo pela versão. */
 class DecoderRegistryAlternativeTest {
 
     @Test

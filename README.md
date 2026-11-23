@@ -9,6 +9,26 @@ Serviço de rastreamento GPS em Java 25 com Maven e PostgreSQL 16/PostGIS. Dois 
 
 A API HTTP está prevista para uma etapa posterior.
 
+## Organização do código
+
+Os pacotes Java ficam sob `software.aporia.tracking`. Os testes seguem a mesma estrutura em `src/test/java`.
+
+| Pacote | Responsabilidade |
+| --- | --- |
+| `core` | Tipos de pacote, quadro recebido e telemetria compartilhados pelo serviço. |
+| `protocol` | Contratos de adaptador, sessão e decodificação, além dos registros usados para selecionar implementações. |
+| `protocol.suntech` e `protocol.teltonika` | Formatos de mensagem, adaptadores e decodificadores de cada fabricante. A consulta de firmware fica com a implementação Suntech. |
+| `gateway` | Listener TCP, conexões e registro de sessões ativas. |
+| `command` e `command.dispatcher` | Estados do comando, reserva, envio pela sessão e coordenação da recuperação. |
+| `storage` | Configuração do pool JDBC. |
+| `storage.device` | Cadastro, descoberta e associação do equipamento ao ativo. |
+| `storage.packet` | Ingestão, gravação e consulta de pacotes brutos. |
+| `storage.command` | Fila de comandos, reserva, recuperação e persistência de respostas. |
+| `storage.telemetry` | Mensagens processadas, posições, última posição e eventos da outbox. |
+| `worker` | Consumo de pacotes, processamento transacional e política de retentativa. |
+
+As interfaces ficam junto ao código que define o contrato. Por exemplo, o dispatcher define `CommandTransport` e o gateway fornece `SessionCommandTransport` usando suas sessões TCP. As exceções acompanham o fluxo que distingue a falha: o worker trata pacotes inválidos e falhas que admitem retentativa, enquanto a fila cheia é sinalizada por `DeviceCommandRepository.QueueFullException`. Repositórios que participam da mesma transação podem pertencer a pacotes diferentes e receber a mesma conexão JDBC.
+
 ## Configuração e operação
 
 O arquivo `.env.example` mostra a configuração da aplicação para execução no host. O Compose da aplicação configura sua própria URL JDBC para acesso pela rede Docker. As migrations incrementais do Flyway ficam em [src/main/resources/db/migration](src/main/resources/db/migration).

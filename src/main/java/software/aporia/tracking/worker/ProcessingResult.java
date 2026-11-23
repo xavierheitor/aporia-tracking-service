@@ -2,6 +2,10 @@ package software.aporia.tracking.worker;
 
 import java.util.UUID;
 
+/**
+ * Descreve o desfecho de um ciclo do worker, incluindo o motivo e o prazo de nova tentativa
+ * quando aplicáveis.
+ */
 record ProcessingResult(
         UUID packetId,
         Status status,

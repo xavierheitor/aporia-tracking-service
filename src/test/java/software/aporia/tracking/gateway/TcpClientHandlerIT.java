@@ -14,21 +14,22 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
+import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import software.aporia.tracking.protocol.suntech.SuntechAdapter;
+import software.aporia.tracking.storage.device.JdbcDeviceLookup;
+import software.aporia.tracking.storage.packet.JdbcPacketIngestion;
+import software.aporia.tracking.support.TestDatabase;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 
-import software.aporia.tracking.support.TestDatabase;
-import com.zaxxer.hikari.HikariDataSource;
-
-import software.aporia.tracking.protocol.SuntechAdapter;
-import software.aporia.tracking.storage.JdbcDeviceLookup;
-import software.aporia.tracking.storage.JdbcPacketIngestion;
-
+/** Exercita a descoberta e o ciclo de registro, substituição e encerramento de sessões TCP com banco real. */
 class TcpClientHandlerIT {
 
     private HikariDataSource dataSource;

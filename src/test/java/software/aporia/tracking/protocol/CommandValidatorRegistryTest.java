@@ -1,6 +1,8 @@
 
 package software.aporia.tracking.protocol;
 
+import software.aporia.tracking.protocol.suntech.SuntechCommandValidator;
+
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -9,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
+/** Exercita a seleção do validador e a verificação do destinatário de comandos Suntech. */
 class CommandValidatorRegistryTest {
 
     private final CommandValidatorRegistry registry =

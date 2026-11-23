@@ -5,10 +5,15 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * Resolve adaptadores por identificador ou pelo primeiro byte da conexão. Um prefixo ambíguo
+ * impede a seleção automática.
+ */
 public final class ProtocolRegistry {
 
     private final Map<String, ProtocolAdapter> adapters;
 
+    /** Constrói o índice de adaptadores e rejeita identificadores vazios ou repetidos. */
     public ProtocolRegistry(
             Collection<? extends ProtocolAdapter> registeredAdapters
     ) {
@@ -39,6 +44,10 @@ public final class ProtocolRegistry {
         this.adapters = Map.copyOf(registry);
     }
 
+    /**
+     * Seleciona o único adaptador que aceita o prefixo recebido. Falha quando nenhum ou vários o
+     * reconhecem.
+     */
     public ProtocolAdapter detect(int first) {
         ProtocolAdapter selected = null;
         for (var adapter : adapters.values()) {
@@ -51,6 +60,7 @@ public final class ProtocolRegistry {
         return selected;
     }
 
+    /** Resolve o adaptador pelo identificador configurado. */
     public ProtocolAdapter get(String protocolId) {
 
         ProtocolAdapter adapter = adapters.get(protocolId);

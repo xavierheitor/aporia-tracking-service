@@ -9,6 +9,7 @@ services:
       POSTGRES_PASSWORD: tracking_dev
       POSTGRES_DB: postgres
 
+    # A porta distinta permite usar o banco isolado de testes junto ao de desenvolvimento.
     ports:
       - "127.0.0.1:55433:5432"
 

@@ -8,6 +8,7 @@ import org.flywaydb.core.Flyway;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
+/** Fornece conexões para um schema isolado por JVM e verifica o banco de testes antes de aplicar as migrations. */
 public final class TestDatabase {
 
     private static String isolatedUrl;
@@ -59,7 +60,7 @@ public final class TestDatabase {
 
     private static synchronized String isolate(String url, String user, String password) {
         if (isolatedUrl != null) return isolatedUrl;
-        // A fresh schema per test JVM isolates global recovery and fixed protocol examples across runs.
+        // O schema exclusivo da JVM isola a recuperação global e as identidades fixas usadas nos exemplos.
         String schema = "tracking_it_" + UUID.randomUUID().toString().replace("-", "");
         try (var c = DriverManager.getConnection(url, user, password); var s = c.createStatement()) {
             try (var row = s.executeQuery("SELECT current_database(), current_user")) {

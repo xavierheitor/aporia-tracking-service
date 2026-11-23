@@ -8,13 +8,18 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
 import javax.sql.DataSource;
-import software.aporia.tracking.protocol.FirmwareVersionRequest;
-import software.aporia.tracking.storage.DeviceCommandDispatchRepository;
-import software.aporia.tracking.storage.DeviceCommandRecoveryRepository;
-import software.aporia.tracking.storage.DeviceCommandDispatchRepository.Failure;
+import software.aporia.tracking.protocol.suntech.FirmwareVersionRequest;
+import software.aporia.tracking.storage.command.DeviceCommandDispatchRepository;
+import software.aporia.tracking.storage.command.DeviceCommandRecoveryRepository;
+import software.aporia.tracking.storage.command.DeviceCommandDispatchRepository.Failure;
 
+/**
+ * Coordena a reserva no PostgreSQL e a escrita na sessão TCP. A confirmação de escrita e o
+ * resultado incerto são persistidos separadamente.
+ */
 public final class CommandDispatcher {
 
+    /** Resultado observado pelo dispatcher. SENT indica que a escrita local terminou. */
     public enum DispatchResult {
         DEVICE_OFFLINE, NO_COMMAND, SENT, DELIVERY_FAILED, DELIVERY_UNKNOWN, CLAIM_LOST
     }
@@ -24,6 +29,7 @@ public final class CommandDispatcher {
     private final CommandTransport transport;
     private final DispatchOwner owner;
 
+    /** Vincula a fila e o transporte ao proprietário responsável pelas tentativas deste emissor. */
     public CommandDispatcher(DataSource dataSource, DeviceCommandDispatchRepository repository,
                              CommandTransport transport, DispatchOwner owner) {
         this.dataSource = Objects.requireNonNull(dataSource);
@@ -32,6 +38,10 @@ public final class CommandDispatcher {
         this.owner = Objects.requireNonNull(owner);
     }
 
+    /**
+     * Tenta enviar um comando do dispositivo. Quando ele está offline, a fila permanece
+     * disponível para a próxima conexão.
+     */
     public DispatchResult dispatchNext(UUID tenantId, UUID deviceId) throws SQLException {
         synchronized (owner) {
             UUID ownerId = owner.id();
@@ -79,6 +89,7 @@ public final class CommandDispatcher {
         }
 
         try {
+            // A autorização já foi confirmada e a conexão JDBC liberada. Uma falha aqui pode ocorrer após uma escrita parcial.
             session.send(payload);
         } catch (IOException error) {
             try (Connection c = dataSource.getConnection()) {
@@ -98,6 +109,7 @@ public final class CommandDispatcher {
         }
     }
 
+    /** Reconcilia tentativas interrompidas e prazos expirados sob a mesma exclusão usada no envio. */
     public void recover() throws SQLException {
         synchronized (owner) {
             var recovery = new DeviceCommandRecoveryRepository();

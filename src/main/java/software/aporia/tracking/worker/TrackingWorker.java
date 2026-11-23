@@ -11,26 +11,28 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
-
 import javax.sql.DataSource;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import software.aporia.tracking.core.InvalidPacketException;
 import software.aporia.tracking.core.Telemetry;
-import software.aporia.tracking.protocol.DecoderRegistry;
-import software.aporia.tracking.protocol.SuntechDecoder;
-import software.aporia.tracking.protocol.TeltonikaAvl;
 import software.aporia.tracking.protocol.DecodedPacket;
+import software.aporia.tracking.protocol.DecoderRegistry;
 import software.aporia.tracking.protocol.TelemetryDecoder;
-import software.aporia.tracking.storage.AssignmentRepository;
-import software.aporia.tracking.storage.DeviceCommandResponseRepository;
-import software.aporia.tracking.storage.LastPositionRepository;
-import software.aporia.tracking.storage.MessageRepository;
-import software.aporia.tracking.storage.OutboxRepository;
-import software.aporia.tracking.storage.PositionRepository;
+import software.aporia.tracking.protocol.suntech.SuntechDecoder;
+import software.aporia.tracking.protocol.teltonika.TeltonikaAvl;
+import software.aporia.tracking.storage.command.DeviceCommandResponseRepository;
+import software.aporia.tracking.storage.device.AssignmentRepository;
+import software.aporia.tracking.storage.telemetry.LastPositionRepository;
+import software.aporia.tracking.storage.telemetry.MessageRepository;
+import software.aporia.tracking.storage.telemetry.OutboxRepository;
+import software.aporia.tracking.storage.telemetry.PositionRepository;
 
+/**
+ * Consome pacotes brutos e coordena decodificação, deduplicação, posições, respostas e eventos em
+ * uma transação por pacote.
+ */
 public class TrackingWorker {
 
     private final DecoderRegistry decoderRegistry;
@@ -50,14 +52,17 @@ public class TrackingWorker {
 
     private final DeviceCommandResponseRepository responseRepository;
 
+    /** Cria um consumidor de pacotes para todos os tenants com os decodificadores padrão. */
     public TrackingWorker(DataSource dataSource) {
         this(dataSource, null);
     }
 
+    /** Permite restringir a seleção de pacotes a um tenant. */
     public TrackingWorker(DataSource dataSource, UUID tenantFilter) {
         this(dataSource, tenantFilter, defaultDecoderRegistry());
     }
 
+    /** Permite escolher o registro de decodificadores que interpretará os pacotes da fila. */
     public TrackingWorker(
             DataSource dataSource,
             UUID tenantFilter,

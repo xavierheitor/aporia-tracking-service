@@ -7,11 +7,16 @@ import org.slf4j.LoggerFactory;
 
 import software.aporia.tracking.storage.Database;
 
+/**
+ * Inicia o processo do worker e controla o intervalo entre consultas à fila e a retomada após
+ * falhas.
+ */
 public class WorkerApplication {
 
     private static final Logger log
             = LoggerFactory.getLogger(WorkerApplication.class);
 
+    /** Abre o pool de conexões e executa ciclos de processamento até o encerramento do processo. */
     @SuppressWarnings("SleepWhileInLoop") // Intervalos de polling e de recuperação após falha.
     public static void main(String[] args) {
 

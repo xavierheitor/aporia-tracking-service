@@ -1,4 +1,4 @@
-# Opt-in TCP command dispatch for homologation. Combine with compose.app.yaml.
+# Complementa compose.app.yaml para habilitar o dispatcher dentro do gateway na homologação.
 services:
   tracking-gateway:
     environment:

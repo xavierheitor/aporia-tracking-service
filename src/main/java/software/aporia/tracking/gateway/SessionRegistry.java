@@ -8,6 +8,10 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * Mantém a sessão atual por tenant e dispositivo e permite substituir uma conexão quando o
+ * rastreador reconecta.
+ */
 public final class SessionRegistry {
 
     private record DeviceKey(
@@ -18,6 +22,10 @@ public final class SessionRegistry {
     private final Map<DeviceKey, DeviceSession> sessions
             = new ConcurrentHashMap<>();
 
+    /**
+     * Instala a nova sessão e devolve a anterior, quando houver, para que o chamador feche o
+     * socket substituído.
+     */
     public Optional<DeviceSession> register(DeviceSession session) {
 
         Objects.requireNonNull(session);
@@ -43,6 +51,7 @@ public final class SessionRegistry {
         return Optional.ofNullable(replaced.get());
     }
 
+    /** Consulta a sessão do dispositivo dentro do tenant informado. */
     public Optional<DeviceSession> find(
             UUID tenantId,
             UUID deviceId
@@ -52,6 +61,7 @@ public final class SessionRegistry {
         );
     }
 
+    /** Remove a sessão apenas se ela ainda ocupar a entrada, preservando uma eventual reconexão. */
     public void unregister(DeviceSession session) {
 
         Objects.requireNonNull(session);
@@ -65,6 +75,7 @@ public final class SessionRegistry {
         sessions.remove(key, session);
     }
 
+    /** Obtém uma cópia das sessões registradas para a rodada de envio. */
     public List<DeviceSession> onlineSessions() {
         return List.copyOf(sessions.values());
     }
@@ -73,6 +84,7 @@ public final class SessionRegistry {
         return sessions.size();
     }
 
+    /** Compara a instância recebida com a sessão atualmente registrada para o mesmo equipamento. */
     public boolean isCurrent(DeviceSession session) {
 
         Objects.requireNonNull(session);

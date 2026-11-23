@@ -1,0 +1,27 @@
+package software.aporia.tracking.storage.device;
+
+import java.util.Objects;
+import java.util.UUID;
+
+/**
+ * Identifica o equipamento cadastrado, seu tenant e o par protocolo e identidade usado na conexão.
+ *
+ * @param tenantId tenant ao qual pertence o equipamento
+ * @param deviceId identificador do equipamento no cadastro
+ * @param protocol identificador do protocolo no cadastro
+ * @param identity identidade declarada pelo equipamento no protocolo
+ */
+public record RegisteredDevice(
+        UUID tenantId,
+        UUID deviceId,
+        String protocol,
+        String identity
+        ) {
+
+    public RegisteredDevice {
+        Objects.requireNonNull(tenantId);
+        Objects.requireNonNull(deviceId);
+        Objects.requireNonNull(protocol);
+        Objects.requireNonNull(identity);
+    }
+}

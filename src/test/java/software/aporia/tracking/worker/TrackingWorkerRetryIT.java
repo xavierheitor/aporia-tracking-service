@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
+/** Acompanha um pacote pelas tentativas de processamento até sua rejeição definitiva. */
 class TrackingWorkerRetryIT {
 
     @Test

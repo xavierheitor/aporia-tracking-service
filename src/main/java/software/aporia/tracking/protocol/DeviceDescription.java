@@ -1,4 +1,11 @@
 package software.aporia.tracking.protocol;
 
-/** Metadata evidenced by a validated frame. The model is optional. */
+/**
+ * Descreve a família de equipamento reconhecida em um quadro válido. O modelo pode estar ausente na mensagem.
+ *
+ * @param manufacturer fabricante associado ao formato reconhecido
+ * @param deviceType categoria do equipamento
+ * @param wireFormat formato observado na conexão
+ * @param reportedModel código de modelo quando presente na mensagem
+ */
 public record DeviceDescription(String manufacturer, String deviceType, String wireFormat, String reportedModel) {}

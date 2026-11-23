@@ -30,6 +30,7 @@ services:
 
     stop_grace_period: 15s
 
+  # O worker usa a mesma imagem do gateway e inicia sua própria JVM para consumir a fila.
   tracking-worker:
     image: aporia-tracking-java:dev
     container_name: aporia-tracking-worker

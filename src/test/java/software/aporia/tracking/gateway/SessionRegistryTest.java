@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
+/** Verifica o isolamento das sessões por tenant e a remoção condicional após reconexão. */
 class SessionRegistryTest {
 
     @Test
