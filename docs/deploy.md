@@ -130,3 +130,30 @@ Para voltar o binário, exporte em `TRACKING_RELEASE_IMAGE` a tag anterior **com
 O arquivo de propriedade requer um sistema de arquivos local com bloqueios POSIX. Preserve o mesmo arquivo enquanto houver uma instância emissora ativa. Se ele for perdido, confirme o encerramento do emissor original e reconcilie as tentativas em `transmitting` antes de retomar o envio.
 
 Para monitorar a instalação, acompanhe a idade do pacote pendente mais antigo, comandos vencidos ainda em fila e crescimento de `delivery_unknown`. Os logs do dispatcher identificam tenant, dispositivo, comando e tentativa. Faça backup com `pg_dump -Fc`, guarde uma cópia protegida fora do host e ensaie a restauração com `pg_restore --exit-on-error` em uma instância isolada. Antes de expurgar comandos, considere que apagar o registro também libera sua chave idempotente.
+
+## Capacidade para 200 rastreadores
+
+Com 200 equipamentos enviando uma posição por minuto, a entrada média é de 3,33 posições por segundo. Se os relógios estiverem alinhados ou a rede voltar depois de uma interrupção, várias leituras podem chegar juntas. Use como primeiro critério de capacidade que uma rajada de 200 posições seja persistida antes da próxima rodada de 60 segundos.
+
+O ensaio optativo usa um gateway, um worker e PostgreSQL/PostGIS em schema isolado. Abre 200 conexões TCP em loopback, uma por equipamento Suntech cadastrado, e envia três rodadas em intervalos de um minuto pelos mesmos sockets. Para cada rodada exige uma posição histórica e um evento por recepção, 200 últimas posições e todos os pacotes processados na primeira tentativa. O tempo registrado vai do início dos envios até a observação das posições confirmadas no banco, com consulta a cada 100 ms. O teste normal de integração cobre os protocolos; esta medição de capacidade usa um quadro STT por posição.
+
+Com as três variáveis de conexão do banco de testes configuradas conforme os [primeiros passos](primeiros-passos.md), execute:
+
+```sh
+TRACKING_TEST_FLEET=200 mvn -Plint '-Dtest=GatewayCommandCycleIT#processesTwoHundredDevicesEveryMinute' test
+```
+
+No ensaio local de 23/11/2026 em macOS ARM64, JVM 27 com alvo de compilação Java 25 e PostgreSQL/PostGIS de testes, as três rodadas levaram 1,76 s, 1,57 s e 1,37 s. Foram verificadas 600 posições e 600 eventos, com todos os pacotes processados na primeira tentativa. Esta medição curta cobre o envio sincronizado em conexões locais, com o dispatcher habilitado e sem comandos enfileirados.
+
+**Operação inicial:** um gateway, um worker e o banco. Observe a fila em vários instantes, inclusive durante o pico. A consulta abaixo mede apenas pacotes que já podem ser processados. Retentativas programadas para o futuro ficam fora dessa contagem.
+
+```sql
+SELECT count(*) AS prontos,
+       now() - min(available_at) AS espera_do_mais_antigo
+FROM raw_packets
+WHERE status = 'pending' AND available_at <= now();
+```
+
+Se a espera cresce de um minuto para o outro, verifique erros de processamento e saturação do PostgreSQL. Havendo capacidade no banco, é possível subir um segundo consumidor com `docker compose -f compose.services.yaml up -d --scale tracking-worker=2 tracking-worker` e comparar o tempo de drenagem. Réplicas na mesma máquina aproveitam capacidade disponível, mas compartilham o risco de indisponibilidade do host.
+
+Em operação contínua são **288.000 posições por dia**, ou **8,64 milhões em 30 dias**. Quando cada posição válida chega em um pacote único, crescem também as tabelas de recepções, mensagens, posições e eventos, além de seus índices. Meça o espaço real com uma amostra representativa para definir retenção, espaço de backup e margem para WAL. Para fechar o dimensionamento, repita o ensaio no hardware de homologação e inclua o perfil real de reconexão, lotes armazenados offline e indisponibilidade do banco.

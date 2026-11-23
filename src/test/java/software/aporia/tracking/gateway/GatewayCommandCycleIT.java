@@ -7,10 +7,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.io.TempDir;
 import software.aporia.tracking.protocol.suntech.FirmwareVersionRequest;
 import software.aporia.tracking.storage.command.DeviceCommandRepository;
@@ -215,6 +219,96 @@ class GatewayCommandCycleIT {
             }
         }
     }
+    /**
+     * Mede três rajadas de 200 posições em sockets persistentes, separadas por um minuto.
+     * O cronômetro inclui envio, ingestão e commit da última posição de cada rodada.
+     *
+     * @throws Exception se o ambiente isolado ou os processos do ensaio falharem
+     */
+    @Test
+    @EnabledIfEnvironmentVariable(named = "TRACKING_TEST_FLEET", matches = "200")
+    void processesTwoHundredDevicesEveryMinute() throws Exception {
+        final int fleetSize = 200;
+        Path log = runtime.resolve("fleet-gateway.log");
+        try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
+             var c = db.getConnection(); var gateway = start(TcpGateway.class, db, log);
+             var worker = start(WorkerApplication.class, db, runtime.resolve("fleet-worker.log"))) {
+            var listener = Pattern.compile("Tracking TCP Gateway listening on 127\\.0\\.0\\.1:(\\d+)");
+            await("Gateway did not start", () -> listener.matcher(Files.readString(log)).find());
+            var match = listener.matcher(Files.readString(log));
+            assertTrue(match.find());
+            int port = Integer.parseInt(match.group(1));
+            var identities = new ArrayList<String>();
+            // Uma associação e um ativo distintos garantem que last_positions represente os 200 veículos.
+            try (var insert = c.prepareStatement("""
+                    WITH fleet AS MATERIALIZED (
+                        SELECT gen_random_uuid() AS device, gen_random_uuid() AS asset,
+                               '0000000' || lpad(i::text, 3, '0') AS identity, ?::uuid AS tenant
+                        FROM generate_series(1, ?) i
+                    ), devices_added AS (
+                        INSERT INTO devices(id, tenant_id, protocol, identity)
+                        SELECT device, tenant, 'suntech', identity FROM fleet RETURNING id
+                    ), assets_added AS (
+                        INSERT INTO assets(id, tenant_id, name)
+                        SELECT asset, tenant, identity FROM fleet RETURNING id
+                    ), assigned AS (
+                        INSERT INTO assignments(id, tenant_id, device_id, asset_id, starts_at)
+                        SELECT gen_random_uuid(), tenant, device, asset, '2026-01-01 UTC'::timestamptz
+                        FROM fleet JOIN devices_added d ON d.id=device JOIN assets_added a ON a.id=asset
+                    ) SELECT identity FROM fleet ORDER BY identity
+                    """)) {
+                insert.setObject(1, fixture.tenantId());
+                insert.setInt(2, fleetSize);
+                try (var rows = insert.executeQuery()) {
+                    while (rows.next()) identities.add(rows.getString(1));
+                }
+            }
+            assertEquals(fleetSize, identities.size());
+            List<Socket> sockets = new ArrayList<>();
+            try {
+                for (int i = 0; i < fleetSize; i++) sockets.add(new Socket("127.0.0.1", port));
+                long first = System.nanoTime();
+                for (int round = 0; round < 3; round++) {
+                    TimeUnit.NANOSECONDS.sleep(first + TimeUnit.MINUTES.toNanos(round) - System.nanoTime());
+                    long start = System.nanoTime();
+                    String time = String.format(Locale.ROOT, "08:%02d:00", round);
+                    for (int i = 0; i < fleetSize; i++) {
+                        String frame = "STT;" + identities.get(i) + ";013831;20261120;" + time
+                                + ";-16.6700;-49.2500;45.5;1\r";
+                        sockets.get(i).getOutputStream().write(frame.getBytes(StandardCharsets.US_ASCII));
+                    }
+                    int expected = fleetSize * (round + 1);
+                    while (count(c, "positions", fixture.tenantId()) < expected) {
+                        assertTrue(gateway.process().isAlive() && worker.process().isAlive());
+                        assertTrue(System.nanoTime() - start < TimeUnit.MINUTES.toNanos(1),
+                                "Worker did not drain the burst within a minute");
+                        TimeUnit.MILLISECONDS.sleep(100);
+                    }
+                    long elapsed = System.nanoTime() - start;
+                    assertTrue(elapsed < TimeUnit.MINUTES.toNanos(1));
+                    assertEquals(expected, count(c, "raw_packets", fixture.tenantId()));
+                    assertEquals(expected, count(c, "positions", fixture.tenantId()));
+                    assertEquals(expected, count(c, "outbox_events", fixture.tenantId()));
+                    assertEquals(fleetSize, count(c, "last_positions", fixture.tenantId()));
+                    try (var check = c.prepareStatement("""
+                            SELECT count(*) FROM raw_packets
+                            WHERE tenant_id=? AND (status <> 'processed' OR attempts <> 1)
+                            """)) {
+                        check.setObject(1, fixture.tenantId());
+                        try (var row = check.executeQuery()) {
+                            row.next();
+                            assertEquals(0, row.getInt(1));
+                        }
+                    }
+                    System.out.printf(Locale.ROOT, "Frota 200: rodada %d, %.2f s, %d posições acumuladas%n",
+                            round + 1, elapsed / 1_000_000_000.0, expected);
+                }
+            } finally {
+                for (Socket socket : sockets) socket.close();
+            }
+        }
+    }
+
     /**
      * Exercita descoberta AVL, aprovação, ingestão, retransmissão e desabilitação na mesma porta
      * TCP.
