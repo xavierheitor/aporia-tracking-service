@@ -22,6 +22,11 @@ import software.aporia.tracking.support.TestFixtures;
 /** Executa consumidores concorrentes e verifica que cada pacote produz os efeitos esperados uma única vez. */
 class TrackingWorkerConcurrencyIT {
 
+    /**
+     * Executa dois consumidores e verifica que cada pacote produz seus efeitos uma única vez.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldProcessTwoPacketsConcurrentlyWithoutDuplication()
             throws Exception {
@@ -151,6 +156,14 @@ class TrackingWorkerConcurrencyIT {
         }
     }
 
+    /**
+     * Insere na fila o pacote bruto a ser disputado pelos consumidores.
+     *
+     * @param dataSource fonte de conexões JDBC para a operação
+     * @param fixtures cadastro de teste utilizado no cenário
+     * @param frame quadro recebido para interpretação ou ingestão
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private void insertPacket(
             javax.sql.DataSource dataSource,
             TestFixtures fixtures,
@@ -190,6 +203,15 @@ class TrackingWorkerConcurrencyIT {
         }
     }
 
+    /**
+     * Conta as linhas do tenant para detectar ausência ou duplicação de efeitos.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param sql instrução SQL executada na conexão de teste
+     * @param tenantId identificador do tenant que delimita a operação
+     * @return quantidade de registros no escopo da consulta
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private long count(
             Connection connection,
             String sql,

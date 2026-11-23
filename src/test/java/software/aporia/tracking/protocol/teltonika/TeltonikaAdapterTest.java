@@ -11,6 +11,12 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Verifica o login fragmentado e o processamento de exemplos binários dos codecs AVL suportados. */
 class TeltonikaAdapterTest {
     // Os bytes de referência são exemplos TCP publicados em Teltonika Data Sending Protocols.
+    /**
+     * Entrega o login e o lote em fragmentos, verifica os ACKs e altera o CRC para exercitar a
+     * rejeição do lote corrompido.
+     *
+     * @param wire lote AVL de referência em hexadecimal
+     */
     @ParameterizedTest
     @ValueSource(strings = {
         "000000000000003608010000016B40D8EA30010000000000000000000000000000000105021503010101425E0F01F10000601A014E0000000000000000010000C7CF",
@@ -30,6 +36,7 @@ class TeltonikaAdapterTest {
         assertArrayEquals(new byte[]{0,0,0,1}, session.acknowledge(packet));
         assertFalse(new TeltonikaAvl().decodePacket(packet.payload(), packet.deviceIdentity()).readings().getFirst().hasPosition());
         byte[] corrupt = packet.payload();
+        // A alteração de um único bit isola a verificação do CRC dos demais campos já válidos.
         corrupt[corrupt.length - 1] ^= 1;
         var error = assertThrows(IllegalArgumentException.class, () -> session.receive(corrupt));
         assertEquals("INVALID_TELTONIKA_AVL", error.getMessage());

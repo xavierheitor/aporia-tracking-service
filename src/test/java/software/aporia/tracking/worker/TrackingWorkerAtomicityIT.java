@@ -23,6 +23,11 @@ import software.aporia.tracking.support.TestFixtures;
 /** Provoca falha na outbox e verifica o rollback das gravações anteriores na mesma transação. */
 class TrackingWorkerAtomicityIT {
 
+    /**
+     * Provoca uma falha ao gravar o evento e confere o rollback dos efeitos anteriores.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRollbackEverythingWhenOutboxInsertFails()
             throws Exception {
@@ -181,6 +186,12 @@ class TrackingWorkerAtomicityIT {
     /**
      * Cria uma trigger que provoca falha somente para eventos pertencentes ao
      * tenant do teste.
+     *
+     * @param dataSource fonte de conexões JDBC para a operação
+     * @param functionName nome do objeto criado no schema isolado
+     * @param triggerName nome do objeto criado no schema isolado
+     * @param tenantId identificador do tenant que delimita a operação
+     * @throws SQLException se a operação JDBC falhar
      */
     private void createFailureTrigger(
             DataSource dataSource,
@@ -230,6 +241,11 @@ class TrackingWorkerAtomicityIT {
 
     /**
      * Remove a trigger e a função após o teste.
+     *
+     * @param dataSource fonte de conexões JDBC para a operação
+     * @param functionName nome do objeto criado no schema isolado
+     * @param triggerName nome do objeto criado no schema isolado
+     * @throws SQLException se a operação JDBC falhar
      */
     private void dropFailureTrigger(
             DataSource dataSource,
@@ -255,6 +271,12 @@ class TrackingWorkerAtomicityIT {
 
     /**
      * Conta registros relacionados ao teste.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param sql instrução SQL executada na conexão de teste
+     * @param parameter valores vinculados aos parâmetros SQL
+     * @return quantidade de registros no escopo da consulta
+     * @throws SQLException se a operação JDBC falhar
      */
     private long count(
             Connection connection,

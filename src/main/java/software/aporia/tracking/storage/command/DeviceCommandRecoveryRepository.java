@@ -14,6 +14,10 @@ public final class DeviceCommandRecoveryRepository {
     /**
      * Marca como expirados os comandos que atingiram o prazo ainda na fila e devolve o número de
      * linhas afetadas.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @return quantidade de comandos cujo estado foi atualizado
+     * @throws SQLException se a operação JDBC falhar
      */
     public int expireQueued(
             Connection connection
@@ -36,7 +40,14 @@ public final class DeviceCommandRecoveryRepository {
         }
     }
 
-    /** Invalida o token de reservas antigas e classifica o resultado como incerto. */
+    /**
+     * Invalida o token de reservas antigas e classifica o resultado como incerto.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param staleAfter idade mínima para que a reserva seja considerada antiga
+     * @return quantidade de comandos cujo estado foi atualizado
+     * @throws SQLException se a operação JDBC falhar
+     */
     public int markStaleSendingAsUnknown(
             Connection connection,
             Duration staleAfter
@@ -84,7 +95,14 @@ public final class DeviceCommandRecoveryRepository {
         }
     }
 
-    /** Recupera por idade as transmissões legadas sem proprietário registrado. */
+    /**
+     * Recupera por idade as transmissões legadas sem proprietário registrado.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param staleAfter idade mínima para que a reserva seja considerada antiga
+     * @return quantidade de comandos cujo estado foi atualizado
+     * @throws SQLException se a operação JDBC falhar
+     */
     public int markStaleTransmittingAsUnknown(
             Connection connection,
             Duration staleAfter
@@ -105,6 +123,7 @@ public final class DeviceCommandRecoveryRepository {
             );
         }
 
+        // O critério por idade só alcança transmissões legadas sem proprietário. Um emissor ativo pode estar pausado.
         String sql = """
         UPDATE device_commands
         SET status = 'delivery_unknown',
@@ -134,7 +153,14 @@ public final class DeviceCommandRecoveryRepository {
     }
 
 
-    /** Reconcilia transmissões interrompidas do emissor que detém o bloqueio exclusivo. */
+    /**
+     * Reconcilia transmissões interrompidas do emissor que detém o bloqueio exclusivo.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param owner proprietário do envio ou seu identificador persistido
+     * @return quantidade de comandos cujo estado foi atualizado
+     * @throws SQLException se a operação JDBC falhar
+     */
     public int recoverOwner(Connection connection, DispatchOwner owner) throws SQLException {
         try (var statement = connection.prepareStatement("""
                 UPDATE device_commands SET status='delivery_unknown', delivery_unknown_at=now(),
@@ -146,7 +172,13 @@ public final class DeviceCommandRecoveryRepository {
         }
     }
 
-    /** Encerra por timeout a espera pela resposta dos comandos enviados cujo prazo venceu. */
+    /**
+     * Encerra por timeout a espera pela resposta dos comandos enviados cujo prazo venceu.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @return quantidade de comandos cujo estado foi atualizado
+     * @throws SQLException se a operação JDBC falhar
+     */
     public int expireSent(Connection connection) throws SQLException {
         try (var statement = connection.prepareStatement("""
                 UPDATE device_commands SET status='timeout', error_code='RESPONSE_TIMEOUT', claim_token=NULL

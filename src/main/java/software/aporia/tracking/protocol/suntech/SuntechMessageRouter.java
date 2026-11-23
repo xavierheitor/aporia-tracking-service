@@ -5,7 +5,12 @@ import java.util.Objects;
 /** Converte as capacidades de um quadro Suntech no plano de processamento do pacote. */
 public final class SuntechMessageRouter {
 
-    /** Determina todos os processamentos aplicáveis ao conteúdo do quadro. */
+    /**
+     * Determina todos os processamentos aplicáveis ao conteúdo do quadro.
+     *
+     * @param payload bytes do conteúdo da mensagem
+     * @return plano com os processamentos aplicáveis à mensagem
+     */
     public MessageProcessingPlan route(byte[] payload) {
 
         Objects.requireNonNull(payload);

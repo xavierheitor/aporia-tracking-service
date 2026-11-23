@@ -26,19 +26,54 @@ import static software.aporia.tracking.command.dispatcher.CommandDispatcher.Disp
 
 /** Exercita a reserva e o resultado persistido da transmissão, inclusive quando a gravação da conclusão falha. */
 class CommandDispatcherIT {
+    /** Diretório temporário que isola os arquivos gerados pelo cenário. */
     @TempDir Path directory;
 
+    /**
+     * Representa a escrita controlada pelo cenário para reproduzir sucesso, interrupção ou falha.
+     */
     @FunctionalInterface
     private interface Writer {
+        /**
+         * Permite ao cenário decidir quantos bytes chegam ao destino antes de uma falha.
+         *
+         * @param bytes sequência de bytes usada na escrita
+         * @throws IOException se a operação de entrada ou saída falhar
+         */
         void send(byte[] bytes) throws IOException;
     }
 
+    /**
+     * Monta o dispatcher com banco real e um canal cujo comportamento o teste controla.
+     *
+     * @param db fonte de conexões JDBC para a operação
+     * @param owner proprietário do envio ou seu identificador persistido
+     * @param device cadastro de teste utilizado no cenário
+     * @param writer comportamento de escrita simulado na sessão
+     * @return dispatcher conectado ao canal controlado pelo cenário
+     */
     private CommandDispatcher dispatcher(DataSource db, DispatchOwner owner, TestFixtures device, Writer writer) {
         var endpoint = new CommandTransport.Endpoint() {
+            /**
+             * Informa o protocolo da sessão simulada.
+             *
+             * @return identificador do protocolo desta implementação
+             */
             @Override
             public String protocol() { return "suntech"; }
+            /**
+             * Associa a sessão simulada à identidade da fixture.
+             *
+             * @return identidade do equipamento no protocolo
+             */
             @Override
             public String identity() { return device.deviceIdentity(); }
+            /**
+             * Delega a escrita ao comportamento escolhido pelo cenário.
+             *
+             * @param bytes sequência de bytes usada na escrita
+             * @throws IOException se a operação de entrada ou saída falhar
+             */
             @Override
             public void send(byte[] bytes) throws IOException { writer.send(bytes); }
         };
@@ -47,6 +82,15 @@ class CommandDispatcherIT {
                         ? Optional.of(endpoint) : Optional.empty(), owner);
     }
 
+    /**
+     * Insere um comando legado para exercitar a política de envio.
+     *
+     * @param db fonte de conexões JDBC para a operação
+     * @param device cadastro de teste utilizado no cenário
+     * @param payload bytes do conteúdo da mensagem
+     * @return UUID do comando inserido
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private UUID enqueue(DataSource db, TestFixtures device, byte[] payload) throws Exception {
         try (var c = db.getConnection()) {
             return new DeviceCommandRepository().enqueue(c, device.tenantId(), device.deviceId(),
@@ -54,6 +98,14 @@ class CommandDispatcherIT {
         }
     }
 
+    /**
+     * Enfileira a consulta de firmware auditada dentro de uma transação.
+     *
+     * @param db fonte de conexões JDBC para a operação
+     * @param device cadastro de teste utilizado no cenário
+     * @return UUID da consulta de firmware
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private UUID requestFirmware(DataSource db, TestFixtures device) throws Exception {
         try (var c = db.getConnection()) {
             c.setAutoCommit(false);
@@ -64,12 +116,26 @@ class CommandDispatcherIT {
         }
     }
 
+    /**
+     * Consulta o resultado persistido no escopo do tenant.
+     *
+     * @param db fonte de conexões JDBC para a operação
+     * @param device cadastro de teste utilizado no cenário
+     * @param id identificador do registro consultado
+     * @return estado do comando consultado no banco de testes
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private String status(DataSource db, TestFixtures device, UUID id) throws Exception {
         try (var c = db.getConnection()) {
             return new DeviceCommandRepository().findStatus(c, device.tenantId(), id).orElseThrow();
         }
     }
 
+    /**
+     * Simula escrita parcial e distingue a entrega incerta da rejeição anterior ao envio.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void persistsPartialWriteAndRejectsUnapprovedAndWrongIdentity() throws Exception {
         try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
@@ -95,6 +161,12 @@ class CommandDispatcherIT {
         }
     }
 
+    /**
+     * Provoca falha no banco após a escrita e verifica que o erro continua visível sem
+     * retransmissão.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void databaseFailureAfterWriteIsVisibleAndNeverReplays() throws Exception {
         try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
@@ -122,6 +194,12 @@ class CommandDispatcherIT {
         }
     }
 
+    /**
+     * Pausa o emissor durante a escrita, exercita a exclusão entre proprietários e recupera a
+     * tentativa após reinício.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void anotherOwnerCannotRevokePausedWriterAndRestartRecoversCrashAfterWrite() throws Exception {
         Path ownerFile = directory.resolve("gateway");

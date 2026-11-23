@@ -13,10 +13,15 @@ import software.aporia.tracking.storage.Database;
  */
 public class WorkerApplication {
 
+    /** Registra eventos e falhas associados a esta classe. */
     private static final Logger log
             = LoggerFactory.getLogger(WorkerApplication.class);
 
-    /** Abre o pool de conexões e executa ciclos de processamento até o encerramento do processo. */
+    /**
+     * Abre o pool de conexões e executa ciclos de processamento até o encerramento do processo.
+     *
+     * @param args argumentos da linha de comando, atualmente ignorados
+     */
     @SuppressWarnings("SleepWhileInLoop") // Intervalos de polling e de recuperação após falha.
     public static void main(String[] args) {
 

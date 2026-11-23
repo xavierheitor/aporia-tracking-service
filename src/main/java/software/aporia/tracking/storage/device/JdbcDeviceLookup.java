@@ -17,21 +17,43 @@ import software.aporia.tracking.protocol.DeviceDescription;
  */
 public final class JdbcDeviceLookup {
 
+    /** Fonte de conexões JDBC usadas pela instância. */
     private final DataSource dataSource;
 
+    /**
+     * Recebe o pool usado na consulta de cadastro e na atualização da fila de descobertas.
+     *
+     * @param dataSource fonte de conexões JDBC para a operação
+     */
     public JdbcDeviceLookup(DataSource dataSource) {
         this.dataSource = Objects.requireNonNull(dataSource);
     }
 
-    /** Combina os dados do cadastro com a indicação de habilitação usada na admissão da conexão. */
+    /**
+     * Combina os dados do cadastro com a indicação de habilitação usada na admissão da conexão.
+     * @param device cadastro localizado por protocolo e identidade
+     * @param enabled indica se a conexão pode abrir sessão
+     */
     public record Registration(RegisteredDevice device, boolean enabled) {}
 
-    /** Retorna o dispositivo somente quando o cadastro está habilitado. */
+    /**
+     * Retorna o dispositivo somente quando o cadastro está habilitado.
+     *
+     * @param protocol identificador do protocolo do equipamento
+     * @param identity identidade declarada pelo rastreador no protocolo
+     * @return cadastro habilitado, quando encontrado
+     */
     public Optional<RegisteredDevice> findEnabled(String protocol, String identity) {
         return find(protocol, identity).filter(Registration::enabled).map(Registration::device);
     }
 
-    /** Distingue cadastro desabilitado de identidade desconhecida antes da descoberta. */
+    /**
+     * Distingue cadastro desabilitado de identidade desconhecida antes da descoberta.
+     *
+     * @param protocol identificador do protocolo do equipamento
+     * @param identity identidade declarada pelo rastreador no protocolo
+     * @return cadastro com seu estado de habilitação, se encontrado
+     */
     public Optional<Registration> find(
             String protocol,
             String identity
@@ -78,9 +100,14 @@ public final class JdbcDeviceLookup {
     /**
      * Insere a primeira observação ou atualiza a pendência do mesmo protocolo e identidade
      * enquanto aguarda aprovação.
+     *
+     * @param protocol identificador do protocolo do equipamento
+     * @param identity identidade declarada pelo rastreador no protocolo
+     * @param description marca, tipo e formato extraídos pelo adaptador do quadro validado
      */
     public void recordDiscovery(String protocol, String identity,
                                 DeviceDescription description) {
+        // Uma reconexão incrementa a mesma pendência. A aprovação encerra as atualizações desse registro.
         String sql = """
                 INSERT INTO device_discoveries AS q
                     (protocol, identity, manufacturer, device_type, wire_format, reported_model)

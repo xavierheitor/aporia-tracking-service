@@ -12,6 +12,15 @@ public class LastPositionRepository {
     /**
      * Insere a primeira posição ou avança o marcador para uma leitura mais recente. Retorna se
      * houve alteração.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param assetId identificador do ativo associado ao equipamento
+     * @param positionId identificador da posição no histórico
+     * @param recordedAt instante da leitura no equipamento
+     * @param receivedAt instante em que o gateway recebeu os bytes
+     * @return verdadeiro quando a última posição do ativo foi inserida ou atualizada
+     * @throws SQLException se a operação JDBC falhar
      */
     public boolean update(
             Connection connection,
@@ -21,6 +30,7 @@ public class LastPositionRepository {
             Instant recordedAt,
             Instant receivedAt
     ) throws SQLException {
+        // Pacotes antigos podem chegar depois da reconexão. Só uma leitura mais nova avança o marcador.
         String sql = """
             INSERT INTO last_positions (
                 tenant_id,

@@ -11,6 +11,9 @@ import org.junit.jupiter.api.Test;
 /** Verifica a validação do pacote e a proteção dos bytes contra alterações externas. */
 class RawPacketTest {
 
+    /**
+     * Confere protocolo, identidade e bytes de uma recepção válida.
+     */
     @Test
     void shouldCreateValidPacket() {
         RawPacket packet = new RawPacket(
@@ -26,6 +29,9 @@ class RawPacketTest {
         assertEquals(3, packet.payload().length);
     }
 
+    /**
+     * Exige ao menos um byte para criar um pacote bruto.
+     */
     @Test
     void shouldRejectEmptyPayload() {
         IllegalArgumentException exception = assertThrows(
@@ -42,6 +48,10 @@ class RawPacketTest {
         assertEquals("Invalid payload size", exception.getMessage());
     }
 
+    /**
+     * Altera separadamente o array de entrada e a cópia retornada para verificar a imutabilidade
+     * do pacote.
+     */
     @Test
     void shouldProtectPayloadFromModification() {
         byte[] bytes = {0x01, 0x02};
@@ -65,6 +75,9 @@ class RawPacketTest {
         assertEquals(0x01, packet.payload()[0]);
     }
 
+    /**
+     * Confere que o quadro conserva a versão escolhida para decodificação posterior.
+     */
     @Test
     void shouldPreserveDecoderVersion() {
 

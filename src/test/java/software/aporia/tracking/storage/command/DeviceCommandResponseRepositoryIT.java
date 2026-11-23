@@ -21,15 +21,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Verifica persistência transacional, duplicação e escopo das referências usadas nas respostas. */
 class DeviceCommandResponseRepositoryIT {
 
+    /**
+     * Obtém o pool do banco isolado usado para persistir respostas.
+     *
+     * @return pool de conexões configurado
+     */
     private static HikariDataSource dataSource() {
 
         return TestDatabase.createDataSource();
     }
 
+    /**
+     * Codifica o conteúdo da resposta simulada.
+     *
+     * @param value valor a interpretar
+     * @return bytes ASCII da mensagem de exemplo
+     */
     private static byte[] bytes(String value) {
         return value.getBytes(StandardCharsets.US_ASCII);
     }
 
+    /**
+     * Prepara os registros referenciados pela resposta do dispositivo.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @param packetId identificador da recepção bruta
+     * @param identity identidade declarada pelo rastreador no protocolo
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private void createFixture(
             Connection connection,
             UUID tenantId,
@@ -98,6 +119,11 @@ class DeviceCommandResponseRepositoryIT {
                                 }
     }
 
+    /**
+     * Exercita gravação e rollback dentro da transação do chamador.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldPersistResponseAndRollback() throws Exception {
 
@@ -198,6 +224,11 @@ class DeviceCommandResponseRepositoryIT {
         }
     }
 
+    /**
+     * Rejeita um tipo fora das respostas Suntech reconhecidas.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectInvalidResponseType() throws Exception {
 
@@ -222,6 +253,11 @@ class DeviceCommandResponseRepositoryIT {
         }
     }
 
+    /**
+     * Verifica que a resposta não pode referenciar um pacote de outro tenant.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectCrossTenantPacketReference() throws Exception {
 

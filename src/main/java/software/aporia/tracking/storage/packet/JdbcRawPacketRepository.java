@@ -15,10 +15,20 @@ import software.aporia.tracking.core.RawPacket;
 /** Converte registros de pacotes brutos entre a representação Java e a tabela de ingestão via JDBC. */
 public class JdbcRawPacketRepository implements RawPacketRepository {
 
+    /** Endereço JDBC do banco que armazena os pacotes. */
     private final String url;
+    /** Usuário informado ao driver JDBC. */
     private final String username;
+    /** Credencial usada ao abrir a conexão JDBC. */
     private final String password;
 
+    /**
+     * Guarda os parâmetros usados pelo DriverManager para abrir uma conexão a cada operação.
+     *
+     * @param url URL JDBC do banco de pacotes
+     * @param username usuário da conexão JDBC
+     * @param password credencial da conexão JDBC
+     */
     public JdbcRawPacketRepository(
             String url,
             String username,
@@ -29,9 +39,14 @@ public class JdbcRawPacketRepository implements RawPacketRepository {
         this.password = password;
     }
 
+    /**
+     * Vincula os campos do pacote aos parâmetros do INSERT e grava os bytes da recepção.
+     *
+     * @param packet pacote bruto a processar
+     */
     @Override
     public void save(RawPacket packet) {
-        //String sql de insert
+
         String sql = """
             INSERT INTO raw_packets (
                 id, protocol, device_identity,
@@ -40,23 +55,23 @@ public class JdbcRawPacketRepository implements RawPacketRepository {
             """;
 
         try (
-                //pede a conexao com o banco de dados
+
                 Connection connection = DriverManager.getConnection(
                         url, username, password
                 ); 
 
-                //escreve o sql com os dados corretos
                 PreparedStatement statement
                 = connection.prepareStatement(sql)) {
                     statement.setObject(1, packet.id());
                     statement.setString(2, packet.protocol());
                     statement.setString(3, packet.deviceIdentity());
                     statement.setBytes(4, packet.payload());
+                    // O driver recebe um offset explícito para conservar o instante da recepção em TIMESTAMPTZ.
                     statement.setObject(
                             5,
                             packet.receivedAt().atOffset(ZoneOffset.UTC)
                     );
-                    //executa o sql no banco
+
                     statement.executeUpdate();
 
                 } catch (SQLException e) {
@@ -66,6 +81,12 @@ public class JdbcRawPacketRepository implements RawPacketRepository {
                 }
     }
 
+    /**
+     * Reconstrói o pacote bruto a partir da linha identificada pelo UUID.
+     *
+     * @param id identificador do registro consultado
+     * @return pacote correspondente ao UUID, se encontrado
+     */
     @Override
     public Optional<RawPacket> findById(UUID id) {
         String sql = """

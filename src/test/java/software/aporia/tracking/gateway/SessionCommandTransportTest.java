@@ -17,9 +17,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Exercita o envio pela sessão do dispositivo e as falhas de transporte com sockets locais. */
 class SessionCommandTransportTest {
 
+    /** Protocolo configurado para o equipamento do teste. */
     private static final String PROTOCOL = "suntech";
+    /** Identidade do equipamento usada no cenário. */
     private static final String IDENTITY = "1234567890";
 
+    /**
+     * Consulta o transporte sem uma sessão registrada.
+     */
     @Test
     void shouldReportDisconnectedWhenSessionDoesNotExist() {
 
@@ -36,6 +41,9 @@ class SessionCommandTransportTest {
         );
     }
 
+    /**
+     * Exercita o erro de envio quando o dispositivo está offline.
+     */
     @Test
     void shouldRejectSendingWithoutSession() {
 
@@ -57,6 +65,11 @@ class SessionCommandTransportTest {
         assertEquals("DEVICE_SESSION_NOT_AVAILABLE", error.getMessage());
     }
 
+    /**
+     * Lê o socket do equipamento e compara todos os bytes enviados.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldSendExactBytesToConnectedDevice()
             throws Exception {
@@ -113,6 +126,11 @@ class SessionCommandTransportTest {
         }
     }
 
+    /**
+     * Verifica a recusa de uma sessão que já foi invalidada.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectInvalidatedSession()
             throws Exception {
@@ -159,6 +177,11 @@ class SessionCommandTransportTest {
         }
     }
 
+    /**
+     * Impede que o transporte selecione a sessão de outro tenant.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectCrossTenantAccess()
             throws Exception {
@@ -208,6 +231,12 @@ class SessionCommandTransportTest {
             assertEquals("DEVICE_SESSION_NOT_AVAILABLE", error.getMessage());
         }
     }
+    /**
+     * Substitui a sessão depois de selecionar o canal e verifica que a tentativa não migra para o
+     * novo socket.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void selectedEndpointNeverSwitchesToReplacementSocket() throws Exception {
         UUID tenant = UUID.randomUUID();

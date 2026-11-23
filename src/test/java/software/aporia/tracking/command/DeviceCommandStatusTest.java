@@ -8,6 +8,9 @@ import org.junit.jupiter.api.Test;
 /** Verifica quais transições são permitidas entre os estados do comando. */
 class DeviceCommandStatusTest {
 
+    /**
+     * Confere a passagem de queued para a reserva em sending.
+     */
     @Test
     void shouldAllowQueueToSending() {
         assertTrue(
@@ -17,6 +20,9 @@ class DeviceCommandStatusTest {
         );
     }
 
+    /**
+     * Confere que uma reserva pode iniciar a transmissão.
+     */
     @Test
     void shouldAllowSendingToTransmitting() {
         assertTrue(
@@ -26,6 +32,9 @@ class DeviceCommandStatusTest {
         );
     }
 
+    /**
+     * Permite concluir a escrita a partir de transmitting.
+     */
     @Test
     void shouldAllowTransmittingToSent() {
         assertTrue(
@@ -35,6 +44,9 @@ class DeviceCommandStatusTest {
         );
     }
 
+    /**
+     * Exige a etapa de transmissão antes de concluir a escrita.
+     */
     @Test
     void shouldRejectSendingDirectlyToSent() {
         assertFalse(
@@ -44,6 +56,9 @@ class DeviceCommandStatusTest {
         );
     }
 
+    /**
+     * Permite registrar uma resposta após a escrita local.
+     */
     @Test
     void shouldAllowSentToResponded() {
         assertTrue(
@@ -53,6 +68,9 @@ class DeviceCommandStatusTest {
         );
     }
 
+    /**
+     * Verifica a transição prevista para uma resposta tardia.
+     */
     @Test
     void shouldAllowLateResponse() {
         assertTrue(
@@ -62,6 +80,9 @@ class DeviceCommandStatusTest {
         );
     }
 
+    /**
+     * Impede que um comando respondido volte à fila.
+     */
     @Test
     void shouldRejectCompletedCommandRequeue() {
         assertFalse(
@@ -71,6 +92,9 @@ class DeviceCommandStatusTest {
         );
     }
 
+    /**
+     * Rejeita a passagem direta da fila para o estado respondido.
+     */
     @Test
     void shouldRejectInvalidTransition() {
         assertFalse(
@@ -80,6 +104,9 @@ class DeviceCommandStatusTest {
         );
     }
 
+    /**
+     * Converte o valor textual persistido no estado de domínio correspondente.
+     */
     @Test
     void shouldMapDatabaseStatus() {
         assertEquals(
@@ -88,6 +115,9 @@ class DeviceCommandStatusTest {
         );
     }
 
+    /**
+     * Permite classificar uma reserva interrompida como entrega incerta.
+     */
     @Test
     void shouldAllowSendingToDeliveryUnknown() {
         assertTrue(
@@ -97,6 +127,9 @@ class DeviceCommandStatusTest {
         );
     }
 
+    /**
+     * Impede recolocar automaticamente uma entrega incerta na fila.
+     */
     @Test
     void shouldNotAutomaticallyRetryUnknownDelivery() {
         assertFalse(
@@ -106,6 +139,9 @@ class DeviceCommandStatusTest {
         );
     }
 
+    /**
+     * Exercita a reconciliação de uma entrega incerta quando há confirmação posterior.
+     */
     @Test
     void shouldAllowReconciliationOfUnknownDelivery() {
         assertTrue(
@@ -115,6 +151,9 @@ class DeviceCommandStatusTest {
         );
     }
 
+    /**
+     * Reconhece o valor persistido de entrega incerta.
+     */
     @Test
     void shouldMapDeliveryUnknownFromDatabase() {
         assertEquals(

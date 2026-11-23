@@ -22,7 +22,7 @@ with socket.create_connection((HOST, PORT), timeout=5) as sock:
 
     time.sleep(2)
 
-    # Segundo pacote dividido em duas transmissões TCP
+    # O CR permanece na segunda metade. O gateway precisa guardar o fragmento até receber o delimitador.
     midpoint = len(FRAME) // 2
 
     sock.sendall(FRAME[:midpoint])

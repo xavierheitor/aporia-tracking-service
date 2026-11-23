@@ -19,6 +19,12 @@ import software.aporia.tracking.support.TestFixtures;
 /** Verifica que a ausência de associação ao ativo desfaz a mensagem parcial antes do reagendamento. */
 class TrackingWorkerRollbackIT {
 
+    /**
+     * Usa uma leitura fora da vigência da associação e verifica o rollback antes da nova
+     * tentativa.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRollbackMessageWhenAssignmentIsMissing()
             throws Exception {

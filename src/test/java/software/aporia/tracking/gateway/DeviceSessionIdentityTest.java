@@ -11,6 +11,11 @@ import org.junit.jupiter.api.Test;
 /** Verifica que uma conexão permanece vinculada à identidade declarada no início da sessão. */
 class DeviceSessionIdentityTest {
 
+    /**
+     * Monta a sessão com uma identidade conhecida para testar a validação.
+     *
+     * @return sessão vinculada à identidade de teste
+     */
     private DeviceSession createSession() {
         return new DeviceSession(
                 UUID.randomUUID(),
@@ -21,6 +26,9 @@ class DeviceSessionIdentityTest {
         );
     }
 
+    /**
+     * Permite a continuidade da conexão com a mesma identidade.
+     */
     @Test
     void shouldAcceptSameIdentity() {
         DeviceSession session = createSession();
@@ -30,6 +38,9 @@ class DeviceSessionIdentityTest {
         );
     }
 
+    /**
+     * Rejeita a mudança de identidade durante a conexão.
+     */
     @Test
     void shouldRejectDifferentIdentity() {
         DeviceSession session = createSession();
@@ -45,6 +56,9 @@ class DeviceSessionIdentityTest {
         );
     }
 
+    /**
+     * Rejeita identidade ausente dentro de uma sessão vinculada.
+     */
     @Test
     void shouldRejectNullIdentity() {
         DeviceSession session = createSession();

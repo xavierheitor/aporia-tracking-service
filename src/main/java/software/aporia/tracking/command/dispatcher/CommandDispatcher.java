@@ -21,15 +21,37 @@ public final class CommandDispatcher {
 
     /** Resultado observado pelo dispatcher. SENT indica que a escrita local terminou. */
     public enum DispatchResult {
-        DEVICE_OFFLINE, NO_COMMAND, SENT, DELIVERY_FAILED, DELIVERY_UNKNOWN, CLAIM_LOST
+        /** Nenhuma sessão disponível para iniciar o envio. */
+        DEVICE_OFFLINE,
+        /** A consulta da fila não encontrou uma solicitação elegível. */
+        NO_COMMAND,
+        /** A escrita local terminou e seu resultado foi registrado. */
+        SENT,
+        /** A tentativa foi encerrada antes de transmitir o comando. */
+        DELIVERY_FAILED,
+        /** A transmissão pode ter começado e seu resultado é incerto. */
+        DELIVERY_UNKNOWN,
+        /** O token da reserva deixou de autorizar a transição solicitada. */
+        CLAIM_LOST
     }
 
+    /** Fonte de conexões JDBC usadas pela instância. */
     private final DataSource dataSource;
+    /** Repositório utilizado para as operações sobre comandos. */
     private final DeviceCommandDispatchRepository repository;
+    /** Resolve o canal disponível para escrever no equipamento. */
     private final CommandTransport transport;
+    /** Proprietário cujo bloqueio delimita as tentativas deste emissor. */
     private final DispatchOwner owner;
 
-    /** Vincula a fila e o transporte ao proprietário responsável pelas tentativas deste emissor. */
+    /**
+     * Vincula a fila e o transporte ao proprietário responsável pelas tentativas deste emissor.
+     *
+     * @param dataSource fonte de conexões JDBC para a operação
+     * @param repository repositório que controla a reserva e suas transições
+     * @param transport canal usado para alcançar a sessão do dispositivo
+     * @param owner proprietário do envio ou seu identificador persistido
+     */
     public CommandDispatcher(DataSource dataSource, DeviceCommandDispatchRepository repository,
                              CommandTransport transport, DispatchOwner owner) {
         this.dataSource = Objects.requireNonNull(dataSource);
@@ -41,11 +63,17 @@ public final class CommandDispatcher {
     /**
      * Tenta enviar um comando do dispositivo. Quando ele está offline, a fila permanece
      * disponível para a próxima conexão.
+     *
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @return desfecho da tentativa observado pelo dispatcher
+     * @throws SQLException se a operação JDBC falhar
      */
     public DispatchResult dispatchNext(UUID tenantId, UUID deviceId) throws SQLException {
         synchronized (owner) {
             UUID ownerId = owner.id();
             var endpoint = transport.connect(tenantId, deviceId);
+            // O teste de disponibilidade precede a reserva para manter comandos offline na fila.
             if (endpoint.isEmpty()) return DispatchResult.DEVICE_OFFLINE;
 
             var session = endpoint.get();
@@ -71,6 +99,16 @@ public final class CommandDispatcher {
         }
     }
 
+    /**
+     * Verifica a política, confirma a autorização e escreve na sessão escolhida antes de
+     * persistir o resultado.
+     *
+     * @param command comando da tentativa em curso
+     * @param session sessão escolhida para a operação
+     * @param ownerId UUID persistido do emissor
+     * @return desfecho da tentativa observado pelo dispatcher
+     * @throws SQLException se a operação JDBC falhar
+     */
     private DispatchResult transmit(DeviceCommandDispatchRepository.ClaimedCommand command,
                                     CommandTransport.Endpoint session, UUID ownerId) throws SQLException {
         UUID tenantId = command.tenantId();
@@ -109,7 +147,11 @@ public final class CommandDispatcher {
         }
     }
 
-    /** Reconcilia tentativas interrompidas e prazos expirados sob a mesma exclusão usada no envio. */
+    /**
+     * Reconcilia tentativas interrompidas e prazos expirados sob a mesma exclusão usada no envio.
+     *
+     * @throws SQLException se a operação JDBC falhar
+     */
     public void recover() throws SQLException {
         synchronized (owner) {
             var recovery = new DeviceCommandRecoveryRepository();

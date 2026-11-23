@@ -2,6 +2,7 @@
 set -eu
 
 case "${1:-}" in
+    # A view omite identidades já aprovadas ou cadastradas por outra via.
     listar)
         [ "$#" -eq 1 ] || exit 2
         exec psql -X -v ON_ERROR_STOP=1 -c 'SELECT * FROM pending_device_discoveries ORDER BY last_seen_at DESC, id'

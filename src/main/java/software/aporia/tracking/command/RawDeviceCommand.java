@@ -20,8 +20,20 @@ public record RawDeviceCommand(
         byte[] payload
         ) {
 
+    /** Limite de bytes aceitos no conteúdo de um comando. */
     private static final int MAX_COMMAND_SIZE = 8192;
 
+    /**
+     * Valida o destinatário e o tamanho do comando e conserva uma cópia de seus bytes.
+     *
+     * @param commandId identificador do comando na fila
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @param protocol identificador do protocolo do equipamento
+     * @param payload bytes do conteúdo da mensagem
+     * @throws NullPointerException se algum componente for nulo
+     * @throws IllegalArgumentException se o protocolo estiver em branco ou o tamanho do payload for inválido
+     */
     public RawDeviceCommand {
 
         Objects.requireNonNull(commandId, "commandId");
@@ -46,6 +58,11 @@ public record RawDeviceCommand(
         payload = payload.clone();
     }
 
+    /**
+     * Entrega os bytes do comando em um array independente.
+     *
+     * @return cópia dos bytes protegidos pela instância
+     */
     @Override
     public byte[] payload() {
         return payload.clone();

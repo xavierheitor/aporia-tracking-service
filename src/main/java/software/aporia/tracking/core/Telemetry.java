@@ -3,7 +3,8 @@ package software.aporia.tracking.core;
 import java.time.Instant;
 
 /**
- * Reúne os campos de uma leitura. A presença de coordenadas permite distinguir uma posição de mensagens sem localização.
+ * Reúne os campos de uma leitura. A presença de coordenadas permite distinguir
+ * uma posição de mensagens sem localização.
  *
  * @param deviceIdentity identidade do equipamento no protocolo
  * @param recordedAt instante da leitura no equipamento
@@ -27,8 +28,13 @@ public record Telemetry(
         Boolean validFix
         ) {
 
-    /** Exige instante da leitura, ambas as coordenadas e indicação positiva de fixação GPS. */
-     public boolean hasPosition() {
+    /**
+     * Exige horário, latitude, longitude e indicação positiva de fixação GPS.
+     *
+     * @return true se a telemetria possui uma posição válida, false caso
+     * contrário
+     */
+    public boolean hasPosition() {
         return recordedAt != null
                 && latitude != null
                 && longitude != null

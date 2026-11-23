@@ -18,6 +18,14 @@ public record RegisteredDevice(
         String identity
         ) {
 
+    /**
+     * Exige os identificadores usados para vincular a conexão ao cadastro e ao tenant.
+     *
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @param protocol identificador do protocolo do equipamento
+     * @param identity identidade declarada pelo rastreador no protocolo
+     */
     public RegisteredDevice {
         Objects.requireNonNull(tenantId);
         Objects.requireNonNull(deviceId);

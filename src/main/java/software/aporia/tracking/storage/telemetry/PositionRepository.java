@@ -11,7 +11,21 @@ import software.aporia.tracking.core.Telemetry;
 /** Grava a posição geográfica da leitura com seus vínculos ao tenant, ao equipamento e ao ativo. */
 public class PositionRepository {
 
-    /** Grava uma leitura no histórico espacial usando a conexão da transação do chamador. */
+    /**
+     * Grava uma leitura no histórico espacial usando a conexão da transação do chamador.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param assetId identificador do ativo associado ao equipamento
+     * @param deviceId identificador do equipamento cadastrado
+     * @param messageId identificador da mensagem processada
+     * @param readingIndex índice da leitura dentro do pacote
+     * @param telemetry leitura interpretada pelo decodificador
+     * @param receivedAt instante em que o gateway recebeu os bytes
+     * @return UUID da posição inserida
+     * @throws SQLException se a operação JDBC falhar
+     * @throws IllegalArgumentException se a leitura não contiver posição válida
+     */
     public UUID save(
             Connection connection,
             UUID tenantId,
@@ -66,6 +80,7 @@ public class PositionRepository {
                     java.sql.Timestamp.from(receivedAt)
             );
 
+            // O PostGIS recebe X antes de Y. Em WGS 84 essa ordem corresponde a longitude e latitude.
             statement.setDouble(8, telemetry.longitude());
             statement.setDouble(9, telemetry.latitude());
 

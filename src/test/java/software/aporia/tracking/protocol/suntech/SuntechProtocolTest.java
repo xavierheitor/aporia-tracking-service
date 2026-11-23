@@ -12,6 +12,12 @@ import org.junit.jupiter.api.Test;
 /** Exercita os limites de enquadramento TCP e a extração de identidade dos formatos Suntech. */
 class SuntechProtocolTest {
 
+    /**
+     * Codifica os exemplos ASCII usados nos ensaios de enquadramento.
+     *
+     * @param value valor a interpretar
+     * @return bytes ASCII da mensagem de exemplo
+     */
     private byte[] ascii(String value) {
         return value.getBytes(StandardCharsets.US_ASCII);
     }
@@ -107,6 +113,9 @@ class SuntechProtocolTest {
         );
     }
 
+    /**
+     * Rejeita um cabeçalho que o protocolo não reconhece.
+     */
     @Test
     void shouldRejectUnsupportedHeader() {
 
@@ -125,6 +134,9 @@ class SuntechProtocolTest {
         );
     }
 
+    /**
+     * Rejeita bytes incompatíveis com o quadro textual Suntech.
+     */
     @Test
     void shouldRejectNonAsciiFrame() {
 
@@ -145,6 +157,9 @@ class SuntechProtocolTest {
         );
     }
 
+    /**
+     * Impede que um quadro ultrapasse o limite do buffer.
+     */
     @Test
     void shouldRejectOversizedFrame() {
 
@@ -164,6 +179,9 @@ class SuntechProtocolTest {
         );
     }
 
+    /**
+     * Exercita a fronteira inclusiva do tamanho máximo.
+     */
     @Test
     void shouldAcceptMaximumFrameSize() {
 
@@ -179,6 +197,9 @@ class SuntechProtocolTest {
         assertEquals(8192, frames.get(0).length);
     }
 
+    /**
+     * Extrai a identidade de uma resposta de programação.
+     */
     @Test
     void shouldIdentifyProgrammingResponse() {
 
@@ -192,6 +213,9 @@ class SuntechProtocolTest {
         );
     }
 
+    /**
+     * Localiza a identidade após o cabeçalho de telemetria embutida.
+     */
     @Test
     void shouldIdentifyEmbeddedTelemetryResponse() {
 
@@ -206,6 +230,9 @@ class SuntechProtocolTest {
         );
     }
 
+    /**
+     * Confere a posição da identidade em uma resposta simples.
+     */
     @Test
     void shouldIdentifyNormalCommandResponse() {
 
@@ -219,6 +246,9 @@ class SuntechProtocolTest {
         );
     }
 
+    /**
+     * Rejeita uma resposta composta que omite a identidade.
+     */
     @Test
     void shouldRejectEmbeddedResponseWithoutIdentity() {
 

@@ -14,17 +14,26 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class SessionRegistry {
 
+    /**
+     * * Identifica a entrada de uma sessão pela combinação de tenant e dispositivo.
+     * @param tenantId tenant proprietário do equipamento
+     * @param deviceId equipamento cuja conexão ocupa a entrada
+     */
     private record DeviceKey(
             UUID tenantId,
             UUID deviceId
             ) {}
 
+    /** Registro que associa tenant e dispositivo à sessão atual. */
     private final Map<DeviceKey, DeviceSession> sessions
             = new ConcurrentHashMap<>();
 
     /**
      * Instala a nova sessão e devolve a anterior, quando houver, para que o chamador feche o
      * socket substituído.
+     *
+     * @param session sessão escolhida para a operação
+     * @return sessão substituída, se havia outra conexão para o equipamento
      */
     public Optional<DeviceSession> register(DeviceSession session) {
 
@@ -51,7 +60,13 @@ public final class SessionRegistry {
         return Optional.ofNullable(replaced.get());
     }
 
-    /** Consulta a sessão do dispositivo dentro do tenant informado. */
+    /**
+     * Consulta a sessão do dispositivo dentro do tenant informado.
+     *
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @return sessão registrada para o equipamento, se houver
+     */
     public Optional<DeviceSession> find(
             UUID tenantId,
             UUID deviceId
@@ -61,7 +76,11 @@ public final class SessionRegistry {
         );
     }
 
-    /** Remove a sessão apenas se ela ainda ocupar a entrada, preservando uma eventual reconexão. */
+    /**
+     * Remove a sessão apenas se ela ainda ocupar a entrada, preservando uma eventual reconexão.
+     *
+     * @param session sessão escolhida para a operação
+     */
     public void unregister(DeviceSession session) {
 
         Objects.requireNonNull(session);
@@ -72,19 +91,35 @@ public final class SessionRegistry {
         );
 
         session.invalidate();
+        // A comparação da instância preserva a sessão nova se a antiga terminar depois da reconexão.
         sessions.remove(key, session);
     }
 
-    /** Obtém uma cópia das sessões registradas para a rodada de envio. */
+    /**
+     * Obtém uma cópia das sessões registradas para a rodada de envio.
+     *
+     * @return cópia das sessões registradas no momento da consulta
+     */
     public List<DeviceSession> onlineSessions() {
         return List.copyOf(sessions.values());
     }
 
+    /**
+     * Conta as entradas atualmente registradas para diagnóstico e verificação do ciclo de
+     * conexão.
+     *
+     * @return quantidade de sessões registradas
+     */
     public int size() {
         return sessions.size();
     }
 
-    /** Compara a instância recebida com a sessão atualmente registrada para o mesmo equipamento. */
+    /**
+     * Compara a instância recebida com a sessão atualmente registrada para o mesmo equipamento.
+     *
+     * @param session sessão escolhida para a operação
+     * @return verdadeiro se a instância ainda é a sessão registrada sob a chave
+     */
     public boolean isCurrent(DeviceSession session) {
 
         Objects.requireNonNull(session);

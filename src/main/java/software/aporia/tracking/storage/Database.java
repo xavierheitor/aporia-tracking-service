@@ -6,10 +6,17 @@ import com.zaxxer.hikari.HikariDataSource;
 /** Configura o pool JDBC usado pelos processos a partir das variáveis de ambiente do serviço. */
 public final class Database{
 
+    /**
+     * Concentra a criação do pool JDBC no método de fábrica.
+     */
     private Database() {
     }
 
-    /** Cria o pool JDBC com as credenciais e o endereço fornecidos pelo ambiente. */
+    /**
+     * Cria o pool JDBC com as credenciais e o endereço fornecidos pelo ambiente.
+     *
+     * @return pool de conexões configurado
+     */
     public static HikariDataSource createDataSource(){
        String url = System.getenv().getOrDefault(
             "TRACKING_DB_URL",

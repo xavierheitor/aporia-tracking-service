@@ -14,15 +14,25 @@ import org.junit.jupiter.api.Test;
 /** Exercita a seleção do validador e a verificação do destinatário de comandos Suntech. */
 class CommandValidatorRegistryTest {
 
+    /** Registro de implementações exercitado pelo cenário. */
     private final CommandValidatorRegistry registry =
             new CommandValidatorRegistry(
                     List.of(new SuntechCommandValidator())
             );
 
+    /**
+     * Converte a mensagem de exemplo nos bytes ASCII transmitidos pelo rastreador.
+     *
+     * @param value valor a interpretar
+     * @return bytes ASCII da mensagem de exemplo
+     */
     private static byte[] ascii(String value) {
         return value.getBytes(StandardCharsets.US_ASCII);
     }
 
+    /**
+     * Valida o comando usando o validador registrado para Suntech.
+     */
     @Test
     void shouldValidateSuntechCommand() {
 
@@ -35,6 +45,9 @@ class CommandValidatorRegistryTest {
         );
     }
 
+    /**
+     * Verifica o reconhecimento da sintaxe de programação pelo registro.
+     */
     @Test
     void shouldValidateProgramCommand() {
 
@@ -47,6 +60,9 @@ class CommandValidatorRegistryTest {
         );
     }
 
+    /**
+     * Confere o destinatário quando a chamada inclui a identidade esperada.
+     */
     @Test
     void shouldValidateDeviceIdentity() {
 
@@ -63,6 +79,9 @@ class CommandValidatorRegistryTest {
         );
     }
 
+    /**
+     * Rejeita um comando endereçado a outro dispositivo.
+     */
     @Test
     void shouldRejectDifferentDeviceIdentity() {
 
@@ -85,6 +104,9 @@ class CommandValidatorRegistryTest {
         );
     }
 
+    /**
+     * Rejeita bytes incompatíveis com o formato ASCII do comando.
+     */
     @Test
     void shouldRejectInvalidAscii() {
 
@@ -98,6 +120,9 @@ class CommandValidatorRegistryTest {
         assertEquals("INVALID_COMMAND_ASCII", error.getMessage());
     }
 
+    /**
+     * Confere a rejeição de uma mensagem com estrutura de comando inválida.
+     */
     @Test
     void shouldRejectMalformedCommand() {
 
@@ -111,6 +136,9 @@ class CommandValidatorRegistryTest {
         assertEquals("INVALID_COMMAND_FORMAT", error.getMessage());
     }
 
+    /**
+     * Verifica o erro ao solicitar um protocolo sem validador.
+     */
     @Test
     void shouldRejectUnknownProtocol() {
 
@@ -124,6 +152,9 @@ class CommandValidatorRegistryTest {
         assertEquals("UNSUPPORTED_COMMAND_PROTOCOL: teltonika", error.getMessage());
     }
 
+    /**
+     * Impede que dois validadores disputem o mesmo identificador de protocolo.
+     */
     @Test
     void shouldRejectDuplicateValidators() {
 

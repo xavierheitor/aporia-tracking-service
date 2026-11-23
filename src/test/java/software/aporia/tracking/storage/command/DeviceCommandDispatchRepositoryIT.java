@@ -23,12 +23,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Verifica reserva concorrente, autorização condicional, rollback e revogação do token no PostgreSQL. */
 class DeviceCommandDispatchRepositoryIT {
 
+    /** Entrada da fila usada para preparar as solicitações de teste. */
     private final DeviceCommandRepository commands
             = new DeviceCommandRepository();
 
+    /** Repositório que permite ao cenário simular reserva e transmissão. */
     private final DeviceCommandDispatchRepository dispatcher
             = new DeviceCommandDispatchRepository();
 
+    /**
+     * Verifica que a mesma solicitação só pode ser reservada uma vez.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldClaimCommandOnlyOnce() throws Exception {
 
@@ -94,6 +101,11 @@ class DeviceCommandDispatchRepositoryIT {
         }
     }
 
+    /**
+     * Exige uma transação aberta para adquirir a reserva.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRequireExplicitTransaction() throws Exception {
 
@@ -109,6 +121,11 @@ class DeviceCommandDispatchRepositoryIT {
         }
     }
 
+    /**
+     * Mantém duas conexões concorrentes e verifica que a segunda ignora o registro bloqueado.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldNotClaimLockedCommandFromAnotherConnection()
             throws Exception {
@@ -164,6 +181,11 @@ class DeviceCommandDispatchRepositoryIT {
         }
     }
 
+    /**
+     * Confere que desfazer a transação libera o comando para nova reserva.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldReleaseClaimAfterRollback()
             throws Exception {
@@ -218,6 +240,11 @@ class DeviceCommandDispatchRepositoryIT {
         }
     }
 
+    /**
+     * Rejeita a conclusão feita com um token diferente do persistido.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectInvalidClaimToken() throws Exception {
 
@@ -275,6 +302,11 @@ class DeviceCommandDispatchRepositoryIT {
         }
     }
 
+    /**
+     * Confere a transição para sent quando a tentativa autorizada possui o token.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldMarkSentWithValidClaimToken() throws Exception {
 
@@ -350,6 +382,11 @@ class DeviceCommandDispatchRepositoryIT {
         }
     }
 
+    /**
+     * Revoga a reserva e verifica que o emissor antigo perde o direito de concluí-la.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectClaimTokenAfterRecovery()
             throws Exception {
@@ -498,6 +535,11 @@ class DeviceCommandDispatchRepositoryIT {
         }
     }
 
+    /**
+     * Confere o início da transmissão com o token da reserva atual.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldAuthorizeTransmissionWithValidToken()
             throws Exception {
@@ -567,6 +609,11 @@ class DeviceCommandDispatchRepositoryIT {
         }
     }
 
+    /**
+     * Rejeita o início da transmissão com um token obsoleto.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectTransmissionWithInvalidToken()
             throws Exception {
@@ -622,6 +669,11 @@ class DeviceCommandDispatchRepositoryIT {
         }
     }
 
+    /**
+     * Restringe a seleção da fila ao dispositivo indicado.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldClaimCommandForSpecificDevice()
             throws Exception {

@@ -21,6 +21,11 @@ import software.aporia.tracking.support.TestFixtures;
 /** Acompanha um pacote pelas tentativas de processamento até sua rejeição definitiva. */
 class TrackingWorkerRetryIT {
 
+    /**
+     * Antecipa o próximo processamento em cada ciclo até atingir a quinta tentativa e a rejeição.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRetryAndRejectAfterFiveAttempts() throws Exception {
         try (

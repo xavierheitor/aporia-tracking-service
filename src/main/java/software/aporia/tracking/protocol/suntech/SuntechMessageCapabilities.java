@@ -7,10 +7,19 @@ import java.util.Set;
 /** Identifica as capacidades combinadas de uma mensagem Suntech a partir de seu conteúdo. */
 public final class SuntechMessageCapabilities {
 
+    /**
+     * Restringe a classificação ao método estático, que interpreta cada mensagem
+     * independentemente.
+     */
     private SuntechMessageCapabilities() {
     }
 
-    /** Reconhece os conteúdos que podem coexistir no mesmo quadro. */
+    /**
+     * Reconhece os conteúdos que podem coexistir no mesmo quadro.
+     *
+     * @param payload bytes do conteúdo da mensagem
+     * @return conjunto de capacidades reconhecidas
+     */
     public static ProtocolMessageCapabilities classify(
             byte[] payload
     ) {
@@ -44,6 +53,7 @@ public final class SuntechMessageCapabilities {
             case "RPR" ->
                 capabilities.add(MessageCapability.COMMAND_RESPONSE);
 
+            // RES pode trazer uma posição embutida e ainda precisa aparecer no histórico de respostas.
             case "RES" -> {
                 capabilities.add(MessageCapability.COMMAND_RESPONSE);
 

@@ -12,6 +12,9 @@ import org.junit.jupiter.api.Test;
 /** Exercita a seleção de adaptadores e a rejeição de registros conflitantes. */
 class ProtocolRegistryTest {
 
+    /**
+     * Resolve o adaptador pelo identificador registrado.
+     */
     @Test
     void shouldResolveRegisteredAdapter() {
 
@@ -27,6 +30,9 @@ class ProtocolRegistryTest {
         );
     }
 
+    /**
+     * Rejeita um protocolo sem adaptador disponível.
+     */
     @Test
     void shouldRejectUnknownProtocol() {
 
@@ -41,6 +47,9 @@ class ProtocolRegistryTest {
         assertEquals("Unsupported protocol: unknown", error.getMessage());
     }
 
+    /**
+     * Impede a substituição silenciosa de um adaptador de mesmo identificador.
+     */
     @Test
     void shouldRejectDuplicateProtocolIds() {
 

@@ -22,9 +22,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Inicia gateway e worker em processos separados para observar descoberta, aprovação, ingestão e envio de comandos pelo socket. */
 class GatewayCommandCycleIT {
+    /** Diretório temporário que isola os arquivos gerados pelo cenário. */
     @TempDir Path runtime;
 
+    /**
+     * * Controla o ciclo de vida de uma JVM iniciada pelo teste.
+     * @param process processo filho iniciado para o ensaio
+     */
     private record Service(Process process) implements AutoCloseable {
+        /**
+         * Solicita o encerramento do processo filho e aguarda até o limite do cenário.
+         */
         @Override public void close() {
             process.destroy();
             try {
@@ -40,6 +48,15 @@ class GatewayCommandCycleIT {
         }
     }
 
+    /**
+     * Inicia gateway ou worker com a conexão do schema isolado e captura seus logs.
+     *
+     * @param main classe com o ponto de entrada do processo filho
+     * @param db fonte de conexões JDBC para a operação
+     * @param log arquivo que recebe a saída do processo de teste
+     * @return processo filho acompanhado pelo cenário
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private Service start(Class<?> main, HikariDataSource db, Path log) throws Exception {
         var java = Path.of(System.getProperty("java.home"), "bin", "java");
         var builder = new ProcessBuilder(java.toString(), "-cp",
@@ -56,6 +73,13 @@ class GatewayCommandCycleIT {
     }
 
     // Os processos são externos à JVM de teste. A espera intercala consultas até o prazo de dez segundos.
+    /**
+     * Repete a observação até a condição se cumprir ou o prazo expirar.
+     *
+     * @param description descrição da observação
+     * @param predicate condição observada até o prazo do cenário
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @SuppressWarnings("SleepWhileInLoop")
     private void await(String description, Callable<Boolean> predicate) throws Exception {
         long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
@@ -66,6 +90,15 @@ class GatewayCommandCycleIT {
         fail(description);
     }
 
+    /**
+     * Conta os registros da tabela no tenant do cenário.
+     *
+     * @param c conexão JDBC usada pelo chamador
+     * @param table tabela consultada pelo cenário
+     * @param tenant identificador do tenant que delimita a operação
+     * @return quantidade de registros no escopo da consulta
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private int count(Connection c, String table, UUID tenant) throws Exception {
         try (var s = c.prepareStatement("SELECT count(*) FROM " + table + " WHERE tenant_id=?")) {
             s.setObject(1, tenant);
@@ -76,6 +109,17 @@ class GatewayCommandCycleIT {
         }
     }
 
+    /**
+     * Persiste a consulta de firmware com a chave idempotente da requisição.
+     *
+     * @param db fonte de conexões JDBC para a operação
+     * @param fixture cadastro de teste utilizado no cenário
+     * @param tenant identificador do tenant que delimita a operação
+     * @param principal identificador do solicitante auditado
+     * @param key chave que identifica repetições da mesma solicitação
+     * @return UUID da consulta, ou nulo se o dispositivo não for elegível
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private UUID enqueue(HikariDataSource db, TestFixtures fixture, UUID tenant, UUID principal, UUID key)
             throws Exception {
         try (var c = db.getConnection()) {
@@ -86,6 +130,12 @@ class GatewayCommandCycleIT {
         }
     }
 
+    /**
+     * Percorre enfileiramento offline, reconexão, envio e respostas sem correlação pelas entradas
+     * reais do serviço.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void offlineQueueReconnectAndUncorrelatedResponsesThroughProductionEntryPoints() throws Exception {
         Path log = runtime.resolve("gateway.log");
@@ -165,6 +215,15 @@ class GatewayCommandCycleIT {
             }
         }
     }
+    /**
+     * Exercita descoberta AVL, aprovação, ingestão, retransmissão e desabilitação na mesma porta
+     * TCP.
+     *
+     * @param port porta TCP atribuída ao gateway de teste
+     * @param c conexão JDBC usada pelo chamador
+     * @param fixture cadastro de teste utilizado no cenário
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private void verifyAvl(int port, Connection c, TestFixtures fixture) throws Exception {
         String imei = "35000" + fixture.deviceIdentity();
         var hex = java.util.HexFormat.of();

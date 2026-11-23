@@ -15,23 +15,51 @@ import java.util.List;
  */
 public final class SuntechAdapter implements ProtocolAdapter {
 
+    /**
+     * Reconhece os prefixos ASCII que podem iniciar uma mensagem Suntech.
+     *
+     * @param first primeiro byte da conexão, interpretado sem sinal
+     * @return verdadeiro quando o prefixo é compatível com o adaptador
+     */
     @Override public boolean acceptsFirstByte(int first) { return first == 'S' || first == 'A' || first == 'R'; }
 
+    /**
+     * Fornece o identificador Suntech usado na consulta de cadastro.
+     *
+     * @return identificador do protocolo desta implementação
+     */
     @Override
     public String protocolId() {
         return "suntech";
     }
 
+    /**
+     * Escolhe a versão registrada junto ao pacote bruto.
+     *
+     * @return versão usada para interpretar os bytes persistidos
+     */
     @Override
     public String decoderVersion() {
         return "suntech-ascii-v3";
     }
 
+    /**
+     * Abre um buffer de enquadramento próprio para esta conexão.
+     *
+     * @return sessão de protocolo com estado independente
+     */
     @Override
     public ProtocolSession newSession() {
         return new SuntechSession();
     }
 
+    /**
+     * Valida o conteúdo e consulta o mapa de campos para extrair o código do modelo quando
+     * presente.
+     *
+     * @param frame quadro recebido para interpretação ou ingestão
+     * @return metadados que podem compor a pendência de autorização
+     */
     @Override
     public DeviceDescription describe(ProtocolFrame frame) {
         byte[] payload = frame.payload();
@@ -54,12 +82,22 @@ public final class SuntechAdapter implements ProtocolAdapter {
         return new DeviceDescription("Suntech", "gps_tracker", "Suntech ASCII", model);
     }
 
+    /**
+     * Mantém o enquadrador ASCII de uma conexão Suntech.
+     */
     private static final class SuntechSession
             implements ProtocolSession {
 
+        /** Enquadrador Suntech usado para reconhecer a identidade do quadro. */
         private final SuntechProtocol protocol
                 = new SuntechProtocol();
 
+        /**
+         * Converte cada mensagem delimitada por CR em um quadro com identidade e cabeçalho.
+         *
+         * @param incoming bytes disponíveis nesta leitura TCP, possivelmente um fragmento
+         * @return quadros completos nesta leitura, em ordem de recepção
+         */
         @Override
         public List<ProtocolFrame> receive(byte[] incoming) {
 

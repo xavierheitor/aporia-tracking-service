@@ -11,9 +11,14 @@ import java.util.Objects;
  */
 public final class ProtocolRegistry {
 
+    /** Adaptadores disponíveis para seleção por identificador ou prefixo. */
     private final Map<String, ProtocolAdapter> adapters;
 
-    /** Constrói o índice de adaptadores e rejeita identificadores vazios ou repetidos. */
+    /**
+     * Constrói o índice de adaptadores e rejeita identificadores vazios ou repetidos.
+     *
+     * @param registeredAdapters adaptadores disponíveis para seleção
+     */
     public ProtocolRegistry(
             Collection<? extends ProtocolAdapter> registeredAdapters
     ) {
@@ -47,6 +52,11 @@ public final class ProtocolRegistry {
     /**
      * Seleciona o único adaptador que aceita o prefixo recebido. Falha quando nenhum ou vários o
      * reconhecem.
+     *
+     * @param first primeiro byte da conexão, interpretado sem sinal
+     * @return único adaptador que aceita o prefixo
+     * @throws IllegalStateException se mais de um adaptador reconhecer o prefixo
+     * @throws IllegalArgumentException se nenhum protocolo reconhecer o prefixo
      */
     public ProtocolAdapter detect(int first) {
         ProtocolAdapter selected = null;
@@ -60,7 +70,12 @@ public final class ProtocolRegistry {
         return selected;
     }
 
-    /** Resolve o adaptador pelo identificador configurado. */
+    /**
+     * Resolve o adaptador pelo identificador configurado.
+     *
+     * @param protocolId identificador do protocolo do equipamento
+     * @return adaptador registrado para o protocolo
+     */
     public ProtocolAdapter get(String protocolId) {
 
         ProtocolAdapter adapter = adapters.get(protocolId);

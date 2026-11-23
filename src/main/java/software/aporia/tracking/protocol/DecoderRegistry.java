@@ -11,9 +11,14 @@ import java.util.Objects;
  */
 public final class DecoderRegistry {
 
+    /** Decodificadores indexados pela versão persistida junto ao pacote. */
     private final Map<String, TelemetryDecoder> decoders;
 
-    /** Indexa os decodificadores por versão e rejeita colisões no registro. */
+    /**
+     * Indexa os decodificadores por versão e rejeita colisões no registro.
+     *
+     * @param registeredDecoders decodificadores indexados por versão
+     */
     public DecoderRegistry(
             Collection<? extends TelemetryDecoder> registeredDecoders
     ) {
@@ -44,7 +49,12 @@ public final class DecoderRegistry {
 
     }
 
-    /** Resolve a versão gravada no pacote bruto. Uma versão desconhecida impede a decodificação. */
+    /**
+     * Resolve a versão gravada no pacote bruto. Uma versão desconhecida impede a decodificação.
+     *
+     * @param decoderVersion versão do decodificador vinculada ao pacote
+     * @return decodificador associado à versão
+     */
     public TelemetryDecoder get(String decoderVersion) {
 
         TelemetryDecoder decoder = decoders.get(decoderVersion);

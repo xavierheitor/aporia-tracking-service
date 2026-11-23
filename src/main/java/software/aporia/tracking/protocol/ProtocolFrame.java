@@ -19,6 +19,14 @@ public record ProtocolFrame(
         boolean acknowledgmentRequired
 ) {
 
+    /**
+     * Copia os bytes emitidos pela sessão antes que seu buffer volte a receber dados.
+     *
+     * @param deviceIdentity identidade declarada pelo rastreador no protocolo
+     * @param payload bytes do conteúdo da mensagem
+     * @param messageType tipo declarado no cabeçalho da mensagem
+     * @param acknowledgmentRequired indica se o protocolo solicita confirmação
+     */
     public ProtocolFrame {
         Objects.requireNonNull(deviceIdentity, "deviceIdentity");
         Objects.requireNonNull(payload, "payload");
@@ -27,8 +35,18 @@ public record ProtocolFrame(
         payload = Arrays.copyOf(payload, payload.length);
     }
 
+    /**
+     * Identifica a etapa de login para que o gateway escolha a resposta de admissão.
+     *
+     * @return verdadeiro para um quadro de login
+     */
     public boolean isLogin() { return "LOGIN".equals(messageType); }
 
+    /**
+     * Entrega uma cópia dos bytes preservados no quadro.
+     *
+     * @return cópia dos bytes protegidos pela instância
+     */
     @Override
     public byte[] payload() {
         return Arrays.copyOf(payload, payload.length);

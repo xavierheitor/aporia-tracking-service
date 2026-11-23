@@ -17,6 +17,13 @@ public final class DeviceCommandDispatchRepository {
     /**
      * Reserva identificada pelo token exigido nas transições seguintes. Os bytes são copiados
      * para preservar a tentativa.
+     * @param id UUID do comando reservado
+     * @param tenantId tenant da reserva
+     * @param deviceId equipamento de destino
+     * @param protocol protocolo de saída
+     * @param payload bytes reservados para a escrita
+     * @param attempts número da tentativa
+     * @param claimToken token exigido nas transições condicionais
      */
     public record ClaimedCommand(
             UUID id,
@@ -28,6 +35,17 @@ public final class DeviceCommandDispatchRepository {
             UUID claimToken
             ) {
 
+        /**
+         * Protege os bytes reservados contra alterações entre a reserva e a autorização.
+         *
+         * @param id identificador do registro consultado
+         * @param tenantId identificador do tenant que delimita a operação
+         * @param deviceId identificador do equipamento cadastrado
+         * @param protocol identificador do protocolo do equipamento
+         * @param payload bytes do conteúdo da mensagem
+         * @param attempts número de tentativas associado à operação
+         * @param claimToken token que identifica a reserva vigente
+         */
         public ClaimedCommand {
             Objects.requireNonNull(id);
             Objects.requireNonNull(tenantId);
@@ -39,11 +57,22 @@ public final class DeviceCommandDispatchRepository {
             payload = payload.clone();
         }
 
+        /**
+         * Entrega uma cópia dos bytes associados à tentativa.
+         *
+         * @return cópia dos bytes protegidos pela instância
+         */
         @Override
         public byte[] payload() {
             return payload.clone();
         }
 
+        /**
+         * Resume a reserva para diagnóstico, expondo o tamanho do payload e omitindo seu conteúdo
+         * e o token.
+         *
+         * @return resumo da reserva sem expor os bytes nem o token
+         */
         @Override
         public String toString() {
             return "ClaimedCommand[id=" + id
@@ -56,7 +85,13 @@ public final class DeviceCommandDispatchRepository {
         }
     }
 
-    /** Reserva um comando elegível na transação do chamador. */
+    /**
+     * Reserva um comando elegível na transação do chamador.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @return comando reservado com seu token, ou vazio se nenhum for elegível
+     * @throws SQLException se a operação JDBC falhar
+     */
     public Optional<ClaimedCommand> claimNext(
             Connection connection
     ) throws SQLException {
@@ -67,6 +102,13 @@ public final class DeviceCommandDispatchRepository {
     /**
      * Registra a escrita local concluída se a tentativa ainda detiver o token e estiver em
      * transmissão.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param commandId identificador do comando na fila
+     * @param claimToken token que identifica a reserva vigente
+     * @return verdadeiro se a transição condicional alterou a linha da tentativa
+     * @throws SQLException se a operação JDBC falhar
      */
     public boolean markSent(
             Connection connection,
@@ -101,7 +143,16 @@ public final class DeviceCommandDispatchRepository {
         }
     }
 
-    /** Condiciona o início da transmissão ao estado da reserva e ao token da tentativa. */
+    /**
+     * Condiciona o início da transmissão ao estado da reserva e ao token da tentativa.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param commandId identificador do comando na fila
+     * @param claimToken token que identifica a reserva vigente
+     * @return verdadeiro se a transição condicional alterou a linha da tentativa
+     * @throws SQLException se a operação JDBC falhar
+     */
     public boolean authorizeTransmission(
             Connection connection,
             UUID tenantId,
@@ -112,7 +163,18 @@ public final class DeviceCommandDispatchRepository {
         return authorizeTransmission(connection, tenantId, commandId, claimToken, null, null);
     }
 
-    /** Condiciona o início da transmissão ao estado da reserva e ao token da tentativa. */
+    /**
+     * Condiciona o início da transmissão ao estado da reserva e ao token da tentativa.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param commandId identificador do comando na fila
+     * @param claimToken token que identifica a reserva vigente
+     * @param owner UUID do proprietário da tentativa, ou nulo na autorização legada
+     * @param sessionIdentity identidade de referência do equipamento
+     * @return verdadeiro se a transição condicional alterou a linha da tentativa
+     * @throws SQLException se a operação JDBC falhar
+     */
     public boolean authorizeTransmission(Connection connection, UUID tenantId, UUID commandId,
                                          UUID claimToken, UUID owner, String sessionIdentity) throws SQLException {
         Objects.requireNonNull(connection);
@@ -151,7 +213,15 @@ public final class DeviceCommandDispatchRepository {
         }
     }
 
-    /** Restringe a reserva ao tenant e dispositivo cuja sessão o dispatcher localizou. */
+    /**
+     * Restringe a reserva ao tenant e dispositivo cuja sessão o dispatcher localizou.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @return comando reservado com seu token, ou vazio se nenhum for elegível
+     * @throws SQLException se a operação JDBC falhar
+     */
     public Optional<ClaimedCommand> claimNextForDevice(
             Connection connection,
             UUID tenantId,
@@ -161,6 +231,16 @@ public final class DeviceCommandDispatchRepository {
         return claim(connection, Objects.requireNonNull(tenantId), Objects.requireNonNull(deviceId));
     }
 
+    /**
+     * Bloqueia o dispositivo elegível e verifica novamente a fila antes de atribuir o token de
+     * reserva.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @return comando reservado com seu token, ou vazio se nenhum for elegível
+     * @throws SQLException se a operação JDBC falhar
+     */
     private Optional<ClaimedCommand> claim(Connection connection, UUID tenantId, UUID deviceId)
             throws SQLException {
         if (connection.getAutoCommit()) {
@@ -248,12 +328,23 @@ public final class DeviceCommandDispatchRepository {
      * escrita.
      */
     public enum Failure {
-        COMMAND_POLICY_DENIED, AUTHORIZATION_REJECTED, TCP_WRITE_UNCERTAIN
+        /** Os bytes ou o protocolo divergiram da operação permitida. */
+        COMMAND_POLICY_DENIED,
+        /** A reserva deixou de satisfazer as condições de início da transmissão. */
+        AUTHORIZATION_REJECTED,
+        /** A escrita falhou com possibilidade de envio parcial. */
+        TCP_WRITE_UNCERTAIN
     }
 
     /**
      * Registra o desfecho compatível com a etapa da falha e indica se a tentativa ainda podia
      * alterar o comando.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param command comando da tentativa em curso
+     * @param reason motivo do encerramento da tentativa
+     * @return verdadeiro se a transição condicional alterou a linha da tentativa
+     * @throws SQLException se a operação JDBC falhar
      */
     public boolean finishFailure(Connection connection, ClaimedCommand command, Failure reason)
             throws SQLException {

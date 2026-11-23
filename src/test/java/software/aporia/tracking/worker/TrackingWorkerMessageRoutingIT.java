@@ -21,12 +21,28 @@ import software.aporia.tracking.support.TestFixtures;
 /** Verifica a persistência de respostas Suntech e o tratamento de telemetria presente na mesma mensagem. */
 class TrackingWorkerMessageRoutingIT {
 
+    /** Identidade do equipamento usada no cenário. */
     private static final String IDENTITY = "1234567890";
 
+    /**
+     * Codifica a mensagem de exemplo com o charset usado no protocolo.
+     *
+     * @param value valor a interpretar
+     * @return bytes ASCII da mensagem de exemplo
+     */
     private byte[] bytes(String value) {
         return value.getBytes(StandardCharsets.US_ASCII);
     }
 
+    /**
+     * Persiste o quadro de entrada usado no cenário de roteamento.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param fixtures cadastro de teste utilizado no cenário
+     * @param payload bytes do conteúdo da mensagem
+     * @return UUID atribuído ao pacote de teste
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private UUID insertPacket(
             Connection connection,
             TestFixtures fixtures,
@@ -68,6 +84,13 @@ class TrackingWorkerMessageRoutingIT {
         return packetId;
     }
 
+    /**
+     * Confere no banco a conclusão do processamento do pacote.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param packetId identificador da recepção bruta
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private void assertPacketProcessed(
             Connection connection,
             UUID packetId
@@ -93,6 +116,15 @@ class TrackingWorkerMessageRoutingIT {
         }
     }
 
+    /**
+     * Compara a resposta persistida com o tipo e os bytes esperados.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param packetId identificador da recepção bruta
+     * @param expectedType tipo da resposta de comando
+     * @param expectedPayload bytes esperados na resposta persistida
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private void assertResponse(
             Connection connection,
             UUID packetId,
@@ -141,6 +173,14 @@ class TrackingWorkerMessageRoutingIT {
         }
     }
 
+    /**
+     * Conta as posições do cenário para distinguir resposta simples de composta.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param packetId identificador da recepção bruta
+     * @return quantidade de registros no escopo da consulta
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private int countPositions(
             Connection connection,
             UUID packetId
@@ -164,6 +204,11 @@ class TrackingWorkerMessageRoutingIT {
         }
     }
 
+    /**
+     * Persiste uma resposta RES sem exigir que ela contenha posição.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldProcessConventionalCommandResponse()
             throws Exception {
@@ -214,6 +259,11 @@ class TrackingWorkerMessageRoutingIT {
         }
     }
 
+    /**
+     * Persiste o retorno de programação RPR recebido do equipamento.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldProcessRprResponse()
             throws Exception {
@@ -263,6 +313,11 @@ class TrackingWorkerMessageRoutingIT {
         }
     }
 
+    /**
+     * Confere a posição e a resposta produzidas pelo mesmo quadro composto.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldProcessTelemetryInsideCommandResponse()
             throws Exception {

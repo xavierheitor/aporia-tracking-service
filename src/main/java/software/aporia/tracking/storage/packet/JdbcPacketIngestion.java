@@ -15,8 +15,14 @@ import software.aporia.tracking.core.ReceivedFrame;
 /** Revalida o dispositivo habilitado e persiste o quadro bruto na mesma transação. */
 public class JdbcPacketIngestion {
 
+    /** Fonte de conexões JDBC usadas pela instância. */
     private final DataSource dataSource;
 
+    /**
+     * Recebe o pool usado para revalidar o cadastro e confirmar a ingestão em uma transação.
+     *
+     * @param dataSource fonte de conexões JDBC para a operação
+     */
     public JdbcPacketIngestion(DataSource dataSource) {
         this.dataSource = java.util.Objects.requireNonNull(dataSource, "dataSource must not be null");
     }
@@ -24,6 +30,9 @@ public class JdbcPacketIngestion {
     /**
      * Persiste o quadro e retorna seu UUID após o commit. Quando fornecidos, tenant e dispositivo
      * restringem a revalidação do cadastro.
+     *
+     * @param frame quadro recebido para interpretação ou ingestão
+     * @return UUID da nova recepção
      */
     public UUID accept(ReceivedFrame frame) {
         return accept(frame, null, null);
@@ -32,6 +41,11 @@ public class JdbcPacketIngestion {
     /**
      * Persiste o quadro e retorna seu UUID após o commit. Quando fornecidos, tenant e dispositivo
      * restringem a revalidação do cadastro.
+     *
+     * @param frame quadro recebido para interpretação ou ingestão
+     * @param expectedTenant identificador esperado pela sessão para restringir a consulta
+     * @param expectedDevice identificador esperado pela sessão para restringir a consulta
+     * @return UUID da nova recepção
      */
     public UUID accept(ReceivedFrame frame, UUID expectedTenant, UUID expectedDevice) {
         if ((expectedTenant == null) != (expectedDevice == null)) throw new IllegalArgumentException("INVALID_SCOPE");

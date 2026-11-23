@@ -9,12 +9,21 @@ import org.junit.jupiter.api.Test;
 /** Verifica a identificação das capacidades de mensagens Suntech, inclusive respostas compostas. */
 class SuntechMessageCapabilitiesTest {
 
+    /**
+     * Obtém as capacidades reconhecidas nos bytes do exemplo Suntech.
+     *
+     * @param message mensagem do protocolo usada no cenário
+     * @return capacidades reconhecidas no exemplo
+     */
     private ProtocolMessageCapabilities classify(String message) {
         return SuntechMessageCapabilities.classify(
                 message.getBytes(StandardCharsets.US_ASCII)
         );
     }
 
+    /**
+     * Confere a capacidade de telemetria de uma mensagem STT.
+     */
     @Test
     void shouldClassifySttAsTelemetry() {
 
@@ -24,6 +33,9 @@ class SuntechMessageCapabilitiesTest {
         assertFalse(result.hasCommandResponse());
     }
 
+    /**
+     * Confere que ASTT também ativa o processamento de telemetria.
+     */
     @Test
     void shouldClassifyAsttAsTelemetry() {
 
@@ -32,6 +44,9 @@ class SuntechMessageCapabilitiesTest {
         assertTrue(result.hasTelemetry());
     }
 
+    /**
+     * Identifica a mensagem de presença ALV.
+     */
     @Test
     void shouldClassifyHeartbeat() {
 
@@ -41,6 +56,9 @@ class SuntechMessageCapabilitiesTest {
         assertFalse(result.hasTelemetry());
     }
 
+    /**
+     * Reconhece o conteúdo de resposta a comando.
+     */
     @Test
     void shouldClassifyCommandResponse() {
 
@@ -52,6 +70,9 @@ class SuntechMessageCapabilitiesTest {
         assertFalse(result.hasTelemetry());
     }
 
+    /**
+     * Confere que uma resposta com posição ativa ambos os processamentos.
+     */
     @Test
     void shouldClassifyResponseWithTelemetry() {
 
@@ -64,6 +85,9 @@ class SuntechMessageCapabilitiesTest {
         assertTrue(result.hasTelemetry());
     }
 
+    /**
+     * Reconhece a resposta de programação pelo cabeçalho RPR.
+     */
     @Test
     void shouldClassifyRprAsCommandResponse() {
 
@@ -75,6 +99,9 @@ class SuntechMessageCapabilitiesTest {
         assertFalse(result.hasTelemetry());
     }
 
+    /**
+     * Confere a ausência de capacidades para um cabeçalho desconhecido.
+     */
     @Test
     void shouldReturnEmptyForUnknownMessage() {
 
@@ -83,6 +110,9 @@ class SuntechMessageCapabilitiesTest {
         assertTrue(result.values().isEmpty());
     }
 
+    /**
+     * Confere a ausência de capacidades quando nenhum conteúdo chega.
+     */
     @Test
     void shouldReturnEmptyForEmptyPayload() {
 

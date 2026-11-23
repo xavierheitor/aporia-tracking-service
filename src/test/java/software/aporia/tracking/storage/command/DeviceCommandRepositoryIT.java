@@ -21,13 +21,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Exercita enfileiramento, validação do dispositivo e isolamento das solicitações entre tenants. */
 class DeviceCommandRepositoryIT {
 
+    /** Repositório utilizado para as operações sobre comandos. */
     private final DeviceCommandRepository repository
             = new DeviceCommandRepository();
 
+    /**
+     * Monta os bytes da solicitação para o equipamento usado no teste.
+     *
+     * @param identity identidade declarada pelo rastreador no protocolo
+     * @return bytes ASCII da mensagem de exemplo
+     */
     private byte[] command(String identity) {
         return ("CMD;" + identity + ";03;04;1\r").getBytes(StandardCharsets.US_ASCII);
     }
 
+    /**
+     * Confere o enfileiramento de um comando para um cadastro habilitado.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldEnqueueCommandForEnabledDevice() throws Exception {
 
@@ -87,6 +99,11 @@ class DeviceCommandRepositoryIT {
         }
     }
 
+    /**
+     * Rejeita o enfileiramento para cadastro desabilitado.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectDisabledDevice() throws Exception {
 
@@ -121,6 +138,11 @@ class DeviceCommandRepositoryIT {
         }
     }
 
+    /**
+     * Impede que um tenant enfileire comandos para equipamento de outro.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectCrossTenantCommand() throws Exception {
 
@@ -144,6 +166,11 @@ class DeviceCommandRepositoryIT {
         }
     }
 
+    /**
+     * Rejeita um comando que já ultrapassou o prazo ao entrar na fila.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectExpiredCommand() throws Exception {
 
@@ -167,6 +194,11 @@ class DeviceCommandRepositoryIT {
         }
     }
 
+    /**
+     * Confere o isolamento por tenant na consulta do estado.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldNotExposeCommandAcrossTenants() throws Exception {
 

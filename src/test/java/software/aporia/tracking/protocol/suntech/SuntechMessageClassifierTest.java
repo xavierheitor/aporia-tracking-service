@@ -6,9 +6,13 @@ import org.junit.jupiter.api.Test;
 /** Relaciona cabeçalhos conhecidos e desconhecidos às categorias tratadas pelo serviço. */
 class SuntechMessageClassifierTest {
 
+    /** Classificador de cabeçalhos exercitado pelos testes. */
     private final SuntechMessageClassifier classifier
             = new SuntechMessageClassifier();
 
+    /**
+     * Classifica os cabeçalhos de posição como telemetria.
+     */
     @Test
     void shouldClassifyTelemetry() {
         assertEquals(
@@ -22,6 +26,9 @@ class SuntechMessageClassifierTest {
         );
     }
 
+    /**
+     * Classifica os cabeçalhos de retorno de comando.
+     */
     @Test
     void shouldClassifyCommandResponses() {
         assertEquals(
@@ -35,6 +42,9 @@ class SuntechMessageClassifierTest {
         );
     }
 
+    /**
+     * Reconhece ALV como sinal de presença.
+     */
     @Test
     void shouldClassifyHeartbeat() {
         assertEquals(
@@ -43,6 +53,9 @@ class SuntechMessageClassifierTest {
         );
     }
 
+    /**
+     * Confere a categoria reservada a cabeçalhos desconhecidos.
+     */
     @Test
     void shouldClassifyUnknownMessages() {
         assertEquals(

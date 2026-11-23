@@ -12,17 +12,24 @@ import java.util.Set;
  */
 public class SuntechProtocol {
 
+    /** Limite de bytes que o enquadrador aceita para uma mensagem. */
     private static final int MAX_FRAME_SIZE = 8192;
+    /** Byte de retorno de carro que encerra uma mensagem Suntech. */
     private static final byte DELIMITER = '\r';
 
+    /** Cabeçalhos aceitos para identificar o dispositivo no quadro. */
     private static final Set<String> HEADERS
             = Set.of("ALV", "STT", "ASTT", "RES", "RPR");
 
+    /** Armazena os bytes já recebidos da unidade de protocolo em montagem. */
     private byte[] buffer = new byte[0];
 
     /**
      * Emite todos os quadros terminados por CR e conserva o fragmento restante para a próxima
      * leitura.
+     *
+     * @param incoming bytes disponíveis nesta leitura TCP, possivelmente um fragmento
+     * @return quadros completos nesta leitura, em ordem de recepção
      */
     public List<byte[]> receive(byte[] incoming) {
 
@@ -87,6 +94,7 @@ public class SuntechProtocol {
                 remaining
         );
 
+        // Só o trecho após o último CR precisa sobreviver até a próxima leitura do socket.
         buffer = remainder;
 
         return frames;
@@ -95,6 +103,10 @@ public class SuntechProtocol {
     /**
      * Valida o envelope e extrai a identidade, inclusive quando a resposta contém um cabeçalho de
      * posição embutido.
+     *
+     * @param frame quadro recebido para interpretação ou ingestão
+     * @return identidade extraída do cabeçalho reconhecido
+     * @throws IllegalArgumentException se o quadro, o cabeçalho ou a identidade forem inválidos
      */
     public String identify(byte[] frame) {
 

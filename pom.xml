@@ -226,6 +226,7 @@
 
     </build>
 
+    <!-- O perfil lint faz avisos do compilador falharem o build de produção e de testes. -->
     <profiles>
         <profile>
             <id>lint</id>

@@ -12,6 +12,9 @@ import org.junit.jupiter.api.Test;
 /** Verifica a resolução de versões de decodificador e a rejeição de versões duplicadas ou desconhecidas. */
 class DecoderRegistryTest {
 
+    /**
+     * Resolve uma versão registrada para a implementação correspondente.
+     */
     @Test
     void shouldResolveRegisteredDecoder() {
 
@@ -27,6 +30,9 @@ class DecoderRegistryTest {
         );
     }
 
+    /**
+     * Rejeita uma versão sem implementação registrada.
+     */
     @Test
     void shouldRejectUnknownDecoder() {
 
@@ -41,6 +47,9 @@ class DecoderRegistryTest {
         assertEquals("Decoder unavailable: unknown-v1", error.getMessage());
     }
 
+    /**
+     * Impede a associação da mesma versão a dois decodificadores.
+     */
     @Test
     void shouldRejectDuplicateDecoderVersions() {
 

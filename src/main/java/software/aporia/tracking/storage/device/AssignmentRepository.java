@@ -17,6 +17,13 @@ public class AssignmentRepository {
     /**
      * Procura o ativo vinculado ao dispositivo no instante da leitura, inclusive para pacotes
      * recebidos com atraso.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @param recordedAt instante da leitura no equipamento
+     * @return ativo vigente no instante consultado, se houver
+     * @throws SQLException se a operação JDBC falhar
      */
     public Optional<UUID> findAssetId(
             Connection connection,
@@ -24,6 +31,7 @@ public class AssignmentRepository {
             UUID deviceId,
             Instant recordedAt
     ) throws SQLException {
+        // O início pertence à vigência; uma leitura exatamente no fim já deve usar a próxima associação.
         String sql = """
             SELECT asset_id
             FROM assignments

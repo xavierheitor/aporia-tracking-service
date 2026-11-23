@@ -32,16 +32,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Exercita a descoberta e o ciclo de registro, substituição e encerramento de sessões TCP com banco real. */
 class TcpClientHandlerIT {
 
+    /** Fonte de conexões JDBC usadas pela instância. */
     private HikariDataSource dataSource;
+    /** Registro que associa tenant e dispositivo à sessão atual. */
     private SessionRegistry sessionRegistry;
+    /** Manipulador de conexão usado pelo teste com sockets locais. */
     private TcpClientHandler handler;
+    /** Sinal de execução compartilhado com as tarefas do gateway. */
     private AtomicBoolean running;
 
+    /** Tenant proprietário do cadastro do equipamento. */
     private UUID tenantId;
+    /** Identificador interno do equipamento cadastrado. */
     private UUID deviceId;
 
+    /** Identidade que acompanha os quadros do equipamento. */
     private final String identity = "9876543299";
 
+    /**
+     * Prepara o cadastro, o registro de sessões e o manipulador do socket.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @BeforeEach
     @SuppressWarnings("unused") // Invocado pelo JUnit.
     void setUp() throws Exception {
@@ -89,6 +101,11 @@ class TcpClientHandlerIT {
         );
     }
 
+    /**
+     * Interrompe o manipulador e remove os dados criados no cenário.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @AfterEach
     @SuppressWarnings("unused") // Invocado pelo JUnit.
     void tearDown() throws Exception {
@@ -129,18 +146,36 @@ class TcpClientHandlerIT {
         }
     }
 
+    /**
+     * Constrói o quadro STT completo com a identidade solicitada.
+     *
+     * @param imei identidade declarada pelo rastreador no protocolo
+     * @return mensagem STT de exemplo com terminador CR
+     */
     private String frame(String imei) {
         return "STT;" + imei
                 + ";013831;20261120;08:45:00;"
                 + "-16.6700;-49.2500;45.5;1\r";
     }
 
+    /**
+     * Grava os bytes ASCII no socket e descarrega o buffer.
+     *
+     * @param socket socket TCP da conexão do equipamento
+     * @param payload bytes do conteúdo da mensagem
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private void send(Socket socket, String payload) throws Exception {
         OutputStream output = socket.getOutputStream();
         output.write(payload.getBytes(StandardCharsets.US_ASCII));
         output.flush();
     }
 
+    /**
+     * Aguarda uma mudança de sessão observável dentro do prazo do teste.
+     *
+     * @param condition condição observada até o prazo do cenário
+     */
     @SuppressWarnings("SleepWhileInLoop") // Polling limitado pelo timeout do teste.
     private void awaitCondition(BooleanSupplier condition) {
 
@@ -154,6 +189,11 @@ class TcpClientHandlerIT {
         );
     }
 
+    /**
+     * Acompanha registro e remoção da sessão durante uma conexão real.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRegisterAndRemoveSession() throws Exception {
 
@@ -185,6 +225,11 @@ class TcpClientHandlerIT {
         }
     }
 
+    /**
+     * Verifica o encerramento ao receber outra identidade na mesma conexão.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectIdentityChange() throws Exception {
 
@@ -212,6 +257,11 @@ class TcpClientHandlerIT {
         }
     }
 
+    /**
+     * Reconecta o mesmo dispositivo e confere a substituição da conexão anterior.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldReplacePreviousConnection() throws Exception {
 
@@ -264,6 +314,11 @@ class TcpClientHandlerIT {
         }
     }
 
+    /**
+     * Confere os metadados pendentes do Suntech e a ausência de sessão autorizada.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldDiscoverUnknownSuntechWithoutStartingSession() throws Exception {
 

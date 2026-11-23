@@ -11,11 +11,20 @@ import com.zaxxer.hikari.HikariDataSource;
 /** Fornece conexões para um schema isolado por JVM e verifica o banco de testes antes de aplicar as migrations. */
 public final class TestDatabase {
 
+    /** URL do schema exclusivo reutilizada pelas conexões da JVM de testes. */
     private static String isolatedUrl;
 
+    /**
+     * Restringe a criação de conexões aos métodos de fábrica do suporte de testes.
+     */
     private TestDatabase() {
     }
 
+    /**
+     * Confere o endereço de testes e configura o pool para o schema isolado.
+     *
+     * @return pool de conexões configurado
+     */
     public static HikariDataSource createDataSource() {
 
         String url = System.getenv("TRACKING_TEST_DB_URL");
@@ -58,6 +67,14 @@ public final class TestDatabase {
         return new HikariDataSource(config);
     }
 
+    /**
+     * Verifica banco e usuário, cria um schema por JVM e agenda sua remoção ao encerrar.
+     *
+     * @param url URL JDBC do banco de testes
+     * @param user usuário da conexão de teste
+     * @param password credencial da conexão de teste
+     * @return URL JDBC com o schema reservado à JVM de testes
+     */
     private static synchronized String isolate(String url, String user, String password) {
         if (isolatedUrl != null) return isolatedUrl;
         // O schema exclusivo da JVM isola a recuperação global e as identidades fixas usadas nos exemplos.

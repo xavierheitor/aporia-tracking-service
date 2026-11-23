@@ -14,27 +14,47 @@ import java.util.regex.Pattern;
 public final class SuntechCommandValidator
         implements CommandValidator {
 
+    /** Tamanho máximo admitido para o payload do comando, em bytes. */
     private static final int MAX_LENGTH = 8192;
 
+    /** Formato de dez dígitos exigido para o destinatário do comando. */
     private static final Pattern IDENTITY =
             Pattern.compile("\\d{10}");
 
+    /** Formato do identificador de grupo no comando Suntech. */
     private static final Pattern GROUP =
             Pattern.compile("\\d{2}");
 
+    /** Formato de um parâmetro de programação com código e valor. */
     private static final Pattern PARAMETER =
             Pattern.compile("\\d{2}#[\\x20-\\x7E]+");
 
+    /**
+     * Identifica o protocolo cuja gramática este validador aceita.
+     *
+     * @return identificador do protocolo desta implementação
+     */
     @Override
     public String protocolId() {
         return "suntech";
     }
 
+    /**
+     * Verifica a gramática do payload sem exigir uma identidade fornecida pelo chamador.
+     *
+     * @param payload bytes do conteúdo da mensagem
+     */
     @Override
     public void validate(byte[] payload) {
         validate(payload, null);
     }
 
+    /**
+     * Valida cabeçalho, destinatário e parâmetros e compara a identidade quando informada.
+     *
+     * @param payload bytes do conteúdo da mensagem
+     * @param expectedIdentity identidade de referência do equipamento
+     */
     @Override
     public void validate(
             byte[] payload,
@@ -47,7 +67,7 @@ public final class SuntechCommandValidator
         }
 
         // Aceitamos CR como terminador opcional nesta etapa.
-        // O enquadramento exato no TCP ainda precisa ser confirmado.
+        // Descontar o terminador mantém a validação dos campos igual para os dois formatos de entrada.
         int length = payload.length;
 
         if (payload[length - 1] == '\r') {
@@ -107,6 +127,11 @@ public final class SuntechCommandValidator
         }
     }
 
+    /**
+     * Verifica o código da operação e a estrutura dos parâmetros de CMD.
+     *
+     * @param parts campos da mensagem separados por ponto e vírgula
+     */
     private void validateCmd(String[] parts) {
 
         if (parts.length < 4) {
@@ -126,6 +151,11 @@ public final class SuntechCommandValidator
         }
     }
 
+    /**
+     * Confere os campos que descrevem os parâmetros de programação PRG.
+     *
+     * @param parts campos da mensagem separados por ponto e vírgula
+     */
     private void validatePrg(String[] parts) {
 
         if (parts.length < 4) {
@@ -142,6 +172,12 @@ public final class SuntechCommandValidator
         }
     }
 
+    /**
+     * Associa o motivo da rejeição à exceção devolvida ao chamador.
+     *
+     * @param code código que identifica o motivo da falha
+     * @return exceção de formato usada para rejeitar o conteúdo
+     */
     private IllegalArgumentException invalid(String code) {
         return new IllegalArgumentException(code);
     }

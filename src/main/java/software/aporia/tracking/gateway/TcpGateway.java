@@ -34,18 +34,24 @@ import software.aporia.tracking.storage.packet.JdbcPacketIngestion;
  */
 public class TcpGateway {
 
+    /** Registra eventos e falhas associados a esta classe. */
     private static final Logger log
             = LoggerFactory.getLogger(TcpGateway.class);
 
+    /** Porta configurada para o listener TCP. */
     private static final int PORT = Integer.parseInt(
             System.getenv().getOrDefault("TRACKING_TCP_PORT", "5500")
     );
 
+    /** Tempo máximo de espera usado durante o encerramento do gateway. */
     private static final int SHUTDOWN_TIMEOUT_SECONDS = 10;
 
     /**
      * Abre o listener, instala a rotina de encerramento e inicia o envio periódico se houver
      * proprietário configurado.
+     *
+     * @param args argumentos da linha de comando, atualmente ignorados
+     * @throws IOException se a operação de entrada ou saída falhar
      */
     public static void main(String[] args) throws IOException {
 
@@ -101,6 +107,7 @@ public class TcpGateway {
                 var dispatcher = new CommandDispatcher(
                         dataSource, new DeviceCommandDispatchRepository(),
                         new SessionCommandTransport(sessionRegistry), owner);
+                // O intervalo começa após cada rodada; uma rodada lenta não sobrepõe outra no mesmo emissor.
                 polling.scheduleWithFixedDelay(() -> poll(dispatcher, sessionRegistry, running),
                         0, 1, TimeUnit.SECONDS);
             }
@@ -178,6 +185,15 @@ public class TcpGateway {
         }
     }
 
+    /**
+     * Interrompe a aceitação de conexões, fecha sockets ativos e coordena a saída das tarefas do
+     * gateway.
+     *
+     * @param server socket de escuta do gateway
+     * @param running indicador compartilhado de execução do serviço
+     * @param gatewayFinished sinal de conclusão do laço do gateway
+     * @param activeClients conexões aceitas e ainda acompanhadas pelo gateway
+     */
     private static void shutdown(ServerSocket server, AtomicBoolean running,
                                  CountDownLatch gatewayFinished, Set<Socket> activeClients) {
         log.info("Shutdown requested for TCP Gateway");
@@ -212,6 +228,14 @@ public class TcpGateway {
         }
     }
 
+    /**
+     * Executa a recuperação e consulta a fila de comandos para os dispositivos com sessão
+     * registrada.
+     *
+     * @param dispatcher coordenador do envio de comandos
+     * @param sessions registro de sessões ativas do gateway
+     * @param running indicador compartilhado de execução do serviço
+     */
     private static void poll(CommandDispatcher dispatcher,
                              SessionRegistry sessions, AtomicBoolean running) {
         if (!running.get()) return;

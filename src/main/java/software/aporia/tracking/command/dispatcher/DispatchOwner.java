@@ -20,18 +20,36 @@ import java.util.UUID;
  */
 public final class DispatchOwner implements AutoCloseable {
     // Fechar outro descritor do mesmo inode pode liberar o bloqueio POSIX do processo.
+    /** Arquivos já bloqueados nesta JVM, identificados antes da abertura de outro descritor. */
     private static final Set<Object> openFiles = new HashSet<>();
+    /** Identidade do arquivo no sistema de arquivos, inclusive quando acessado por outro caminho. */
     private final Object fileKey;
+    /** Bloqueio do arquivo mantido durante a vida do emissor. */
     private final FileLock lock;
+    /** UUID do emissor conservado entre reinícios. */
     private final UUID id;
 
+    /**
+     * Associa o bloqueio adquirido ao UUID persistido e à identidade do arquivo no sistema
+     * operacional.
+     *
+     * @param lock bloqueio exclusivo adquirido sobre o arquivo do emissor
+     * @param id UUID persistido no arquivo do emissor
+     * @param fileKey identidade do arquivo informada pelo sistema de arquivos
+     */
     private DispatchOwner(FileLock lock, UUID id, Object fileKey) {
         this.fileKey = fileKey;
         this.lock = lock;
         this.id = id;
     }
 
-    /** Abre o arquivo de propriedade com exclusividade e recupera o UUID persistido pelo emissor. */
+    /**
+     * Abre o arquivo de propriedade com exclusividade e recupera o UUID persistido pelo emissor.
+     *
+     * @param path caminho do arquivo persistente do emissor
+     * @return proprietário com bloqueio exclusivo adquirido
+     * @throws IOException se a operação de entrada ou saída falhar
+     */
     public static synchronized DispatchOwner open(Path path) throws IOException {
         try {
             Files.createFile(path);
@@ -51,6 +69,7 @@ public final class DispatchOwner implements AutoCloseable {
                 id = UUID.randomUUID();
                 var bytes = StandardCharsets.US_ASCII.encode(id.toString());
                 while (bytes.hasRemaining()) channel.write(bytes);
+                // O UUID precisa chegar ao arquivo antes de autorizar tentativas que dependerão dele após um reinício.
                 channel.force(true);
             } else {
                 if (channel.size() != 36) throw new IOException("INVALID_DISPATCH_OWNER");
@@ -68,14 +87,23 @@ public final class DispatchOwner implements AutoCloseable {
         }
     }
 
-    /** Fornece o UUID do proprietário enquanto o bloqueio está válido. */
+    /**
+     * Fornece o UUID do proprietário enquanto o bloqueio está válido.
+     *
+     * @return UUID persistido do emissor
+     * @throws IllegalStateException se o chamador não detiver o monitor do proprietário ou se o bloqueio estiver inválido
+     */
     public UUID id() {
         if (!Thread.holdsLock(this)) throw new IllegalStateException("DISPATCH_OWNER_LOCK_REQUIRED");
         if (!lock.isValid()) throw new IllegalStateException("DISPATCH_OWNER_CLOSED");
         return id;
     }
 
-    /** Libera o arquivo de propriedade ao encerrar o emissor. */
+    /**
+     * Libera o arquivo de propriedade ao encerrar o emissor.
+     *
+     * @throws IOException se a operação de entrada ou saída falhar
+     */
     @Override
     public synchronized void close() throws IOException {
         synchronized (DispatchOwner.class) {

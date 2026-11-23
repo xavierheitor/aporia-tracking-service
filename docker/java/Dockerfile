@@ -18,4 +18,5 @@ COPY --from=build \
     /app/target/aporia-tracking-service-1.0-SNAPSHOT.jar \
     /app/app.jar
 
+# O Compose substitui este comando para usar a mesma imagem como gateway TCP.
 CMD ["java", "-cp", "/app/app.jar", "software.aporia.tracking.worker.WorkerApplication"]

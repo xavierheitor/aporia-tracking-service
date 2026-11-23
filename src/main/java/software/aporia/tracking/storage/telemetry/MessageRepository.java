@@ -12,7 +12,17 @@ import java.util.UUID;
  */
 public class MessageRepository {
 
-    /** Retorna o UUID da mensagem inserida ou nulo quando a chave de deduplicação já existe. */
+    /**
+     * Retorna o UUID da mensagem inserida ou nulo quando a chave de deduplicação já existe.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @param rawPacketId identificador da recepção bruta
+     * @param payloadHash resumo SHA-256 do conteúdo recebido
+     * @return UUID da mensagem, ou nulo se o conteúdo já foi registrado
+     * @throws SQLException se a operação JDBC falhar
+     */
     public UUID save(
             Connection connection,
             UUID tenantId,
@@ -22,6 +32,7 @@ public class MessageRepository {
     ) throws SQLException {
         UUID messageId = UUID.randomUUID();
 
+        // A restrição por tenant, dispositivo e hash resolve duplicatas inclusive entre workers concorrentes.
         String sql = """
             INSERT INTO messages (
                 id,

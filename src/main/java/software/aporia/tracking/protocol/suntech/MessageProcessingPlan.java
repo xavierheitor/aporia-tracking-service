@@ -15,7 +15,12 @@ public record MessageProcessingPlan(
         boolean processHeartbeat
         ) {
 
-    /** Converte cada capacidade reconhecida em uma decisão independente de processamento. */
+    /**
+     * Converte cada capacidade reconhecida em uma decisão independente de processamento.
+     *
+     * @param capabilities capacidades presentes na mensagem
+     * @return plano com os processamentos aplicáveis à mensagem
+     */
     public static MessageProcessingPlan from(
             ProtocolMessageCapabilities capabilities
     ) {
@@ -28,7 +33,11 @@ public record MessageProcessingPlan(
         );
     }
 
-    /** Indica se há pelo menos um processamento aplicável. */
+    /**
+     * Indica se há pelo menos um processamento aplicável.
+     *
+     * @return verdadeiro se ao menos um caminho de processamento está habilitado
+     */
     public boolean hasWork() {
         return processTelemetry
                 || processCommandResponse

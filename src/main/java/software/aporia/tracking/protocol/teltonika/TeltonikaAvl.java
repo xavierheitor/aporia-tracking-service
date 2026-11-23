@@ -11,12 +11,31 @@ import software.aporia.tracking.core.Telemetry;
 
 /** Valida lotes AVL Codec 8 e 8E e extrai suas leituras GPS na ordem dos registros. */
 public final class TeltonikaAvl implements TelemetryDecoder {
+    /** Limite do pacote AVL em bytes, incluindo cabeçalho e CRC. */
     static final int MAX_PACKET = 1280;
 
+    /**
+     * Identifica a família de protocolo dos lotes AVL suportados.
+     *
+     * @return identificador do protocolo desta implementação
+     */
     @Override public String protocolId() { return "teltonika"; }
 
+    /**
+     * Informa a versão de decodificação usada na persistência do pacote.
+     *
+     * @return versão usada para interpretar os bytes persistidos
+     */
     @Override public String decoderVersion() { return "teltonika-avl-v1"; }
 
+    /**
+     * Valida comprimento, CRC, codec e contagens antes de devolver as leituras na ordem do lote.
+     *
+     * @param packet pacote bruto a processar
+     * @param identity identidade declarada pelo rastreador no protocolo
+     * @return identidade, leituras e eventual resposta presentes no pacote
+     * @throws IllegalArgumentException se tamanho, CRC, codec ou estrutura do lote forem inválidos
+     */
     @Override
     public DecodedPacket decodePacket(byte[] packet, String identity) {
         try {
@@ -49,6 +68,15 @@ public final class TeltonikaAvl implements TelemetryDecoder {
         }
     }
 
+    /**
+     * Lê um registro GPS e percorre os grupos de entradas e saídas, interpretando a ignição
+     * quando disponível.
+     *
+     * @param data buffer posicionado no próximo campo binário
+     * @param extended indica uso das larguras do Codec 8 Extended
+     * @param identity identidade declarada pelo rastreador no protocolo
+     * @return telemetria interpretada a partir dos campos do equipamento
+     */
     private static Telemetry readRecord(ByteBuffer data, boolean extended, String identity) {
         long millis = data.getLong();
         if (millis < 0 || millis > 253402300799999L || Byte.toUnsignedInt(data.get()) > 2) throw invalid();
@@ -89,15 +117,33 @@ public final class TeltonikaAvl implements TelemetryDecoder {
                 ignition, (double) (heading % 360), satellites, satellites > 0);
     }
 
+    /**
+     * Consome um campo sem sinal usando a largura definida pelo codec.
+     *
+     * @param data buffer posicionado no próximo campo binário
+     * @param extended indica uso das larguras do Codec 8 Extended
+     * @return valor inteiro sem sinal consumido do buffer
+     */
     private static int field(ByteBuffer data, boolean extended) {
         return extended ? Short.toUnsignedInt(data.getShort()) : Byte.toUnsignedInt(data.get());
     }
 
+    /**
+     * Avança sobre um valor de E/S após conferir se ele cabe nos bytes restantes.
+     *
+     * @param data buffer posicionado no próximo campo binário
+     * @param length quantidade de bytes a consumir
+     */
     private static void skip(ByteBuffer data, int length) {
         if (length > data.remaining()) throw invalid();
         data.position(data.position() + length);
     }
 
+    /**
+     * Padroniza a rejeição de lotes AVL truncados ou estruturalmente inválidos.
+     *
+     * @return exceção de formato usada para rejeitar o conteúdo
+     */
     private static IllegalArgumentException invalid() {
         return new IllegalArgumentException("INVALID_TELTONIKA_AVL");
     }

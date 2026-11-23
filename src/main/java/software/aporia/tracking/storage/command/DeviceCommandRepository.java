@@ -16,6 +16,15 @@ public final class DeviceCommandRepository {
     /**
      * Insere uma solicitação legada sem auditoria de solicitante. O dispatcher exige a entrada
      * auditada para transmitir.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @param protocol identificador do protocolo do equipamento
+     * @param payload bytes do conteúdo da mensagem
+     * @param expiresAt instante limite da solicitação
+     * @return UUID do comando inserido
+     * @throws SQLException se a operação JDBC falhar
      */
     public UUID enqueue(
             Connection connection,
@@ -31,6 +40,16 @@ public final class DeviceCommandRepository {
     /**
      * Sob o bloqueio do dispositivo, reaproveita a requisição idempotente ou cria a consulta de
      * firmware auditada na transação aberta.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @param principalId identificador do solicitante auditado
+     * @param requestKey chave que identifica repetições da mesma solicitação
+     * @return UUID da solicitação criada ou existente, ou vazio para dispositivo inelegível
+     * @throws SQLException se a operação JDBC falhar
+     * @throws QueueFullException se a fila já contiver dez consultas pendentes para o equipamento
+     * @throws IllegalStateException se a conexão usar autocommit
      */
     public Optional<UUID> enqueueFirmwareVersion(Connection connection, UUID tenantId, UUID deviceId,
                                                  UUID principalId, UUID requestKey) throws SQLException {
@@ -77,10 +96,26 @@ public final class DeviceCommandRepository {
 
     /** Indica que o dispositivo atingiu o limite de consultas enfileiradas. */
     public static final class QueueFullException extends IllegalStateException {
+        /** Versão da forma serializada desta exceção. */
         @java.io.Serial
         private static final long serialVersionUID = 1L;
     }
 
+    /**
+     * Persiste o comando no escopo do dispositivo habilitado e preserva os dados de auditoria
+     * quando fornecidos.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @param protocol identificador do protocolo do equipamento
+     * @param payload bytes do conteúdo da mensagem
+     * @param expiresAt instante limite da solicitação
+     * @param principalId identificador do solicitante auditado
+     * @param requestKey chave que identifica repetições da mesma solicitação
+     * @return UUID do comando inserido
+     * @throws SQLException se a operação JDBC falhar
+     */
     private UUID enqueue(Connection connection, UUID tenantId, UUID deviceId, String protocol,
                          byte[] payload, Instant expiresAt, UUID principalId, UUID requestKey) throws SQLException {
         Objects.requireNonNull(connection);
@@ -151,7 +186,15 @@ public final class DeviceCommandRepository {
         return commandId;
     }
 
-    /** Consulta o estado do comando apenas no tenant informado. */
+    /**
+     * Consulta o estado do comando apenas no tenant informado.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param commandId identificador do comando na fila
+     * @return estado persistido, se o comando existir no tenant
+     * @throws SQLException se a operação JDBC falhar
+     */
     public Optional<String> findStatus(
             Connection connection,
             UUID tenantId,

@@ -44,6 +44,22 @@ Ao combinar os arquivos de banco e aplicação em um ambiente novo, confira o no
 
 Para configurar um rastreador, listar pendências e autorizar um equipamento em um tenant, consulte o [guia do gateway TCP](docs/gateway-tcp.md). Para construir a imagem, habilitar o envio da consulta de firmware ou verificar uma tentativa de entrega, consulte o [guia de comandos](docs/comandos.md).
 
+## Leitura das migrations
+
+O Flyway aplica os arquivos por versão e confere o checksum de cada migration já executada. Esta sequência acompanha o caminho do equipamento e dos dados pelo serviço.
+
+| Versão | Efeito no fluxo |
+| --- | --- |
+| V1 | Cria tenants, dispositivos e a fila de pacotes brutos que liga gateway e worker. |
+| V2 | Associa dispositivos a ativos por vigência e persiste mensagens, histórico espacial, última posição e eventos da outbox. |
+| V3 | Introduz a fila de comandos e o histórico das respostas recebidas. |
+| V4 | Registra o instante da reserva e introduz o resultado de entrega incerta. |
+| V5 | Atribui um token à reserva para que um emissor antigo perca a autorização após recuperação. |
+| V6 | Distingue a reserva do início da transmissão e registra quando esta começou. |
+| V7 | Identifica o proprietário da transmissão, limita os comandos em voo por dispositivo e reforça o escopo das referências de respostas. |
+| V8 | Registra solicitante e chave de requisição para reconhecer repetições da mesma solicitação. |
+| V9 | Separa descoberta de cadastro e promove o equipamento ao tenant escolhido na aprovação administrativa. |
+
 ## Validação
 
 Para compilar produção e testes com lint ou executar a suíte unitária:

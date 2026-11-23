@@ -6,15 +6,27 @@ package software.aporia.tracking.protocol;
  */
 public interface TelemetryDecoder {
 
-    /** Identifica o protocolo de origem dos pacotes que este decodificador interpreta. */
+    /**
+     * Identifica o protocolo de origem dos pacotes que este decodificador interpreta.
+     *
+     * @return identificador do protocolo desta implementação
+     */
     String protocolId();
 
-    /** Identifica a implementação usada para interpretar o formato persistido. */
+    /**
+     * Identifica a implementação usada para interpretar o formato persistido.
+     *
+     * @return versão usada para interpretar os bytes persistidos
+     */
     String decoderVersion();
 
     /**
      * Interpreta um pacote completo usando a identidade cadastrada como contexto e preserva a
      * ordem das leituras.
+     *
+     * @param frame quadro recebido para interpretação ou ingestão
+     * @param registeredIdentity identidade de referência do equipamento
+     * @return identidade, leituras e eventual resposta presentes no pacote
      */
     DecodedPacket decodePacket(byte[] frame, String registeredIdentity);
 }

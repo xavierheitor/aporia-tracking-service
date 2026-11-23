@@ -15,6 +15,16 @@ public final class DeviceCommandResponseRepository {
     /**
      * Registra a resposta sem atribuir um comando de origem. Retorna o UUID criado ou nulo se o
      * pacote já tiver uma resposta.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @param rawPacketId identificador da recepção bruta
+     * @param protocol identificador do protocolo do equipamento
+     * @param responseType tipo da resposta de comando
+     * @param payload bytes do conteúdo da mensagem
+     * @return UUID da resposta, ou nulo se o pacote já tinha uma resposta
+     * @throws SQLException se a operação JDBC falhar
      */
     public UUID save(
             Connection connection,

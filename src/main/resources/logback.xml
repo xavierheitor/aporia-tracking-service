@@ -7,6 +7,7 @@
     </encoder>
 </appender>
 
+<!-- Os componentes de conexão registram avisos e erros. O serviço e o Flyway também informam etapas de execução. -->
 <logger name="com.zaxxer.hikari" level="WARN"/>
 <logger name="org.postgresql" level="WARN"/>
 <logger name="org.flywaydb" level="INFO"/>

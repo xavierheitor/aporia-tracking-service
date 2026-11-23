@@ -12,6 +12,9 @@ import org.junit.jupiter.api.Test;
 /** Verifica o isolamento das sessões por tenant e a remoção condicional após reconexão. */
 class SessionRegistryTest {
 
+    /**
+     * Confere a recuperação da sessão registrada para o equipamento.
+     */
     @Test
     void shouldRegisterAndFindSession() {
 
@@ -38,6 +41,9 @@ class SessionRegistryTest {
         assertEquals(1, registry.size());
     }
 
+    /**
+     * Verifica o isolamento da chave de sessão entre tenants.
+     */
     @Test
     void shouldIsolateTenants() {
 
@@ -60,6 +66,9 @@ class SessionRegistryTest {
         );
     }
 
+    /**
+     * Desconecta a sessão antiga após uma reconexão e confere que a nova permanece registrada.
+     */
     @Test
     void shouldNotRemoveNewSessionWhenOldDisconnects() {
 
@@ -87,6 +96,9 @@ class SessionRegistryTest {
         );
     }
 
+    /**
+     * Remove a sessão e consulta a ausência da entrada.
+     */
     @Test
     void shouldUnregisterSession() {
 
@@ -109,6 +121,9 @@ class SessionRegistryTest {
         assertEquals(0, registry.size());
     }
 
+    /**
+     * Registra uma reconexão e verifica a invalidação do socket lógico anterior.
+     */
     @Test
     void shouldInvalidatePreviousSessionOnReconnect() {
 
@@ -144,6 +159,9 @@ class SessionRegistryTest {
         );
     }
 
+    /**
+     * Confere a invalidação da sessão removida pelo registro.
+     */
     @Test
     void shouldInvalidateSessionOnUnregister() {
 
@@ -170,6 +188,9 @@ class SessionRegistryTest {
         );
     }
 
+    /**
+     * Confere que o chamador recebe a sessão substituída para poder fechá-la.
+     */
     @Test
     void shouldReturnReplacedSession() {
 
@@ -205,6 +226,9 @@ class SessionRegistryTest {
         assertTrue(registry.isCurrent(newSession));
     }
 
+    /**
+     * Verifica que uma sessão removida deixa de ser a instância atual.
+     */
     @Test
     void shouldNotConsiderRemovedSessionCurrent() {
 

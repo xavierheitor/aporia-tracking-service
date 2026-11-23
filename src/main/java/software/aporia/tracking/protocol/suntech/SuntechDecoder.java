@@ -18,13 +18,24 @@ import software.aporia.tracking.core.Telemetry;
  */
 public class SuntechDecoder implements TelemetryDecoder {
 
+    /**
+     * Identifica a família dos quadros interpretados pelo decodificador.
+     *
+     * @return identificador do protocolo desta implementação
+     */
     @Override public String protocolId() { return "suntech"; }
 
+    /**
+     * Identifica a versão do formato gravada com os pacotes Suntech.
+     *
+     * @return versão usada para interpretar os bytes persistidos
+     */
     @Override
     public String decoderVersion() {
         return "suntech-ascii-v3";
     }
 
+    /** Nomes dos campos na ordem dos bits do mapa de presença. */
     private static final String[] FIELDS = {
         "map", "model", "firmware", "realtime",
         "date", "time", "cell", "mcc",
@@ -34,12 +45,22 @@ public class SuntechDecoder implements TelemetryDecoder {
         "reason", "sequence"
     };
 
+    /** Formato decimal aceito antes da conversão dos campos numéricos. */
     private static final Pattern NUMBER = Pattern.compile(
             "[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)"
     );
 
+    /** Enquadrador Suntech usado para reconhecer a identidade do quadro. */
     private final SuntechProtocol protocol = new SuntechProtocol();
 
+    /**
+     * Combina o plano de roteamento com a leitura de telemetria, preservando o tipo de resposta
+     * em mensagens compostas.
+     *
+     * @param frame quadro recebido para interpretação ou ingestão
+     * @param registeredIdentity identidade de referência do equipamento
+     * @return identidade, leituras e eventual resposta presentes no pacote
+     */
     @Override
     public DecodedPacket decodePacket(byte[] frame, String registeredIdentity) {
         String identity = protocol.identify(frame);
@@ -53,6 +74,9 @@ public class SuntechDecoder implements TelemetryDecoder {
     /**
      * Extrai a telemetria de uma mensagem de posição ou presença, inclusive de uma posição
      * embutida em resposta.
+     *
+     * @param frame quadro recebido para interpretação ou ingestão
+     * @return telemetria interpretada a partir dos campos do equipamento
      */
     public Telemetry decode(byte[] frame) {
 
@@ -116,6 +140,14 @@ public class SuntechDecoder implements TelemetryDecoder {
         };
     }
 
+    /**
+     * Percorre o mapa de presença para associar cada campo à sua posição no texto e validar os
+     * valores da leitura.
+     *
+     * @param identity identidade declarada pelo rastreador no protocolo
+     * @param parts campos da mensagem separados por ponto e vírgula
+     * @return telemetria interpretada a partir dos campos do equipamento
+     */
     private Telemetry decodePosition(
             String identity,
             String[] parts
@@ -232,6 +264,14 @@ public class SuntechDecoder implements TelemetryDecoder {
         );
     }
 
+    /**
+     * Converte o campo decimal opcional e confere os limites aceitos para a grandeza.
+     *
+     * @param value valor a interpretar
+     * @param min limite inclusivo do intervalo aceito
+     * @param max limite inclusivo do intervalo aceito
+     * @return valor convertido, ou nulo para campo ausente
+     */
     private Double number(String value, double min, double max) {
         if (value == null || value.isEmpty()) {
             return null;
@@ -251,6 +291,14 @@ public class SuntechDecoder implements TelemetryDecoder {
         return parsed;
     }
 
+    /**
+     * Aplica os limites do campo e exige que o valor represente um inteiro.
+     *
+     * @param value valor a interpretar
+     * @param min limite inclusivo do intervalo aceito
+     * @param max limite inclusivo do intervalo aceito
+     * @return valor convertido, ou nulo para campo ausente
+     */
     private Integer integer(String value, int min, int max) {
         Double parsed = number(value, min, max);
 
@@ -265,6 +313,12 @@ public class SuntechDecoder implements TelemetryDecoder {
         return parsed.intValue();
     }
 
+    /**
+     * Cria o erro de validação com o código que identifica o campo ou formato rejeitado.
+     *
+     * @param code código que identifica o motivo da falha
+     * @return exceção de formato usada para rejeitar o conteúdo
+     */
     private IllegalArgumentException invalid(String code) {
         return new IllegalArgumentException(code);
     }

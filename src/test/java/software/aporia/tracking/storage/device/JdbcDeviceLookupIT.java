@@ -21,11 +21,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Exercita a consulta de equipamentos habilitados e a disputa entre tenants pela aprovação de uma descoberta. */
 class JdbcDeviceLookupIT {
 
+    /**
+     * Abre o pool do schema reservado aos testes de integração.
+     *
+     * @return pool de conexões configurado
+     */
     private HikariDataSource createDataSource() {
 
         return TestDatabase.createDataSource();
     }
 
+    /**
+     * Cria o tenant e seu cadastro de equipamento para a consulta.
+     *
+     * @param dataSource fonte de conexões JDBC para a operação
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @param identity identidade declarada pelo rastreador no protocolo
+     * @param enabled indica se o equipamento pode conectar
+     * @throws SQLException se a operação JDBC falhar
+     */
     private void createFixture(
             HikariDataSource dataSource,
             UUID tenantId,
@@ -75,6 +90,14 @@ class JdbcDeviceLookupIT {
         }
     }
 
+    /**
+     * Remove os registros criados no cenário em ordem de dependência.
+     *
+     * @param dataSource fonte de conexões JDBC para a operação
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @throws SQLException se a operação JDBC falhar
+     */
     private void deleteFixture(
             HikariDataSource dataSource,
             UUID tenantId,
@@ -110,6 +133,11 @@ class JdbcDeviceLookupIT {
         }
     }
 
+    /**
+     * Disputa uma descoberta entre dois tenants e confere a propriedade do cadastro resultante.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void concurrentApprovalsAssignDiscoveryToExactlyOneTenant() throws Exception {
         try (var db = createDataSource(); var first = new TestFixtures(db); var second = new TestFixtures(db);
@@ -127,6 +155,17 @@ class JdbcDeviceLookupIT {
         }
     }
 
+    /**
+     * Sincroniza os dois operadores antes da aprovação e distingue o vencedor do conflito
+     * esperado.
+     *
+     * @param db fonte de conexões JDBC para a operação
+     * @param identity identidade declarada pelo rastreador no protocolo
+     * @param tenant identificador do tenant que delimita a operação
+     * @param barrier barreira que sincroniza as aprovações concorrentes
+     * @return verdadeiro quando este operador conseguiu aprovar a descoberta
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private boolean approve(HikariDataSource db, String identity, UUID tenant, CyclicBarrier barrier) throws Exception {
         try (var c = db.getConnection(); var query = c.prepareStatement("""
                 SELECT approve_device_discovery(id, ?) FROM device_discoveries WHERE protocol='teltonika' AND identity=?
@@ -144,6 +183,11 @@ class JdbcDeviceLookupIT {
         }
     }
 
+    /**
+     * Localiza o equipamento habilitado pelo par protocolo e identidade.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldFindEnabledDevice() throws Exception {
 
@@ -184,6 +228,11 @@ class JdbcDeviceLookupIT {
         }
     }
 
+    /**
+     * Confere que o cadastro desabilitado fica fora da consulta de habilitados.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldNotFindDisabledDevice() throws Exception {
 
@@ -220,6 +269,9 @@ class JdbcDeviceLookupIT {
         }
     }
 
+    /**
+     * Verifica o resultado vazio para uma identidade sem cadastro.
+     */
     @Test
     void shouldRejectUnknownDevice() {
 
@@ -237,6 +289,11 @@ class JdbcDeviceLookupIT {
         }
     }
 
+    /**
+     * Impede que a identidade seja resolvida sob outro protocolo.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectWrongProtocol() throws Exception {
 

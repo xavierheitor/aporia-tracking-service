@@ -3,6 +3,7 @@ services:
   tracking-gateway:
     environment:
       TRACKING_DISPATCH_OWNER_FILE: /var/lib/aporia-dispatch/owner
+    # O UUID do emissor precisa sobreviver à recriação do contêiner para recuperar suas transmissões.
     volumes:
       - dispatch-owner:/var/lib/aporia-dispatch
 

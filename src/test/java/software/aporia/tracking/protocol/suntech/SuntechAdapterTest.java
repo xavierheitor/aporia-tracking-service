@@ -15,9 +15,13 @@ import org.junit.jupiter.api.Test;
 /** Verifica a adaptação de quadros Suntech completos, fragmentados e agrupados na mesma leitura. */
 class SuntechAdapterTest {
 
+    /** Adaptador Suntech exercitado nas leituras simuladas. */
     private final SuntechAdapter adapter
             = new SuntechAdapter();
 
+    /**
+     * Confere os identificadores usados para registrar o adaptador e o decodificador.
+     */
     @Test
     void shouldExposeProtocolMetadata() {
 
@@ -29,6 +33,9 @@ class SuntechAdapterTest {
         );
     }
 
+    /**
+     * Confere os metadados produzidos a partir de uma mensagem completa.
+     */
     @Test
     void shouldConvertReceivedFrame() {
 
@@ -55,6 +62,9 @@ class SuntechAdapterTest {
         assertFalse(frame.acknowledgmentRequired());
     }
 
+    /**
+     * Divide o quadro entre leituras para exercitar a remontagem na sessão.
+     */
     @Test
     void shouldReassembleFragmentedFrame() {
 
@@ -79,6 +89,9 @@ class SuntechAdapterTest {
         );
     }
 
+    /**
+     * Exercita a emissão de vários quadros recebidos em uma leitura.
+     */
     @Test
     void shouldHandleMultipleFrames() {
 
@@ -103,6 +116,9 @@ class SuntechAdapterTest {
         );
     }
 
+    /**
+     * Verifica que os buffers de duas conexões evoluem independentemente.
+     */
     @Test
     void shouldIsolateSessions() {
 

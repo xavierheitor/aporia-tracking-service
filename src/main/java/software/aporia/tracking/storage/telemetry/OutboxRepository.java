@@ -11,7 +11,16 @@ import java.util.UUID;
  */
 public class OutboxRepository {
 
-    /** Insere o evento associado à posição na mesma transação em que o worker atualiza o histórico. */
+    /**
+     * Insere o evento associado à posição na mesma transação em que o worker atualiza o histórico.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param assetId identificador do ativo associado ao equipamento
+     * @param positionId identificador da posição no histórico
+     * @return UUID do evento inserido na outbox
+     * @throws SQLException se a operação JDBC falhar
+     */
     public UUID savePositionEvent(
             Connection connection,
             UUID tenantId,

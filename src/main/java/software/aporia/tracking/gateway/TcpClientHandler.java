@@ -26,25 +26,46 @@ import software.aporia.tracking.storage.packet.JdbcPacketIngestion;
  */
 public final class TcpClientHandler {
 
+    /** Registra eventos e falhas associados a esta classe. */
     private static final Logger log
             = LoggerFactory.getLogger(TcpClientHandler.class);
 
+    /** Prazo em milissegundos para a fase anterior ao registro de sessão. */
     private static final int LOGIN_TIMEOUT_MS = 30_000;
+    /** Tempo máximo de inatividade da sessão identificada, em milissegundos. */
     private static final int SESSION_IDLE_MS = sessionIdleMillis();
 
+    /**
+     * Converte em milissegundos o prazo configurado para inatividade de sessões identificadas.
+     *
+     * @return prazo de inatividade em milissegundos
+     */
     private static int sessionIdleMillis() {
         int seconds = Integer.parseInt(System.getenv().getOrDefault("TRACKING_TCP_SESSION_IDLE_SECONDS", "180"));
         if (seconds <= 0) throw new IllegalArgumentException("INVALID_TCP_SESSION_IDLE_SECONDS");
         return Math.multiplyExact(seconds, 1000);
     }
 
+    /** Persiste o pacote bruto antes da confirmação de recebimento. */
     private final JdbcPacketIngestion ingestion;
+    /** Consulta o cadastro e registra a descoberta de identidades desconhecidas. */
     private final JdbcDeviceLookup deviceLookup;
+    /** Registro que associa tenant e dispositivo à sessão atual. */
     private final SessionRegistry sessionRegistry;
+    /** Seleciona o adaptador que conduzirá a conexão após a primeira leitura. */
     private final java.util.function.IntFunction<ProtocolAdapter> selectAdapter;
+    /** Sinal de execução compartilhado com as tarefas do gateway. */
     private final AtomicBoolean running;
 
-    /** Restringe todas as conexões tratadas por esta instância ao adaptador fornecido. */
+    /**
+     * Restringe todas as conexões tratadas por esta instância ao adaptador fornecido.
+     *
+     * @param ingestion componente que persiste os quadros recebidos
+     * @param deviceLookup consulta responsável pelo cadastro e pela descoberta
+     * @param sessionRegistry registro de sessões ativas do gateway
+     * @param adapter adaptador usado nas conexões deste manipulador
+     * @param running indicador compartilhado de execução do serviço
+     */
     public TcpClientHandler(
             JdbcPacketIngestion ingestion,
             JdbcDeviceLookup deviceLookup,
@@ -55,7 +76,15 @@ public final class TcpClientHandler {
         this(ingestion, deviceLookup, sessionRegistry, first -> adapter, running);
     }
 
-    /** Seleciona um adaptador pelo primeiro byte e mantém a escolha durante toda a conexão. */
+    /**
+     * Seleciona um adaptador pelo primeiro byte e mantém a escolha durante toda a conexão.
+     *
+     * @param ingestion componente que persiste os quadros recebidos
+     * @param deviceLookup consulta responsável pelo cadastro e pela descoberta
+     * @param sessionRegistry registro de sessões ativas do gateway
+     * @param selectAdapter função que escolhe o adaptador pelo primeiro byte
+     * @param running indicador compartilhado de execução do serviço
+     */
     public TcpClientHandler(JdbcPacketIngestion ingestion, JdbcDeviceLookup deviceLookup,
                             SessionRegistry sessionRegistry, java.util.function.IntFunction<ProtocolAdapter> selectAdapter,
                             AtomicBoolean running) {
@@ -69,6 +98,8 @@ public final class TcpClientHandler {
     /**
      * Consome leituras até o encerramento da conexão e remove condicionalmente a sessão
      * registrada na saída.
+     *
+     * @param client socket TCP da conexão do equipamento
      */
     public void handle(Socket client) {
 

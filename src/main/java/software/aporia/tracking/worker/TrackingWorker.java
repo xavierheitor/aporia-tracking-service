@@ -35,34 +35,59 @@ import software.aporia.tracking.storage.telemetry.PositionRepository;
  */
 public class TrackingWorker {
 
+    /** Seleciona o decodificador pela versão que acompanha os bytes brutos. */
     private final DecoderRegistry decoderRegistry;
 
+    /** Fonte de conexões JDBC usadas pela instância. */
     private final DataSource dataSource;
 
+    /** Persiste a mensagem e detecta o conteúdo já processado. */
     private final MessageRepository messageRepository;
+    /** Resolve o ativo associado no instante da leitura. */
     private final AssignmentRepository assignmentRepository;
+    /** Grava cada leitura válida no histórico geográfico. */
     private final PositionRepository positionRepository;
+    /** Atualiza o marcador de posição mais recente do ativo. */
     private final LastPositionRepository lastPositionRepository;
+    /** Grava o evento na mesma transação que a posição. */
     private final OutboxRepository outboxRepository;
 
+    /** Restringe a seleção a um tenant quando configurado. */
     private final UUID tenantFilter;
 
+    /** Registra eventos e falhas associados a esta classe. */
     private static final Logger log
             = LoggerFactory.getLogger(TrackingWorker.class);
 
+    /** Persiste respostas de comando vinculadas à recepção do quadro. */
     private final DeviceCommandResponseRepository responseRepository;
 
-    /** Cria um consumidor de pacotes para todos os tenants com os decodificadores padrão. */
+    /**
+     * Cria um consumidor de pacotes para todos os tenants com os decodificadores padrão.
+     *
+     * @param dataSource fonte de conexões JDBC para a operação
+     */
     public TrackingWorker(DataSource dataSource) {
         this(dataSource, null);
     }
 
-    /** Permite restringir a seleção de pacotes a um tenant. */
+    /**
+     * Permite restringir a seleção de pacotes a um tenant.
+     *
+     * @param dataSource fonte de conexões JDBC para a operação
+     * @param tenantFilter tenant a processar, ou nulo para consumir a fila de todos
+     */
     public TrackingWorker(DataSource dataSource, UUID tenantFilter) {
         this(dataSource, tenantFilter, defaultDecoderRegistry());
     }
 
-    /** Permite escolher o registro de decodificadores que interpretará os pacotes da fila. */
+    /**
+     * Permite escolher o registro de decodificadores que interpretará os pacotes da fila.
+     *
+     * @param dataSource fonte de conexões JDBC para a operação
+     * @param tenantFilter tenant a processar, ou nulo para consumir a fila de todos
+     * @param decoderRegistry decodificadores disponíveis ao worker
+     */
     public TrackingWorker(
             DataSource dataSource,
             UUID tenantFilter,
@@ -81,6 +106,11 @@ public class TrackingWorker {
         this.responseRepository = new DeviceCommandResponseRepository();
     }
 
+    /**
+     * Registra as versões Suntech e Teltonika disponíveis ao iniciar o consumidor.
+     *
+     * @return registro das versões de decodificação disponíveis
+     */
     private static DecoderRegistry defaultDecoderRegistry() {
         return new DecoderRegistry(List.of(new SuntechDecoder(), new TeltonikaAvl()));
     }
@@ -128,12 +158,16 @@ public class TrackingWorker {
 
     /**
      * Executa todo o processamento utilizando a mesma transação JDBC.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @return resultado a publicar após o commit
+     * @throws SQLException se a operação JDBC falhar
      */
     private ProcessingResult processInTransaction(
             Connection connection
     ) throws SQLException {
 
-        // 1. Selecionar um pacote pendente.
+        // SKIP LOCKED permite que cada worker reserve um pacote livre, respeitando o prazo da próxima tentativa.
         String selectSql = """
             SELECT
                 rp.id,
@@ -243,6 +277,7 @@ public class TrackingWorker {
         // 4. Registrar a mensagem.
         // Se o conteúdo já existir, o método retorna null.
         // Criar um ponto de recuperação antes da persistência.
+        // O savepoint permite desfazer mensagem e posições e ainda gravar a retentativa na mesma transação.
         Savepoint savepoint = connection.setSavepoint(
                 "processing_start"
         );
@@ -331,6 +366,9 @@ public class TrackingWorker {
     /**
      * Verifica se o conteúdo corresponde ao hash SHA-256 armazenado na
      * ingestão.
+     *
+     * @param payload bytes do conteúdo da mensagem
+     * @param storedHash resumo SHA-256 do conteúdo recebido
      */
     private void validateHash(
             byte[] payload,
@@ -365,6 +403,11 @@ public class TrackingWorker {
      * Registra uma rejeição permanente.
      *
      * A atualização participa da transação atual.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param packetId identificador da recepção bruta
+     * @param errorCode código que identifica o motivo da falha
+     * @throws SQLException se a operação JDBC falhar
      */
     private void rejectPacket(
             Connection connection,
@@ -403,6 +446,10 @@ public class TrackingWorker {
      *
      * Deve ser chamado somente após concluir todas as operações de
      * persistência.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param packetId identificador da recepção bruta
+     * @throws SQLException se a operação JDBC falhar
      */
     private void markProcessed(
             Connection connection,
@@ -434,6 +481,16 @@ public class TrackingWorker {
         }
     }
 
+    /**
+     * Incrementa a tentativa na linha bloqueada e agenda a próxima execução ou encerra o pacote
+     * ao atingir o limite.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param packetId identificador da recepção bruta
+     * @param errorCode código que identifica o motivo da falha
+     * @return resultado a publicar após o commit
+     * @throws SQLException se a operação JDBC falhar
+     */
     private ProcessingResult scheduleRetry(
             Connection connection,
             UUID packetId,
@@ -535,6 +592,11 @@ public class TrackingWorker {
         );
     }
 
+    /**
+     * Emite o diagnóstico de acordo com o resultado confirmado pelo processamento.
+     *
+     * @param result resultado da transação de processamento
+     */
     private void logResult(ProcessingResult result) {
 
         switch (result.status()) {

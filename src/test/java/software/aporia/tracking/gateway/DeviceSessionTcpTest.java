@@ -16,6 +16,11 @@ import org.junit.jupiter.api.Test;
 /** Exercita a escrita no socket e a rejeição de novas escritas após desconexão ou invalidação. */
 class DeviceSessionTcpTest {
 
+    /**
+     * Confere no outro extremo do socket os bytes enviados pela sessão.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldSendRawCommandOverTcp() throws Exception {
 
@@ -46,6 +51,11 @@ class DeviceSessionTcpTest {
         }
     }
 
+    /**
+     * Rejeita um comando vazio antes da escrita.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectEmptyCommand() throws Exception {
 
@@ -70,6 +80,11 @@ class DeviceSessionTcpTest {
         }
     }
 
+    /**
+     * Rejeita a tentativa quando o socket está desconectado.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectDisconnectedSocket() throws Exception {
 
@@ -93,6 +108,11 @@ class DeviceSessionTcpTest {
         }
     }
 
+    /**
+     * Invalida a sessão e verifica a rejeição da escrita seguinte.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectSendingAfterInvalidation() throws Exception {
 
@@ -126,14 +146,36 @@ class DeviceSessionTcpTest {
     }
 
 
+    /**
+     * Bloqueia a saída até o temporizador fechar o socket e verifica a invalidação da sessão.
+     */
     @Test
     void deadlineClosesBlockedWriterAndInvalidatesSession() {
         var closed = new java.util.concurrent.CountDownLatch(1);
         Socket stalled = new Socket() {
+            /**
+             * Simula a conexão local para que o teste alcance a escrita bloqueante.
+             *
+             * @return verdadeiro se a conexão está disponível localmente
+             */
             @Override public boolean isConnected() { return true; }
+            /**
+             * Libera a escrita simulada ao fechar o socket.
+             */
             @Override public void close() { closed.countDown(); }
+            /**
+             * Fornece a saída controlada que permanece bloqueada até o fechamento.
+             *
+             * @return saída bloqueante simulada pelo teste
+             */
             @Override public java.io.OutputStream getOutputStream() {
                 return new java.io.OutputStream() {
+                    /**
+                     * Mantém a escrita suspensa até o cenário simular o encerramento do socket.
+                     *
+                     * @param value valor a interpretar
+                     * @throws java.io.IOException se a escrita simulada for interrompida
+                     */
                     @Override public void write(int value) throws java.io.IOException {
                         try {
                             if (!closed.await(8, java.util.concurrent.TimeUnit.SECONDS)) {

@@ -19,6 +19,11 @@ import software.aporia.tracking.support.TestFixtures;
 /** Verifica a consistência entre histórico de posições, última posição e evento na outbox. */
 class TrackingWorkerPositionIT {
 
+    /**
+     * Confere histórico, última posição e evento produzidos pela mesma leitura.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldPersistPositionAndOutboxAtomically()
             throws Exception {

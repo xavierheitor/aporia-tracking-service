@@ -17,7 +17,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /** Verifica a ingestão para um equipamento cadastrado e o tratamento de identidades desconhecidas. */
 class JdbcPacketIngestionIT {
 
-    /** Confere a ingestão de um quadro de dispositivo cadastrado. */
+    /**
+     * Confere a ingestão de um quadro de dispositivo cadastrado.
+     *
+     * @throws SQLException se a operação JDBC falhar
+     */
     @Test
     void shouldAcceptRegisteredDevice() throws SQLException {
         try (var dataSource = TestDatabase.createDataSource();

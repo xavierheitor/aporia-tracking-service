@@ -10,13 +10,23 @@ import org.junit.jupiter.api.Test;
 /** Cobre a gramática dos comandos e parâmetros Suntech e os formatos rejeitados. */
 class SuntechCommandValidatorTest {
 
+    /** Validador usado para exercitar a gramática dos comandos. */
     private final SuntechCommandValidator validator =
             new SuntechCommandValidator();
 
+    /**
+     * Codifica a mensagem de teste com o conjunto de caracteres do protocolo.
+     *
+     * @param value valor a interpretar
+     * @return bytes ASCII da mensagem de exemplo
+     */
     private static byte[] ascii(String value) {
         return value.getBytes(StandardCharsets.US_ASCII);
     }
 
+    /**
+     * Verifica a gramática da consulta de versão de firmware.
+     */
     @Test
     void shouldAcceptFirmwareVersionRequest() {
         assertDoesNotThrow(() -> validator.validate(
@@ -25,6 +35,9 @@ class SuntechCommandValidatorTest {
         ));
     }
 
+    /**
+     * Exercita a sintaxe da consulta de parâmetros predefinidos.
+     */
     @Test
     void shouldAcceptPresetRequest() {
         assertDoesNotThrow(() -> validator.validate(
@@ -33,6 +46,9 @@ class SuntechCommandValidatorTest {
         ));
     }
 
+    /**
+     * Verifica a estrutura de uma mensagem de programação.
+     */
     @Test
     void shouldAcceptProgramCommand() {
         assertDoesNotThrow(() -> validator.validate(
@@ -41,6 +57,9 @@ class SuntechCommandValidatorTest {
         ));
     }
 
+    /**
+     * Aceita vários parâmetros na mesma mensagem de programação.
+     */
     @Test
     void shouldAcceptMultipleParameters() {
         assertDoesNotThrow(() -> validator.validate(
@@ -49,6 +68,9 @@ class SuntechCommandValidatorTest {
         ));
     }
 
+    /**
+     * Confere que o validador aceita o terminador CR opcional.
+     */
     @Test
     void shouldAcceptOptionalCarriageReturn() {
         assertDoesNotThrow(() -> validator.validate(
@@ -57,6 +79,9 @@ class SuntechCommandValidatorTest {
         ));
     }
 
+    /**
+     * Rejeita um destinatário diferente do esperado.
+     */
     @Test
     void shouldRejectDifferentIdentity() {
         IllegalArgumentException error = assertThrows(
@@ -73,6 +98,9 @@ class SuntechCommandValidatorTest {
         );
     }
 
+    /**
+     * Rejeita um cabeçalho fora dos formatos de comando aceitos.
+     */
     @Test
     void shouldRejectUnsupportedHeader() {
         var error = assertThrows(
@@ -84,6 +112,9 @@ class SuntechCommandValidatorTest {
         assertEquals("UNSUPPORTED_COMMAND_HEADER", error.getMessage());
     }
 
+    /**
+     * Rejeita uma identidade que não segue o formato do protocolo.
+     */
     @Test
     void shouldRejectInvalidIdentity() {
         var error = assertThrows(
@@ -95,6 +126,9 @@ class SuntechCommandValidatorTest {
         assertEquals("INVALID_COMMAND_IDENTITY", error.getMessage());
     }
 
+    /**
+     * Confere a rejeição de bytes fora da faixa ASCII admitida.
+     */
     @Test
     void shouldRejectInvalidAscii() {
         var error = assertThrows(
@@ -106,6 +140,9 @@ class SuntechCommandValidatorTest {
         assertEquals("INVALID_COMMAND_ASCII", error.getMessage());
     }
 
+    /**
+     * Rejeita a programação com parâmetros malformados.
+     */
     @Test
     void shouldRejectMalformedProgramCommand() {
         var error = assertThrows(

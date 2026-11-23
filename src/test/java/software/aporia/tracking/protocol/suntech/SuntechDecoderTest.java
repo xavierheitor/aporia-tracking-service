@@ -14,13 +14,23 @@ import software.aporia.tracking.core.Telemetry;
 /** Compara telemetria e heartbeats decodificados com os valores esperados e exercita campos inválidos. */
 class SuntechDecoderTest {
 
+    /** Decodificador usado para interpretar os quadros de exemplo. */
     private final SuntechDecoder decoder
             = new SuntechDecoder();
 
+    /**
+     * Codifica o quadro de exemplo com o mesmo charset usado pelo equipamento.
+     *
+     * @param value valor a interpretar
+     * @return bytes ASCII da mensagem de exemplo
+     */
     private byte[] ascii(String value) {
         return value.getBytes(StandardCharsets.US_ASCII);
     }
 
+    /**
+     * Decodifica um sinal de presença sem exigir coordenadas.
+     */
     @Test
     void shouldDecodeAliveMessage() {
 
@@ -39,6 +49,9 @@ class SuntechDecoderTest {
         assertFalse(telemetry.hasPosition());
     }
 
+    /**
+     * Rejeita um heartbeat com campos excedentes.
+     */
     @Test
     void shouldRejectAliveWithExtraFields() {
 
@@ -55,6 +68,9 @@ class SuntechDecoderTest {
         );
     }
 
+    /**
+     * Compara a posição decodificada com os valores do quadro.
+     */
     @Test
     void shouldDecodePosition() {
         var telemetry = decoder.decode(
@@ -71,6 +87,9 @@ class SuntechDecoderTest {
         assertTrue(telemetry.hasPosition());
     }
 
+    /**
+     * Rejeita uma latitude fora do intervalo geográfico.
+     */
     @Test
     void shouldRejectInvalidLatitude() {
         var exception = assertThrows(
@@ -86,6 +105,9 @@ class SuntechDecoderTest {
         assertEquals("INVALID_NUMBER", exception.getMessage());
     }
 
+    /**
+     * Exige o mapa que determina a ordem e a presença dos campos de posição.
+     */
     @Test
     void shouldRejectMissingInlineMap() {
         var error = assertThrows(
@@ -98,6 +120,9 @@ class SuntechDecoderTest {
         assertEquals("INLINE_MAP_REQUIRED", error.getMessage());
     }
 
+    /**
+     * Verifica a rejeição de mensagem fora dos formatos decodificáveis.
+     */
     @Test
     void shouldRejectUnsupportedMessage() {
         var exception = assertThrows(
@@ -110,6 +135,9 @@ class SuntechDecoderTest {
         assertTrue(exception != null);
     }
 
+    /**
+     * Extrai a posição embutida no corpo de uma resposta.
+     */
     @Test
     void shouldDecodeTelemetryInsideCommandResponse() {
 
@@ -132,6 +160,9 @@ class SuntechDecoderTest {
         assertEquals(expected, actual);
     }
 
+    /**
+     * Exercita o mapa de campos do exemplo StatusReq da revisão 4.
+     */
     @Test
     void readsStatusReqExampleFromRevisionFour() {
         var frame = ascii("RES;STT;1234567890;B9FFFF;201;1.1.11;0;20240317;15:07:40;000030A4;"

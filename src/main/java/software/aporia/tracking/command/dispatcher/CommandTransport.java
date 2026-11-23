@@ -15,13 +15,24 @@ public interface CommandTransport {
      * destino antes da escrita.
      */
     interface Endpoint {
-        /** Informa o protocolo usado pela conexão selecionada. */
+        /**
+         * Informa o protocolo usado pela conexão selecionada.
+         *
+         * @return identificador do protocolo desta implementação
+         */
         String protocol();
-        /** Informa a identidade do rastreador associado à conexão. */
+        /**
+         * Informa a identidade do rastreador associado à conexão.
+         *
+         * @return identidade do equipamento no protocolo
+         */
         String identity();
         /**
          * Escreve os bytes do comando no canal. Uma falha de E/S pode ocorrer após uma escrita
          * parcial.
+         *
+         * @param payload bytes do conteúdo da mensagem
+         * @throws IOException se a operação de entrada ou saída falhar
          */
         void send(byte[] payload) throws IOException;
     }
@@ -29,10 +40,20 @@ public interface CommandTransport {
     /**
      * Busca o canal disponível para o par tenant e dispositivo. Um resultado vazio indica
      * equipamento offline.
+     *
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @return canal da sessão disponível, ou vazio se o dispositivo estiver offline
      */
     Optional<Endpoint> connect(UUID tenantId, UUID deviceId);
 
-    /** Consulta se há um canal disponível no instante da chamada. */
+    /**
+     * Consulta se há um canal disponível no instante da chamada.
+     *
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @return verdadeiro se a conexão está disponível localmente
+     */
     default boolean isConnected(
             UUID tenantId,
             UUID deviceId
@@ -40,7 +61,14 @@ public interface CommandTransport {
         return connect(tenantId, deviceId).isPresent();
     }
 
-    /** Escreve os bytes do comando no canal. Uma falha de E/S pode ocorrer após uma escrita parcial. */
+    /**
+     * Escreve os bytes do comando no canal. Uma falha de E/S pode ocorrer após uma escrita parcial.
+     *
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @param payload bytes do conteúdo da mensagem
+     * @throws IOException se a operação de entrada ou saída falhar
+     */
     default void send(
             UUID tenantId,
             UUID deviceId,

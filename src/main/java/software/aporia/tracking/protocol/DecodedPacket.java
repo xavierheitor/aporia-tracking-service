@@ -11,6 +11,13 @@ import software.aporia.tracking.core.Telemetry;
  * @param responseType tipo de resposta quando há conteúdo de comando
  */
 public record DecodedPacket(String identity, List<Telemetry> readings, String responseType) {
+    /**
+     * Preserva a ordem das leituras em uma lista imutável para o worker.
+     *
+     * @param identity identidade declarada pelo rastreador no protocolo
+     * @param readings leituras na ordem do pacote
+     * @param responseType tipo da resposta de comando
+     */
     public DecodedPacket {
         readings = List.copyOf(readings);
     }

@@ -21,15 +21,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Verifica a recuperação de tentativas interrompidas e a expiração de comandos respeitando estado e prazo. */
 class DeviceCommandRecoveryRepositoryIT {
 
+    /** Entrada da fila usada para preparar as solicitações de teste. */
     private final DeviceCommandRepository commands
             = new DeviceCommandRepository();
 
+    /** Repositório que permite ao cenário simular reserva e transmissão. */
     private final DeviceCommandDispatchRepository dispatcher
             = new DeviceCommandDispatchRepository();
 
+    /** Operações de expiração e recuperação exercitadas pelo cenário. */
     private final DeviceCommandRecoveryRepository recovery
             = new DeviceCommandRecoveryRepository();
 
+    /**
+     * Enfileira o comando sobre o qual o teste manipulará estados e prazos.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param fixtures cadastro de teste utilizado no cenário
+     * @return UUID do comando inserido
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private UUID enqueue(
             Connection connection,
             TestFixtures fixtures
@@ -47,6 +58,15 @@ class DeviceCommandRecoveryRepositoryIT {
         );
     }
 
+    /**
+     * Ajusta o relógio persistido do comando para simular envelhecimento sem espera real.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param commandId identificador do comando na fila
+     * @param column coluna de tempo que o teste ajusta
+     * @param instant instante simulado pelo teste
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     private void setCommandTime(
             Connection connection,
             UUID commandId,
@@ -82,6 +102,11 @@ class DeviceCommandRecoveryRepositoryIT {
         }
     }
 
+    /**
+     * Confere a expiração de um comando ainda na fila.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldExpireQueuedCommand() throws Exception {
 
@@ -148,6 +173,11 @@ class DeviceCommandRecoveryRepositoryIT {
         }
     }
 
+    /**
+     * Preserva o comando cujo prazo na fila ainda está vigente.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldNotExpireValidQueuedCommand()
             throws Exception {
@@ -172,6 +202,11 @@ class DeviceCommandRecoveryRepositoryIT {
         }
     }
 
+    /**
+     * Classifica como incerta uma reserva antiga interrompida em sending.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldMarkStaleSendingAsUnknown()
             throws Exception {
@@ -240,6 +275,11 @@ class DeviceCommandRecoveryRepositoryIT {
         }
     }
 
+    /**
+     * Preserva uma reserva recente durante a recuperação por idade.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldNotRecoverRecentSendingCommand()
             throws Exception {
@@ -290,6 +330,11 @@ class DeviceCommandRecoveryRepositoryIT {
         }
     }
 
+    /**
+     * Exige transação explícita na recuperação de reservas.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectRecoveryWithoutTransaction()
             throws Exception {
@@ -308,6 +353,11 @@ class DeviceCommandRecoveryRepositoryIT {
         }
     }
 
+    /**
+     * Rejeita uma duração inválida para o limite de antiguidade.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectInvalidRecoveryDuration()
             throws Exception {
@@ -326,6 +376,11 @@ class DeviceCommandRecoveryRepositoryIT {
         }
     }
 
+    /**
+     * Recupera uma transmissão legada que excedeu o limite de idade.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRecoverStaleTransmittingCommand()
             throws Exception {
@@ -429,6 +484,11 @@ class DeviceCommandRecoveryRepositoryIT {
         }
     }
 
+    /**
+     * Preserva uma transmissão recente.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldNotRecoverRecentTransmittingCommand()
             throws Exception {
@@ -494,6 +554,11 @@ class DeviceCommandRecoveryRepositoryIT {
         }
     }
 
+    /**
+     * Confere a idempotência da recuperação sobre a mesma tentativa.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldNotRecoverSameTransmissionTwice()
             throws Exception {
@@ -579,6 +644,11 @@ class DeviceCommandRecoveryRepositoryIT {
         }
     }
 
+    /**
+     * Exige transação explícita ao recuperar transmissões antigas.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectTransmittingRecoveryWithoutTransaction()
             throws Exception {

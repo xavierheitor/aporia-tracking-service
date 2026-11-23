@@ -10,19 +10,37 @@ import javax.sql.DataSource;
 /** Cria os registros de um tenant de teste e remove os dependentes em ordem compatível com as chaves estrangeiras. */
 public final class TestFixtures implements AutoCloseable {
 
+    /** Fonte de conexões JDBC usadas pela instância. */
     private final DataSource dataSource;
 
+    /** Tenant proprietário do cadastro do equipamento. */
     private final UUID tenantId = UUID.randomUUID();
+    /** Identificador interno do equipamento cadastrado. */
     private final UUID deviceId = UUID.randomUUID();
+    /** Ativo associado ao equipamento da fixture. */
     private final UUID assetId = UUID.randomUUID();
 
+    /** Identidade que acompanha os quadros do equipamento. */
     private final String deviceIdentity;
 
+    /**
+     * Cria os registros de teste com a identidade atribuída pelo construtor.
+     *
+     * @param dataSource fonte de conexões JDBC para a operação
+     * @throws SQLException se a operação JDBC falhar
+     */
     public TestFixtures(DataSource dataSource) throws SQLException {
         this(dataSource, Long.toString(java.util.concurrent.ThreadLocalRandom.current()
                 .nextLong(1_000_000_000L, 10_000_000_000L)));
     }
 
+    /**
+     * Prepara o tenant, o equipamento e a associação usados pelo cenário.
+     *
+     * @param dataSource fonte de conexões JDBC para a operação
+     * @param deviceIdentity identidade declarada pelo rastreador no protocolo
+     * @throws SQLException se a operação JDBC falhar
+     */
     public TestFixtures(
             DataSource dataSource,
             String deviceIdentity
@@ -34,6 +52,11 @@ public final class TestFixtures implements AutoCloseable {
         create();
     }
 
+    /**
+     * Insere os registros relacionados dentro de uma transação.
+     *
+     * @throws SQLException se a operação JDBC falhar
+     */
     private void create() throws SQLException {
 
         try (Connection connection
@@ -105,6 +128,14 @@ public final class TestFixtures implements AutoCloseable {
         }
     }
 
+    /**
+     * Vincula os parâmetros à instrução da fixture na conexão recebida.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param sql instrução SQL executada na conexão de teste
+     * @param parameters valores vinculados aos parâmetros SQL
+     * @throws SQLException se a operação JDBC falhar
+     */
     private void execute(
             Connection connection,
             String sql,
@@ -122,22 +153,47 @@ public final class TestFixtures implements AutoCloseable {
         }
     }
 
+    /**
+     * Fornece o tenant proprietário dos registros da fixture.
+     *
+     * @return UUID do tenant
+     */
     public UUID tenantId() {
         return tenantId;
     }
 
+    /**
+     * Fornece o equipamento que participa das consultas do cenário.
+     *
+     * @return UUID do dispositivo
+     */
     public UUID deviceId() {
         return deviceId;
     }
 
+    /**
+     * Fornece o ativo associado ao rastreador.
+     *
+     * @return UUID do ativo
+     */
     public UUID assetId() {
         return assetId;
     }
 
+    /**
+     * Fornece a identidade usada para construir as mensagens do equipamento.
+     *
+     * @return identidade do equipamento no protocolo
+     */
     public String deviceIdentity() {
         return deviceIdentity;
     }
 
+    /**
+     * Remove primeiro os registros dependentes e confirma a limpeza em uma transação.
+     *
+     * @throws SQLException se a operação JDBC falhar
+     */
     @Override
     public void close() throws SQLException {
 

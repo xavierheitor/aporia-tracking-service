@@ -14,6 +14,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class JdbcRawPacketRepositoryIT {
     // Testes de integração para o repositório JdbcRawPacketRepository
 
+    /**
+     * Grava os bytes e confere o pacote recuperado pelo identificador.
+     */
     @Test
     void shouldSaveAndFindPacket() {
         var repository = new JdbcRawPacketRepository(

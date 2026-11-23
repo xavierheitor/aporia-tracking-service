@@ -18,6 +18,11 @@ import software.aporia.tracking.support.TestFixtures;
 /** Verifica a rejeição de um pacote cuja identidade diverge da identidade cadastrada. */
 class TrackingWorkerIT {
 
+    /**
+     * Rejeita o pacote cuja identidade decodificada diverge da identidade cadastrada.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRejectPacketWithDifferentDeviceIdentity()
             throws Exception {
