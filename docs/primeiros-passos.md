@@ -16,25 +16,21 @@ Abra primeiro o ponto de entrada do gateway e localize a chamada a `server.accep
 
 ## 2. Preparar o banco do primeiro teste
 
-Se a instância `aporia-tracking-postgis-test` já estiver disponível na porta 55433, use-a. Para uma instalação local nova com Docker e Compose, construa a imagem PostgreSQL/PostGIS para a plataforma indicada pelo Compose de testes e suba apenas esse serviço.
+Se já existe um banco dedicado a testes na porta 55433, use essa instância. Em uma instalação nova, reutilize o Compose do banco com outro nome de projeto; o volume e a rede ficam isolados do desenvolvimento. Configure em `.env` as credenciais da instância local. O exemplo usa o usuário `tracking`.
 
 ```sh
-docker build --platform linux/arm64 -f docker/postgres/Dockerfile -t aporia-postgres-postgis:16 .
-docker compose -p aporia-tracking-tests -f compose.postgis-test.yaml up -d --wait
-docker exec aporia-tracking-postgis-test psql -X -U tracking -d postgres -c '\l'
-```
-
-O Compose inicializa o banco administrativo `postgres`. Se `aporia_tracking_test` estiver ausente na lista, crie-o uma vez. Na instância dedicada a testes, disponibilize as extensões no schema público para que os schemas temporários possam reutilizá-las.
-
-```sh
-# Executar apenas quando o banco estiver ausente.
-docker exec aporia-tracking-postgis-test createdb -U tracking aporia_tracking_test
-
-docker exec aporia-tracking-postgis-test psql -X -v ON_ERROR_STOP=1 -U tracking -d aporia_tracking_test \
+testdb() {
+  TRACKING_DATABASE_NAME=aporia_tracking_test TRACKING_DATABASE_PORT=55433 \
+    docker compose -p aporia-tracking-tests -f compose.database.yaml "$@"
+}
+testdb up -d --build --wait
+testdb exec -T postgres psql -X -v ON_ERROR_STOP=1 -U tracking -d aporia_tracking_test \
   -c 'SELECT current_database(), current_user' \
   -c 'CREATE EXTENSION IF NOT EXISTS postgis' \
   -c 'CREATE EXTENSION IF NOT EXISTS btree_gist'
 ```
+
+Em volume vazio, a imagem cria `aporia_tracking_test` no primeiro boot. Se um volume antigo já estiver inicializado, confirme a lista com `testdb exec -T postgres psql -X -U tracking -d postgres -c '\l'`. Crie o banco com `testdb exec -T postgres createdb -U tracking aporia_tracking_test` somente se ele estiver ausente.
 
 Exporte as variáveis abaixo no terminal do Maven e informe em `TRACKING_TEST_DB_PASSWORD` a senha do usuário da instância de teste. Em Bash ou Zsh, o exemplo lê a senha sem gravá-la no histórico.
 

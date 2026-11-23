@@ -45,12 +45,10 @@ O arquivo `.env.example` mostra a configuração da aplicação para execução 
 
 | Arquivo | Uso |
 | --- | --- |
-| [compose.yaml](compose.yaml) | PostgreSQL/PostGIS de desenvolvimento, porta local 55434. |
-| [compose.postgis-test.yaml](compose.postgis-test.yaml) | Instância PostgreSQL/PostGIS para testes, porta local 55433. |
-| [compose.app.yaml](compose.app.yaml) | Gateway e worker. O gateway publica a porta 5500 em loopback. |
-| [compose.commands.yaml](compose.commands.yaml) | Complemento de homologação que habilita o dispatcher no gateway e preserva o arquivo de propriedade em volume. |
+| [compose.database.yaml](compose.database.yaml) | Um PostgreSQL 16 com PostGIS, volume persistente e porta local 55434. O mesmo arquivo também cria uma instância isolada para testes usando outro projeto Compose. |
+| [compose.services.yaml](compose.services.yaml) | Gateway e worker na rede do banco. O dispatcher é opcional dentro do gateway. |
 
-Ao combinar os arquivos de banco e aplicação em um ambiente novo, confira o nome DNS do banco. A aplicação espera `postgres-postgis` na rede externa `aporia-tracking-service_default`, enquanto o serviço de desenvolvimento se chama `postgres`. A URL JDBC ou o alias de rede deve corresponder ao banco escolhido.
+O serviço de banco responde pelo nome `postgres` na rede `aporia-tracking-db_default`. Configure a senha em `.env`, suba o banco, aplique as migrations e inicie os serviços com a imagem da revisão desejada. As instruções para uma instalação nova ou para migrar dados existentes estão no [guia de deploy](docs/deploy.md).
 
 Para configurar um rastreador, listar pendências e autorizar um equipamento em um tenant, consulte o [guia do gateway TCP](docs/gateway-tcp.md). Para construir a imagem, habilitar o envio da consulta de firmware ou verificar uma tentativa de entrega, consulte o [guia de comandos](docs/comandos.md).
 

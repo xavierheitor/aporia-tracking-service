@@ -21,58 +21,34 @@ docker compose version
 | `TRACKING_DISPATCH_OWNER_FILE` | Habilita a transmissão de comandos no gateway. Na implantação inicial de telemetria, deixe a variável ausente. |
 | `FLYWAY_URL`, `FLYWAY_USER`, `FLYWAY_PASSWORD` | Usadas pelo processo de migração. A URL deve alcançar o banco a partir de onde o Maven é executado. |
 
-O Compose carrega credenciais do arquivo local `.env`. Prepare-o a partir de `.env.example` se ainda não existir, proteja-o no host e forneça as credenciais do ambiente. Para produção, use o mecanismo de segredos da instalação. Os valores explícitos em `environment` no Compose prevalecem sobre `env_file`, inclusive a URL JDBC nos dois serviços. [Compose da aplicação](../compose.app.yaml) · [Exemplo de ambiente](../.env.example)
+O Compose lê as variáveis do shell ou do arquivo local `.env`. Prepare-o a partir de `.env.example` se ainda não existir, proteja-o no host e forneça as credenciais do ambiente. Para produção, use o mecanismo de segredos da instalação. Nos contêineres, a URL JDBC vem de `TRACKING_CONTAINER_DB_URL`. A JVM iniciada diretamente no host usa `TRACKING_DB_URL`. [Compose da aplicação](../compose.services.yaml) · [Exemplo de ambiente](../.env.example)
 
 ## 2. Preparar PostgreSQL e a rede
 
 **Com banco já provisionado**, confirme que a aplicação alcança o endereço interno, que o operador alcança a administração e que o servidor tem os arquivos de extensão `postgis` e `btree_gist`. A migration V2 habilita as extensões com `CREATE EXTENSION IF NOT EXISTS`; use uma credencial de migração com os privilégios necessários, ou peça ao administrador para preparar as extensões.
 
-**Em homologação local nova**, os comandos abaixo usam o Compose de desenvolvimento. Ele está configurado para ARM64, publica o banco em `127.0.0.1:55434` e traz uma credencial de desenvolvimento. O nome de projeto explícito cria a rede `aporia-tracking-service_default`, que o Compose da aplicação espera encontrar.
+**Em homologação local nova**, use o [Compose do banco](../compose.database.yaml). Em volume vazio, o PostgreSQL cria o banco `aporia_tracking_v2` e o usuário configurado. A imagem inclui PostGIS; a migration V2 habilita a extensão no banco alvo.
 
 ```sh
-docker build --platform linux/arm64 -f docker/postgres/Dockerfile -t aporia-postgres-postgis:16 .
-docker compose -p aporia-tracking-service -f compose.yaml up -d --wait postgres
-docker compose -p aporia-tracking-service -f compose.yaml exec -T postgres \
-  psql -X -U tracking -d postgres -c '\l'
+docker compose -f compose.database.yaml up -d --build --wait
+docker compose -f compose.database.yaml exec -T postgres sh -c 'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT current_database(), current_user"'
 ```
 
-Se o banco `aporia_tracking_v2` estiver ausente, crie-o uma vez:
+O projeto `aporia-tracking-db` cria a rede `aporia-tracking-db_default` e o volume `aporia-tracking-db_postgres-data`. A porta no host é `TRACKING_DATABASE_PORT` (55434 por padrão). As credenciais de inicialização só são aplicadas a um volume vazio.
 
-```sh
-docker compose -p aporia-tracking-service -f compose.yaml exec -T postgres \
-  createdb -U tracking aporia_tracking_v2
-```
+**Instalação anterior com dados:** antes da troca, identifique o banco realmente usado pelos processos e seus volumes com `docker ps` e `docker inspect --format '{{json .Mounts}}' NOME_DO_CONTAINER`. Há instalações anteriores com bancos nas portas 55432 e 55433. Confira o nome do banco, o histórico Flyway e as contagens no destino escolhido. Para migrar, interrompa a escrita, faça um backup com `pg_dump -Fc`, restaure em um banco novo e confira extensões, histórico e contagens antes de redirecionar os serviços. O novo nome de projeto cria armazenamento independente. Preserve o volume antigo para recuperação. Para continuar usando o banco atual, configure sua rede externa e a URL JDBC interna nos serviços.
 
-## 3. Construir a imagem e resolver o endereço interno
+## 3. Construir a imagem e selecionar a rede
 
 ```sh
 export TRACKING_RELEASE_IMAGE="aporia-tracking-java:$(git rev-parse HEAD)"
 docker build -f docker/java/Dockerfile -t "$TRACKING_RELEASE_IMAGE" .
-```
-
-O Compose da aplicação traz a tag `:dev` e aponta para `postgres-postgis`. O serviço do banco de desenvolvimento se chama `postgres`. Para esse ambiente, salve o exemplo abaixo como `compose.release.local.yaml` ao lado do Compose principal. Ele usa a revisão construída e o DNS correto. Para uma instalação com banco externo, substitua a URL nos **dois** serviços e configure uma rede externa existente em `networks.tracking-network.name` se a rede da instalação tiver outro nome.
-
-```yaml
-services:
-  tracking-gateway:
-    image: ${TRACKING_RELEASE_IMAGE:?informe a imagem da revisão}
-    environment:
-      TRACKING_DB_URL: jdbc:postgresql://postgres:5432/aporia_tracking_v2
-  tracking-worker:
-    image: ${TRACKING_RELEASE_IMAGE:?informe a imagem da revisão}
-    environment:
-      TRACKING_DB_URL: jdbc:postgresql://postgres:5432/aporia_tracking_v2
-```
-
-Nos comandos seguintes, esta função preserva a ordem dos arquivos Compose:
-
-```sh
-app() {
-  docker compose -f compose.app.yaml -f compose.release.local.yaml "$@"
-}
+app() { docker compose -f compose.services.yaml "$@"; }
 app config --quiet
 app config --images
 ```
+
+A imagem selecionada vale para gateway e worker. O endereço interno padrão é `jdbc:postgresql://postgres:5432/aporia_tracking_v2`. Para outro servidor ou outro banco, configure `TRACKING_CONTAINER_DB_URL` e `TRACKING_DATABASE_NETWORK`. O nome da rede precisa existir quando o Compose dos serviços subir.
 
 ## 4. Aplicar o schema e iniciar
 
@@ -101,7 +77,7 @@ app ps
 app logs --tail=80 tracking-gateway tracking-worker
 ```
 
-Procure `Tracking TCP Gateway listening` e `Aporia Tracking Worker started`. A primeira mensagem informa o bind interno. Para conectar um equipamento físico, publique a porta no **endereço privado alcançável pelo rastreador** e configure o firewall e a rota da APN/VPN. Confira o mapeamento efetivo com `app port tracking-gateway 5500`. No Compose fornecido, `127.0.0.1:5500` aceita somente conexões locais ao host.
+Procure `Tracking TCP Gateway listening` e `Aporia Tracking Worker started`. A primeira mensagem informa o bind interno. Para conectar um equipamento físico, defina `TRACKING_PUBLISH_ADDRESS` com o **endereço privado alcançável pelo rastreador** e recrie o gateway e configure o firewall e a rota da APN/VPN. Confira o mapeamento efetivo com `app port tracking-gateway 5500`. No Compose fornecido, `127.0.0.1:5500` aceita somente conexões locais ao host.
 
 ## 5. Verificar o fluxo com dados
 
@@ -134,17 +110,17 @@ ORDER BY received_at DESC LIMIT 10;
 
 ## 6. Habilitar comandos e recuperar uma versão
 
-Em homologação de comandos, mantenha a mesma imagem e acrescente o arquivo de comandos ao **mesmo projeto Compose**. Ele configura o arquivo de propriedade em um volume persistente. Só a consulta Suntech de firmware está habilitada pelo catálogo atual.
+Em homologação de comandos, habilite o arquivo do emissor no ambiente do gateway. O volume `dispatch-owner` pertence ao projeto `aporia-tracking-app` e conserva o UUID entre recriações. Só a consulta Suntech de firmware está habilitada pelo catálogo atual.
 
 ```sh
-app -f compose.commands.yaml config --quiet
-app -f compose.commands.yaml up -d
+export TRACKING_DISPATCH_OWNER_FILE=/var/lib/aporia-dispatch/owner
+app up -d tracking-gateway
 ```
 
-Confira envio e retorno pelo roteiro do [ciclo de comandos](comandos.md). Ao desabilitar envio, pare o gateway emissor e recrie o serviço com a configuração de telemetria. O worker pode continuar ativo.
+Para desabilitar o envio, remova a definição também de `.env`, caso tenha sido gravada ali. Deixe a variável ausente, pois um caminho vazio não é um arquivo de propriedade válido. Recrie apenas o gateway com a configuração de telemetria.
 
 ```sh
-app -f compose.commands.yaml stop tracking-gateway
+unset TRACKING_DISPATCH_OWNER_FILE
 app up -d --force-recreate tracking-gateway
 ```
 
