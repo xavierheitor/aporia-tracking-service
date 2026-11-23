@@ -9,6 +9,16 @@ Serviço de rastreamento GPS em Java 25 com Maven e PostgreSQL 16/PostGIS. Dois 
 
 A API HTTP está prevista para uma etapa posterior.
 
+## Por onde começar
+
+| Se você quer… | Comece por |
+| --- | --- |
+| Entender o projeto e executar o primeiro teste com um rastreador simulado | [Primeiros passos](docs/primeiros-passos.md) |
+| Acompanhar uma conexão, identificar qual thread trabalha nela e seguir uma posição até o banco | [Arquitetura e fluxos](docs/arquitetura.md) |
+| Configurar, descobrir e autorizar um equipamento físico | [Gateway TCP e protocolos](docs/gateway-tcp.md) |
+| Entender o envio, a recuperação e o significado dos estados de comandos | [Ciclo de comandos](docs/comandos.md) |
+| Preparar o ambiente, aplicar migrations, subir os processos e verificar a versão implantada | [Deploy e operação](docs/deploy.md) |
+
 ## Organização do código
 
 Os pacotes Java ficam sob `software.aporia.tracking`. Os testes seguem a mesma estrutura em `src/test/java`.

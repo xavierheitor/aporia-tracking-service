@@ -20,6 +20,8 @@ O código interno autorizado chama DeviceCommandRepository.enqueueFirmwareVersio
 
 ## Instalação e operação do gateway
 
+Para preparar a rede, selecionar a imagem da revisão, aplicar as migrations e subir ambos os serviços, comece pelo [guia de deploy](deploy.md). As condições abaixo se aplicam ao emissor de comandos.
+
 1. Gerar a imagem com `docker build -f docker/java/Dockerfile -t aporia-tracking-java:dev .`. Usar tag imutável da revisão aprovada para uma implantação. Conferir current_database(), current_user e o histórico de migrations no ambiente escolhido. Parar emissores anteriores, aplicar e validar todas as migrations, incluindo a V9 de descoberta e autorização. A V8 torna a chave de requisição única por tenant, dispositivo e solicitante.
 2. O Compose base atende telemetria. Para homologação do dispatcher, usar `docker compose -f compose.app.yaml -f compose.commands.yaml up -d` após conferir a URL de banco configurada. Alternativamente iniciar TcpGateway e WorkerApplication com as variáveis de banco do ambiente. Configurar TRACKING_DISPATCH_OWNER_FILE na instância do gateway que transmite. O diretório pai deve existir e permitir escrita. O volume do Compose preserva esse arquivo ao recriar o contêiner.
 3. A identidade de dez dígitos que o rastreador declara não autentica criptograficamente o equipamento. Homologar em rede privada/VPN/APN com acesso controlado. Manter programação, atuação em saídas, bloqueio e envio arbitrário desabilitados.
