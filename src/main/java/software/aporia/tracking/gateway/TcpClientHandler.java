@@ -132,13 +132,12 @@ public final class TcpClientHandler {
                             adapter.decoderVersion()
                     );
 
-                    var packetId = ingestion.accept(receivedFrame);
+                    var packetId = ingestion.accept(receivedFrame, registeredSession.tenantId(), registeredSession.deviceId());
 
                     log.debug(
-                            "Packet persisted: id={}, protocol={}, identity={}",
+                            "Packet persisted: id={}, protocol={}",
                             packetId,
-                            adapter.protocolId(),
-                            frame.deviceIdentity()
+                            adapter.protocolId()
                     );
                 }
             }

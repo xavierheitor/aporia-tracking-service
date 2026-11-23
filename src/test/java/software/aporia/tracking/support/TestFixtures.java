@@ -17,6 +17,11 @@ public final class TestFixtures implements AutoCloseable {
 
     private final String deviceIdentity;
 
+    public TestFixtures(DataSource dataSource) throws SQLException {
+        this(dataSource, Long.toString(java.util.concurrent.ThreadLocalRandom.current()
+                .nextLong(1_000_000_000L, 10_000_000_000L)));
+    }
+
     public TestFixtures(
             DataSource dataSource,
             String deviceIdentity

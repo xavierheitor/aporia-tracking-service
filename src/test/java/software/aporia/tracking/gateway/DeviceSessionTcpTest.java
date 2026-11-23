@@ -125,4 +125,30 @@ class DeviceSessionTcpTest {
         }
     }
 
+
+    @Test
+    void deadlineClosesBlockedWriterAndInvalidatesSession() {
+        var closed = new java.util.concurrent.CountDownLatch(1);
+        Socket stalled = new Socket() {
+            @Override public boolean isConnected() { return true; }
+            @Override public void close() { closed.countDown(); }
+            @Override public java.io.OutputStream getOutputStream() {
+                return new java.io.OutputStream() {
+                    @Override public void write(int value) throws java.io.IOException {
+                        try {
+                            if (!closed.await(8, java.util.concurrent.TimeUnit.SECONDS)) {
+                                throw new AssertionError("write deadline did not close the socket");
+                            }
+                        } catch (InterruptedException e) {
+                            throw new AssertionError(e);
+                        }
+                        throw new java.io.IOException("closed");
+                    }
+                };
+            }
+        };
+        var session = new DeviceSession(UUID.randomUUID(), UUID.randomUUID(), "suntech", "1234567890", stalled);
+        assertThrows(java.io.IOException.class, () -> session.send(new byte[]{1}));
+        assertFalse(session.isConnected());
+    }
 }

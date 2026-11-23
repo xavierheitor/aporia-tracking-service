@@ -50,8 +50,9 @@ public final class DeviceCommandResponseRepository {
                 protocol,
                 response_type,
                 payload,
-                result
-            ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 'unknown')
+                result, received_at
+            ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 'unknown',
+                (SELECT received_at FROM raw_packets WHERE id=?))
             ON CONFLICT (raw_packet_id) DO NOTHING
             """;
 
@@ -65,6 +66,7 @@ public final class DeviceCommandResponseRepository {
             statement.setString(5, protocol);
             statement.setString(6, responseType);
             statement.setBytes(7, payload);
+            statement.setObject(8, rawPacketId);
 
             int inserted = statement.executeUpdate();
 

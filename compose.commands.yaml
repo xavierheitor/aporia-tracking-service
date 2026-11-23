@@ -1,0 +1,10 @@
+# Opt-in TCP command dispatch for homologation. Combine with compose.app.yaml.
+services:
+  tracking-gateway:
+    environment:
+      TRACKING_DISPATCH_OWNER_FILE: /var/lib/aporia-dispatch/owner
+    volumes:
+      - dispatch-owner:/var/lib/aporia-dispatch
+
+volumes:
+  dispatch-owner:

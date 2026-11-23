@@ -4,6 +4,10 @@
 >
 > **Fonte de verdade:** o código, as migrations e os testes presentes no checkout atual prevalecem sobre este documento. As informações de progresso abaixo são derivadas do histórico de desenvolvimento e precisam ser verificadas no repositório.
 
+## Atualização do checkout em 23/11/2026
+
+O fluxo de homologação para consulta de firmware inclui dispatcher com recuperação por proprietário, gateway, worker e migrations V7–V8. A decisão de arquitetura, o contrato da fila, o ensaio de integração e o procedimento operacional estão em [docs/comandos.md](docs/comandos.md). O Compose de comandos é opt-in. O Marco C preserva RES/RPR sem vínculo nos formatos disponíveis. A API ficou para implementação posterior pelo mantenedor. A homologação física, a evidência para correlação positiva e a ativação em produção continuam pendentes. As seções de estado e roadmap abaixo registram o planejamento original.
+
 ## 1. Missão e escopo
 
 O **Aporia Tracking Service** é um serviço backend Java para rastreamento de dispositivos GPS, com isolamento multi-tenant, comunicação TCP com rastreadores, ingestão e processamento de telemetria, persistência geoespacial e envio controlado de comandos. O protocolo implementado inicialmente é **Suntech**, com foco no ST8310R; a arquitetura deve permitir protocolos adicionais sem contaminar o núcleo de domínio com particularidades de um fabricante. Esse serviço servirá de base para uma api que fornece os dados e interface do serviço para clientes.

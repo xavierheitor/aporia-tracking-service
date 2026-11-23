@@ -44,7 +44,7 @@ public final class DeviceCommandDispatchRepository {
                     + ", protocol=" + protocol
                     + ", payloadBytes=" + payload.length
                     + ", attempts=" + attempts
-                    + ", claimToken=" + claimToken + "]";
+                    + "]";
         }
     }
 
@@ -52,81 +52,7 @@ public final class DeviceCommandDispatchRepository {
             Connection connection
     ) throws SQLException {
 
-        Objects.requireNonNull(connection);
-
-        if (connection.getAutoCommit()) {
-            throw new IllegalStateException(
-                    "CLAIM_REQUIRES_TRANSACTION"
-            );
-        }
-
-        UUID token = UUID.randomUUID();
-
-        String sql = """
-        WITH candidate AS (
-            SELECT c.id
-            FROM device_commands c
-            JOIN devices d
-              ON d.tenant_id = c.tenant_id
-             AND d.id = c.device_id
-            WHERE c.status = 'queued'
-              AND c.available_at <= NOW()
-              AND c.expires_at > NOW()
-              AND d.enabled = true
-              AND d.protocol = c.protocol
-            ORDER BY c.available_at, c.created_at, c.id
-            FOR UPDATE OF c SKIP LOCKED
-            LIMIT 1
-        )
-        UPDATE device_commands c
-        SET status = 'sending',
-            attempts = c.attempts + 1,
-            claimed_at = NOW(),
-            claim_token = ?
-        FROM candidate
-        WHERE c.id = candidate.id
-          AND c.status = 'queued'
-        RETURNING
-            c.id,
-            c.tenant_id,
-            c.device_id,
-            c.protocol,
-            c.payload,
-            c.attempts,
-            c.claim_token
-        """;
-
-        try (PreparedStatement statement
-                = connection.prepareStatement(sql)) {
-
-            // Associa o UUID ao parâmetro do SQL.
-            statement.setObject(1, token);
-
-            try (ResultSet result = statement.executeQuery()) {
-
-                if (!result.next()) {
-                    return Optional.empty();
-                }
-
-                ClaimedCommand command = new ClaimedCommand(
-                        result.getObject("id", UUID.class),
-                        result.getObject("tenant_id", UUID.class),
-                        result.getObject("device_id", UUID.class),
-                        result.getString("protocol"),
-                        result.getBytes("payload"),
-                        result.getInt("attempts"),
-                        result.getObject("claim_token", UUID.class)
-                );
-
-                if (result.next()) {
-                    throw new SQLException(
-                            "MULTIPLE_COMMANDS_CLAIMED"
-                    );
-                }
-
-                return Optional.of(command);
-            }
-        }
+        return claim(connection, null, null);
     }
 
     public boolean markSent(
@@ -144,7 +70,7 @@ public final class DeviceCommandDispatchRepository {
         String sql = """
         UPDATE device_commands
         SET status = 'sent',
-            sent_at = NOW()
+            sent_at = NOW(), claim_token = NULL
         WHERE tenant_id = ?
           AND id = ?
           AND claim_token = ?
@@ -169,6 +95,11 @@ public final class DeviceCommandDispatchRepository {
             UUID claimToken
     ) throws SQLException {
 
+        return authorizeTransmission(connection, tenantId, commandId, claimToken, null, null);
+    }
+
+    public boolean authorizeTransmission(Connection connection, UUID tenantId, UUID commandId,
+                                         UUID claimToken, UUID owner, String sessionIdentity) throws SQLException {
         Objects.requireNonNull(connection);
         Objects.requireNonNull(tenantId);
         Objects.requireNonNull(commandId);
@@ -177,20 +108,29 @@ public final class DeviceCommandDispatchRepository {
         String sql = """
         UPDATE device_commands
         SET status = 'transmitting',
-            transmission_started_at = NOW()
+            transmission_started_at = NOW(), dispatch_owner = ?
         WHERE tenant_id = ?
           AND id = ?
           AND claim_token = ?
           AND status = 'sending'
-          AND expires_at > NOW()
+          AND expires_at > clock_timestamp()
+          AND (CAST(? AS uuid) IS NULL OR (requested_by IS NOT NULL AND request_key IS NOT NULL))
+          AND EXISTS (SELECT 1 FROM devices d WHERE d.id = device_commands.device_id
+                      AND d.tenant_id = device_commands.tenant_id AND d.enabled
+                      AND d.protocol = device_commands.protocol
+                      AND (CAST(? AS varchar) IS NULL OR d.identity=?))
         """;
 
         try (PreparedStatement statement
                 = connection.prepareStatement(sql)) {
 
-            statement.setObject(1, tenantId);
-            statement.setObject(2, commandId);
-            statement.setObject(3, claimToken);
+            statement.setObject(1, owner);
+            statement.setObject(2, tenantId);
+            statement.setObject(3, commandId);
+            statement.setObject(4, claimToken);
+            statement.setObject(5, owner);
+            statement.setString(6, sessionIdentity);
+            statement.setString(7, sessionIdentity);
 
             return statement.executeUpdate() == 1;
         }
@@ -202,64 +142,65 @@ public final class DeviceCommandDispatchRepository {
             UUID deviceId
     ) throws SQLException {
 
-        Objects.requireNonNull(connection);
-        Objects.requireNonNull(tenantId);
-        Objects.requireNonNull(deviceId);
+        return claim(connection, Objects.requireNonNull(tenantId), Objects.requireNonNull(deviceId));
+    }
 
+    private Optional<ClaimedCommand> claim(Connection connection, UUID tenantId, UUID deviceId)
+            throws SQLException {
         if (connection.getAutoCommit()) {
             throw new IllegalStateException(
                     "CLAIM_REQUIRES_TRANSACTION"
             );
         }
 
-        UUID token = UUID.randomUUID();
-
-        String sql = """
-        WITH candidate AS (
+        String select = """
             SELECT c.id
             FROM device_commands c
             JOIN devices d
               ON d.tenant_id = c.tenant_id
              AND d.id = c.device_id
-            WHERE c.tenant_id = ?
-              AND c.device_id = ?
-              AND c.status = 'queued'
+            WHERE %s c.status = 'queued'
               AND c.available_at <= NOW()
               AND c.expires_at > NOW()
               AND d.enabled = true
               AND d.protocol = c.protocol
+              AND NOT EXISTS (SELECT 1 FROM device_commands active
+                              WHERE active.tenant_id = c.tenant_id AND active.device_id = c.device_id
+                                AND active.status IN ('sending', 'transmitting', 'sent'))
             ORDER BY
                 c.available_at,
                 c.created_at,
                 c.id
-            FOR UPDATE OF c SKIP LOCKED
+            FOR UPDATE OF c, d SKIP LOCKED
             LIMIT 1
-        )
-        UPDATE device_commands c
-        SET status = 'sending',
-            attempts = c.attempts + 1,
-            claimed_at = NOW(),
-            claim_token = ?
-        FROM candidate
-        WHERE c.id = candidate.id
-          AND c.status = 'queued'
-        RETURNING
-            c.id,
-            c.tenant_id,
-            c.device_id,
-            c.protocol,
-            c.payload,
-            c.attempts,
-            c.claim_token
-        """;
+        """.formatted(deviceId == null ? "" : "c.tenant_id = ? AND c.device_id = ? AND");
 
-        try (PreparedStatement statement
-                = connection.prepareStatement(sql)) {
+        UUID candidate;
+        try (var statement = connection.prepareStatement(select)) {
+            if (deviceId != null) {
+                statement.setObject(1, tenantId);
+                statement.setObject(2, deviceId);
+            }
+            try (var rows = statement.executeQuery()) {
+                if (!rows.next()) return Optional.empty();
+                candidate = rows.getObject(1, UUID.class);
+            }
+        }
 
-            statement.setObject(1, tenantId);
-            statement.setObject(2, deviceId);
-            statement.setObject(3, token);
-
+        // Recheck with a fresh READ COMMITTED snapshot after locking the device.
+        // A competing reservation could have committed while the SELECT was scanning.
+        String update = """
+                UPDATE device_commands c SET status='sending', attempts=c.attempts+1,
+                    claimed_at=now(), claim_token=?
+                WHERE c.id=? AND c.status='queued' AND c.expires_at > clock_timestamp()
+                AND NOT EXISTS (SELECT 1 FROM device_commands active
+                                WHERE active.tenant_id=c.tenant_id AND active.device_id=c.device_id
+                                  AND active.status IN ('sending','transmitting','sent'))
+                RETURNING id,tenant_id,device_id,protocol,payload,attempts,claim_token
+                """;
+        try (var statement = connection.prepareStatement(update)) {
+            statement.setObject(1, UUID.randomUUID());
+            statement.setObject(2, candidate);
             try (ResultSet result = statement.executeQuery()) {
 
                 if (!result.next()) {
@@ -287,4 +228,26 @@ public final class DeviceCommandDispatchRepository {
         }
     }
 
+    public enum Failure {
+        COMMAND_POLICY_DENIED, AUTHORIZATION_REJECTED, TCP_WRITE_UNCERTAIN
+    }
+
+    public boolean finishFailure(Connection connection, ClaimedCommand command, Failure reason)
+            throws SQLException {
+        boolean writing = reason == Failure.TCP_WRITE_UNCERTAIN;
+        String transition = writing
+                ? "status='delivery_unknown', delivery_unknown_at=now()"
+                : "status='delivery_failed'";
+        String sql = "UPDATE device_commands SET claim_token=NULL, error_code=?, " + transition
+                + " WHERE tenant_id=? AND device_id=? AND id=? AND claim_token=? AND status=?";
+        try (var statement = connection.prepareStatement(sql)) {
+            statement.setString(1, reason.name());
+            statement.setObject(2, command.tenantId());
+            statement.setObject(3, command.deviceId());
+            statement.setObject(4, command.id());
+            statement.setObject(5, command.claimToken());
+            statement.setString(6, writing ? "transmitting" : "sending");
+            return statement.executeUpdate() == 1;
+        }
+    }
 }

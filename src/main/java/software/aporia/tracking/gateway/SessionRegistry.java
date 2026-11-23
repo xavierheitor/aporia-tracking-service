@@ -1,5 +1,6 @@
 package software.aporia.tracking.gateway;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -60,9 +61,12 @@ public final class SessionRegistry {
                 session.deviceId()
         );
 
-        sessions.remove(key, session);
-
         session.invalidate();
+        sessions.remove(key, session);
+    }
+
+    public List<DeviceSession> onlineSessions() {
+        return List.copyOf(sessions.values());
     }
 
     public int size() {

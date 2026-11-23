@@ -1,5 +1,6 @@
 package software.aporia.tracking.storage;
 
+import software.aporia.tracking.protocol.FirmwareVersionRequest;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -19,6 +20,56 @@ public final class DeviceCommandRepository {
             byte[] payload,
             Instant expiresAt
     ) throws SQLException {
+        return enqueue(connection, tenantId, deviceId, protocol, payload, expiresAt, null, null);
+    }
+
+    public Optional<UUID> enqueueFirmwareVersion(Connection connection, UUID tenantId, UUID deviceId,
+                                                 UUID principalId, UUID requestKey) throws SQLException {
+        Objects.requireNonNull(principalId);
+        Objects.requireNonNull(requestKey);
+        if (connection.getAutoCommit()) throw new IllegalStateException("ENQUEUE_REQUIRES_TRANSACTION");
+        try (var statement = connection.prepareStatement("""
+                SELECT identity FROM devices WHERE tenant_id=? AND id=? AND protocol='suntech'
+                AND enabled FOR UPDATE
+                """)) {
+            statement.setObject(1, tenantId);
+            statement.setObject(2, deviceId);
+            try (var row = statement.executeQuery()) {
+                if (!row.next()) return Optional.empty();
+                // All submissions for this device hold its row lock until commit.
+                try (var previous = connection.prepareStatement("""
+                        SELECT id FROM device_commands WHERE tenant_id=? AND device_id=?
+                        AND requested_by=? AND request_key=?
+                        """)) {
+                    previous.setObject(1, tenantId);
+                    previous.setObject(2, deviceId);
+                    previous.setObject(3, principalId);
+                    previous.setObject(4, requestKey);
+                    try (var ids = previous.executeQuery()) {
+                        if (ids.next()) return Optional.of(ids.getObject(1, UUID.class));
+                    }
+                }
+                try (var capacity = connection.prepareStatement("""
+                        SELECT count(*) FROM device_commands WHERE tenant_id=? AND device_id=? AND status='queued'
+                        """)) {
+                    capacity.setObject(1, tenantId);
+                    capacity.setObject(2, deviceId);
+                    try (var count = capacity.executeQuery()) {
+                        count.next();
+                        if (count.getInt(1) >= 10) throw new QueueFullException();
+                    }
+                }
+                byte[] payload = FirmwareVersionRequest.encode(row.getString(1));
+                return Optional.of(enqueue(connection, tenantId, deviceId, "suntech", payload,
+                        Instant.now().plusSeconds(120), principalId, requestKey));
+            }
+        }
+    }
+
+    public static final class QueueFullException extends IllegalStateException {}
+
+    private UUID enqueue(Connection connection, UUID tenantId, UUID deviceId, String protocol,
+                         byte[] payload, Instant expiresAt, UUID principalId, UUID requestKey) throws SQLException {
         Objects.requireNonNull(connection);
         Objects.requireNonNull(tenantId);
         Objects.requireNonNull(deviceId);
@@ -48,11 +99,11 @@ public final class DeviceCommandRepository {
                 protocol,
                 payload,
                 status,
-                expires_at
+                expires_at, requested_by, request_key
             )
             SELECT
                 ?, d.tenant_id, d.id, d.protocol,
-                ?, 'queued', ?
+                ?, 'queued', ?, ?, ?
             FROM devices d
             WHERE d.tenant_id = ?
               AND d.id = ?
@@ -69,9 +120,11 @@ public final class DeviceCommandRepository {
                     3,
                     expiresAt.atOffset(java.time.ZoneOffset.UTC)
             );
-            statement.setObject(4, tenantId);
-            statement.setObject(5, deviceId);
-            statement.setString(6, protocol);
+            statement.setObject(4, principalId);
+            statement.setObject(5, requestKey);
+            statement.setObject(6, tenantId);
+            statement.setObject(7, deviceId);
+            statement.setString(8, protocol);
 
             int inserted = statement.executeUpdate();
 

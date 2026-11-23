@@ -209,4 +209,24 @@ class SessionCommandTransportTest {
             assertEquals("DEVICE_SESSION_NOT_AVAILABLE", error.getMessage());
         }
     }
+    @Test
+    void selectedEndpointNeverSwitchesToReplacementSocket() throws Exception {
+        UUID tenant = UUID.randomUUID();
+        UUID device = UUID.randomUUID();
+        try (var listener = new ServerSocket(0);
+             var oldPeer = new Socket("127.0.0.1", listener.getLocalPort()); var oldSocket = listener.accept();
+             var newPeer = new Socket("127.0.0.1", listener.getLocalPort()); var newSocket = listener.accept()) {
+            var registry = new SessionRegistry();
+            registry.register(new DeviceSession(tenant, device, PROTOCOL, IDENTITY, oldSocket));
+            var transport = new SessionCommandTransport(registry);
+            var selected = transport.connect(tenant, device).orElseThrow();
+            registry.register(new DeviceSession(tenant, device, PROTOCOL, IDENTITY, newSocket));
+            byte[] bytes = "test".getBytes(StandardCharsets.US_ASCII);
+            assertThrows(IOException.class, () -> selected.send(bytes));
+            oldSocket.shutdownOutput();
+            newSocket.shutdownOutput();
+            assertEquals(-1, oldPeer.getInputStream().read());
+            assertEquals(-1, newPeer.getInputStream().read());
+        }
+    }
 }

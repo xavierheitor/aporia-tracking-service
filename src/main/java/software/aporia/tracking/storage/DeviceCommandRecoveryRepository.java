@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.Duration;
+import software.aporia.tracking.command.dispatcher.DispatchOwner;
 import java.util.Objects;
 
 public final class DeviceCommandRecoveryRepository {
@@ -103,6 +104,7 @@ public final class DeviceCommandRecoveryRepository {
             claim_token = NULL,
             error_code = 'TRANSMISSION_LEASE_EXPIRED'
         WHERE status = 'transmitting'
+          AND dispatch_owner IS NULL
           AND transmission_started_at IS NOT NULL
           AND transmission_started_at <
               NOW() - (
@@ -123,4 +125,24 @@ public final class DeviceCommandRecoveryRepository {
         }
     }
 
+
+    public int recoverOwner(Connection connection, DispatchOwner owner) throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                UPDATE device_commands SET status='delivery_unknown', delivery_unknown_at=now(),
+                    claim_token=NULL, error_code='TRANSMISSION_INTERRUPTED'
+                WHERE status='transmitting' AND dispatch_owner=?
+                """)) {
+            statement.setObject(1, owner.id());
+            return statement.executeUpdate();
+        }
+    }
+
+    public int expireSent(Connection connection) throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                UPDATE device_commands SET status='timeout', error_code='RESPONSE_TIMEOUT', claim_token=NULL
+                WHERE status='sent' AND expires_at <= now()
+                """)) {
+            return statement.executeUpdate();
+        }
+    }
 }

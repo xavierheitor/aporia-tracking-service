@@ -1,118 +1,120 @@
 package software.aporia.tracking.command.dispatcher;
 
+import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
-
 import javax.sql.DataSource;
-
+import software.aporia.tracking.protocol.FirmwareVersionRequest;
 import software.aporia.tracking.storage.DeviceCommandDispatchRepository;
+import software.aporia.tracking.storage.DeviceCommandRecoveryRepository;
+import software.aporia.tracking.storage.DeviceCommandDispatchRepository.Failure;
 
 public final class CommandDispatcher {
 
     public enum DispatchResult {
-        DEVICE_OFFLINE,
-        NO_COMMAND,
-        SENT,
-        DELIVERY_UNKNOWN,
-        CLAIM_LOST
+        DEVICE_OFFLINE, NO_COMMAND, SENT, DELIVERY_FAILED, DELIVERY_UNKNOWN, CLAIM_LOST
     }
 
     private final DataSource dataSource;
     private final DeviceCommandDispatchRepository repository;
     private final CommandTransport transport;
+    private final DispatchOwner owner;
 
-    public CommandDispatcher(
-            DataSource dataSource,
-            DeviceCommandDispatchRepository repository,
-            CommandTransport transport
-    ) {
+    public CommandDispatcher(DataSource dataSource, DeviceCommandDispatchRepository repository,
+                             CommandTransport transport, DispatchOwner owner) {
         this.dataSource = Objects.requireNonNull(dataSource);
         this.repository = Objects.requireNonNull(repository);
         this.transport = Objects.requireNonNull(transport);
+        this.owner = Objects.requireNonNull(owner);
     }
 
-    public DispatchResult dispatchNext(
-            UUID tenantId,
-            UUID deviceId
-    ) throws SQLException {
+    public DispatchResult dispatchNext(UUID tenantId, UUID deviceId) throws SQLException {
+        synchronized (owner) {
+            UUID ownerId = owner.id();
+            var endpoint = transport.connect(tenantId, deviceId);
+            if (endpoint.isEmpty()) return DispatchResult.DEVICE_OFFLINE;
 
-        Objects.requireNonNull(tenantId);
-        Objects.requireNonNull(deviceId);
-
-        if (!transport.isConnected(tenantId, deviceId)) {
-            return DispatchResult.DEVICE_OFFLINE;
-        }
-
-        DeviceCommandDispatchRepository.ClaimedCommand command;
-
-        // Fase 1: reservar e confirmar a transação.
-        try (Connection connection = dataSource.getConnection()) {
-            connection.setAutoCommit(false);
-
-            try {
-                var claimed = repository.claimNextForDevice(
-                        connection,
-                        tenantId,
-                        deviceId
-                );
-
-                if (claimed.isEmpty()) {
-                    connection.commit();
-                    return DispatchResult.NO_COMMAND;
+            var session = endpoint.get();
+            DeviceCommandDispatchRepository.ClaimedCommand command;
+            try (Connection c = dataSource.getConnection()) {
+                c.setAutoCommit(false);
+                try {
+                    var claimed = repository.claimNextForDevice(c, tenantId, deviceId);
+                    c.commit();
+                    if (claimed.isEmpty()) return DispatchResult.NO_COMMAND;
+                    command = claimed.get();
+                } catch (SQLException | RuntimeException error) {
+                    c.rollback();
+                    throw error;
                 }
+            }
 
-                command = claimed.get();
-                connection.commit();
+            DispatchResult result = transmit(command, session, ownerId);
+            LoggerFactory.getLogger(CommandDispatcher.class).info(
+                    "Command dispatch tenant={} device={} command={} attempt={} result={}",
+                    tenantId, deviceId, command.id(), command.attempts(), result);
+            return result;
+        }
+    }
 
-            } catch (SQLException | RuntimeException e) {
-                connection.rollback();
-                throw e;
+    private DispatchResult transmit(DeviceCommandDispatchRepository.ClaimedCommand command,
+                                    CommandTransport.Endpoint session, UUID ownerId) throws SQLException {
+        UUID tenantId = command.tenantId();
+        byte[] payload = command.payload();
+        try (Connection c = dataSource.getConnection()) {
+            c.setAutoCommit(true);
+            if (!session.protocol().equals(command.protocol())
+                    || !FirmwareVersionRequest.permits(command.protocol(), session.identity(), payload)) {
+                return repository.finishFailure(c, command, Failure.COMMAND_POLICY_DENIED)
+                        ? DispatchResult.DELIVERY_FAILED : DispatchResult.CLAIM_LOST;
+            }
+            if (!repository.authorizeTransmission(c, tenantId, command.id(), command.claimToken(), ownerId, session.identity())) {
+                return repository.finishFailure(c, command, Failure.AUTHORIZATION_REJECTED)
+                        ? DispatchResult.DELIVERY_FAILED : DispatchResult.CLAIM_LOST;
             }
         }
 
-        // Fase 2: autorizar a transmissão.
-        try (Connection connection = dataSource.getConnection()) {
-            boolean authorized = repository.authorizeTransmission(
-                    connection,
-                    command.tenantId(),
-                    command.id(),
-                    command.claimToken()
-            );
-
-            if (!authorized) {
-                return DispatchResult.CLAIM_LOST;
-            }
-        }
-
-        // Fase 3: executar a escrita TCP.
         try {
-            transport.send(
-                    command.tenantId(),
-                    command.deviceId(),
-                    command.payload()
-            );
-        } catch (IOException e) {
-            // Não sabemos se algum byte chegou ao dispositivo.
-            // A recuperação posterior classificará a tentativa
-            // como delivery_unknown.
-            return DispatchResult.DELIVERY_UNKNOWN;
+            session.send(payload);
+        } catch (IOException error) {
+            try (Connection c = dataSource.getConnection()) {
+                c.setAutoCommit(true);
+                return repository.finishFailure(c, command, Failure.TCP_WRITE_UNCERTAIN)
+                        ? DispatchResult.DELIVERY_UNKNOWN : DispatchResult.CLAIM_LOST;
+            } catch (SQLException failure) {
+                failure.addSuppressed(error);
+                throw failure;
+            }
         }
 
-        // Fase 4: registrar a escrita concluída.
-        try (Connection connection = dataSource.getConnection()) {
-            boolean updated = repository.markSent(
-                    connection,
-                    command.tenantId(),
-                    command.id(),
-                    command.claimToken()
-            );
+        try (Connection c = dataSource.getConnection()) {
+            c.setAutoCommit(true);
+            return repository.markSent(c, tenantId, command.id(), command.claimToken())
+                    ? DispatchResult.SENT : DispatchResult.CLAIM_LOST;
+        }
+    }
 
-            return updated
-                    ? DispatchResult.SENT
-                    : DispatchResult.CLAIM_LOST;
+    public void recover() throws SQLException {
+        synchronized (owner) {
+            var recovery = new DeviceCommandRecoveryRepository();
+            try (Connection c = dataSource.getConnection()) {
+                c.setAutoCommit(false);
+                try {
+                    recovery.recoverOwner(c, owner);
+                    recovery.markStaleSendingAsUnknown(c, Duration.ofMinutes(1));
+                    recovery.markStaleTransmittingAsUnknown(c, Duration.ofMinutes(1));
+                    recovery.expireQueued(c);
+                    recovery.expireSent(c);
+                    c.commit();
+                } catch (SQLException | RuntimeException error) {
+                    c.rollback();
+                    throw error;
+                }
+            }
         }
     }
 }

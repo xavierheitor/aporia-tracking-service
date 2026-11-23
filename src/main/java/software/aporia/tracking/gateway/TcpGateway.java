@@ -5,6 +5,7 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,10 +17,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import software.aporia.tracking.command.dispatcher.CommandDispatcher;
+import software.aporia.tracking.command.dispatcher.DispatchOwner;
+import software.aporia.tracking.command.dispatcher.SessionCommandTransport;
 import software.aporia.tracking.protocol.ProtocolAdapter;
 import software.aporia.tracking.protocol.ProtocolRegistry;
 import software.aporia.tracking.protocol.SuntechAdapter;
 import software.aporia.tracking.storage.Database;
+import software.aporia.tracking.storage.DeviceCommandDispatchRepository;
 import software.aporia.tracking.storage.JdbcDeviceLookup;
 import software.aporia.tracking.storage.JdbcPacketIngestion;
 
@@ -42,12 +47,15 @@ public class TcpGateway {
         Set<Socket> activeClients
                 = ConcurrentHashMap.newKeySet();
 
+        String ownerPath = System.getenv("TRACKING_DISPATCH_OWNER_FILE");
         try (
                 var dataSource = Database.createDataSource(); ServerSocket server = new ServerSocket(
                 PORT,
                 50,
-                InetAddress.getByName("0.0.0.0")
-        ); var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                InetAddress.getByName(System.getenv().getOrDefault("TRACKING_TCP_BIND", "0.0.0.0"))
+        ); var executor = Executors.newVirtualThreadPerTaskExecutor();
+                var owner = ownerPath == null ? null : DispatchOwner.open(Path.of(ownerPath));
+                var polling = Executors.newSingleThreadScheduledExecutor()) {
 
             JdbcPacketIngestion ingestion
                     = new JdbcPacketIngestion(dataSource);
@@ -81,6 +89,13 @@ public class TcpGateway {
                     adapter.decoderVersion()
             );
 
+            if (owner != null) {
+                var dispatcher = new CommandDispatcher(
+                        dataSource, new DeviceCommandDispatchRepository(),
+                        new SessionCommandTransport(sessionRegistry), owner);
+                polling.scheduleWithFixedDelay(() -> poll(dispatcher, sessionRegistry, running),
+                        0, 1, TimeUnit.SECONDS);
+            }
             Thread shutdownHook = new Thread(() -> {
 
                 log.info("Shutdown requested for TCP Gateway");
@@ -121,8 +136,8 @@ public class TcpGateway {
             try {
 
                 log.info(
-                        "Tracking TCP Gateway listening on 0.0.0.0:{}",
-                        PORT
+                        "Tracking TCP Gateway listening on {}:{}",
+                        server.getInetAddress().getHostAddress(), server.getLocalPort()
                 );
 
                 while (running.get()) {
@@ -178,7 +193,6 @@ public class TcpGateway {
                     }
                 }
             }
-
             // O try-with-resources aguarda as virtual threads
             // antes de fechar o DataSource.
         } finally {
@@ -187,4 +201,19 @@ public class TcpGateway {
         }
     }
 
+    private static void poll(CommandDispatcher dispatcher,
+                             SessionRegistry sessions, AtomicBoolean running) {
+        if (!running.get()) return;
+        try {
+            dispatcher.recover();
+            for (DeviceSession session : sessions.onlineSessions()) {
+                if (!running.get()) break;
+                dispatcher.dispatchNext(session.tenantId(), session.deviceId());
+            }
+        } catch (java.sql.SQLException error) {
+            log.error("Command polling failed, SQLState={}", error.getSQLState());
+        } catch (RuntimeException error) {
+            log.error("Command polling failed", error);
+        }
+    }
 }

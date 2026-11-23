@@ -1,5 +1,10 @@
 package software.aporia.tracking.gateway;
 
+import org.slf4j.LoggerFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import software.aporia.tracking.command.dispatcher.CommandTransport.Endpoint;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.Socket;
@@ -7,7 +12,15 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
 
-public final class DeviceSession {
+public final class DeviceSession implements Endpoint {
+
+    private static final int WRITE_TIMEOUT_SECONDS = 5;
+    private static final ScheduledThreadPoolExecutor deadlines;
+    static {
+        deadlines = new ScheduledThreadPoolExecutor(1,
+                Thread.ofPlatform().daemon().name("tcp-write-deadline").factory());
+        deadlines.setRemoveOnCancelPolicy(true);
+    }
 
     private final UUID tenantId;
     private final UUID deviceId;
@@ -47,6 +60,7 @@ public final class DeviceSession {
         return deviceId;
     }
 
+    @Override
     public String protocol() {
         return protocol;
     }
@@ -58,6 +72,7 @@ public final class DeviceSession {
                 && !socket.isOutputShutdown();
     }
 
+    @Override
     public void send(byte[] payload) throws IOException {
 
         Objects.requireNonNull(payload);
@@ -75,15 +90,38 @@ public final class DeviceSession {
                 throw new IOException("DEVICE_DISCONNECTED");
             }
 
-            OutputStream output = socket.getOutputStream();
-            output.write(payload);
-            output.flush();
+            var writing = new AtomicBoolean(true);
+            var deadline = deadlines.schedule(() -> {
+                if (writing.compareAndSet(true, false)) abortSocket();
+            }, WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            try {
+                OutputStream output = socket.getOutputStream();
+                output.write(payload);
+                output.flush();
+                if (!writing.compareAndSet(true, false)) throw new IOException("TCP_WRITE_TIMEOUT");
+            } catch (IOException error) {
+                abortSocket();
+                throw error;
+            } finally {
+                writing.set(false);
+                deadline.cancel(false);
+            }
 
         } finally {
             writeLock.unlock();
         }
     }
 
+    private void abortSocket() {
+        active = false;
+        try {
+            socket.close();
+        } catch (IOException error) {
+            LoggerFactory.getLogger(DeviceSession.class).warn("Failed to close command socket", error);
+        }
+    }
+
+    @Override
     public String identity() {
         return identity;
     }

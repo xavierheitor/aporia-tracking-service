@@ -14,28 +14,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
-import com.zaxxer.hikari.HikariConfig;
+import software.aporia.tracking.support.TestDatabase;
 import com.zaxxer.hikari.HikariDataSource;
 
 class DeviceCommandResponseRepositoryIT {
 
     private static HikariDataSource dataSource() {
 
-        HikariConfig config = new HikariConfig();
-
-        config.setJdbcUrl(
-                System.getenv("TRACKING_TEST_DB_URL")
-        );
-        config.setUsername(
-                System.getenv("TRACKING_TEST_DB_USER")
-        );
-        config.setPassword(
-                System.getenv("TRACKING_TEST_DB_PASSWORD")
-        );
-
-        config.setMaximumPoolSize(2);
-
-        return new HikariDataSource(config);
+        return TestDatabase.createDataSource();
     }
 
     private static byte[] bytes(String value) {

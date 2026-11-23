@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import com.zaxxer.hikari.HikariConfig;
+import software.aporia.tracking.support.TestDatabase;
 import com.zaxxer.hikari.HikariDataSource;
 
 import software.aporia.tracking.protocol.SuntechAdapter;
@@ -45,20 +45,7 @@ class TcpClientHandlerIT {
     @SuppressWarnings("unused") // Invocado pelo JUnit.
     void setUp() throws Exception {
 
-        HikariConfig config = new HikariConfig();
-
-        config.setJdbcUrl(
-                System.getenv("TRACKING_TEST_DB_URL")
-        );
-        config.setUsername(
-                System.getenv("TRACKING_TEST_DB_USER")
-        );
-        config.setPassword(
-                System.getenv("TRACKING_TEST_DB_PASSWORD")
-        );
-        config.setMaximumPoolSize(4);
-
-        dataSource = new HikariDataSource(config);
+        dataSource = TestDatabase.createDataSource();
 
         tenantId = UUID.randomUUID();
         deviceId = UUID.randomUUID();

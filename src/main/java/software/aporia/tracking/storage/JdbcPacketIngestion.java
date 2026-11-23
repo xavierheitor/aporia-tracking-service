@@ -23,6 +23,11 @@ public class JdbcPacketIngestion {
     }
 
     public UUID accept(ReceivedFrame frame) {
+        return accept(frame, null, null);
+    }
+
+    public UUID accept(ReceivedFrame frame, UUID expectedTenant, UUID expectedDevice) {
+        if ((expectedTenant == null) != (expectedDevice == null)) throw new IllegalArgumentException("INVALID_SCOPE");
         //try to create a connection to the database and accept the frame
         try (Connection connection = dataSource.getConnection()) {
             // Disable auto-commit for transaction management
@@ -30,7 +35,7 @@ public class JdbcPacketIngestion {
 
             try {
                 //if the frame is accepted, commit the transaction and return the packet ID
-                UUID packetId = acceptInTransaction(connection, frame);
+                UUID packetId = acceptInTransaction(connection, frame, expectedTenant, expectedDevice);
 
                 connection.commit();
                 return packetId;
@@ -66,7 +71,7 @@ public class JdbcPacketIngestion {
      */
     private UUID acceptInTransaction(
             Connection connection,
-            ReceivedFrame frame
+            ReceivedFrame frame, UUID expectedTenant, UUID expectedDevice
     ) throws SQLException {
         // Lookup device by protocol and identity
         String lookupSql = """
@@ -75,6 +80,7 @@ public class JdbcPacketIngestion {
             WHERE protocol = ?
               AND identity = ?
               AND enabled = true
+              AND (CAST(? AS uuid) IS NULL OR (tenant_id=? AND id=?))
             FOR SHARE
             """;
 
@@ -86,6 +92,9 @@ public class JdbcPacketIngestion {
 
             statement.setString(1, frame.protocol());
             statement.setString(2, frame.identity());
+            statement.setObject(3, expectedTenant);
+            statement.setObject(4, expectedTenant);
+            statement.setObject(5, expectedDevice);
 
             try (ResultSet result = statement.executeQuery()) {
                 // If no device is found, throw an exception indicating that the device is unknown or disabled
