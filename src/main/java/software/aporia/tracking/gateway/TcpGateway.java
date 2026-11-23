@@ -1,13 +1,10 @@
 package software.aporia.tracking.gateway;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
-import java.net.SocketTimeoutException;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -19,16 +16,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import software.aporia.tracking.core.ReceivedFrame;
 import software.aporia.tracking.protocol.ProtocolAdapter;
-import software.aporia.tracking.protocol.ProtocolFrame;
 import software.aporia.tracking.protocol.ProtocolRegistry;
-import software.aporia.tracking.protocol.ProtocolSession;
 import software.aporia.tracking.protocol.SuntechAdapter;
 import software.aporia.tracking.storage.Database;
 import software.aporia.tracking.storage.JdbcDeviceLookup;
 import software.aporia.tracking.storage.JdbcPacketIngestion;
-import software.aporia.tracking.storage.RegisteredDevice;
 
 public class TcpGateway {
 
@@ -74,6 +67,14 @@ public class TcpGateway {
                     .getOrDefault("TRACKING_PROTOCOL", "suntech");
 
             ProtocolAdapter adapter = registry.get(protocolId);
+
+            TcpClientHandler clientHandler = new TcpClientHandler(
+                    ingestion,
+                    deviceLookup,
+                    sessionRegistry,
+                    adapter,
+                    running
+            );
 
             log.info(
                     "TCP listener configured: protocol={}, decoder={}",
@@ -140,14 +141,7 @@ public class TcpGateway {
                         try {
                             executor.submit(() -> {
                                 try {
-                                    handleClient(
-                                            client,
-                                            ingestion,
-                                            running,
-                                            adapter,
-                                            deviceLookup,
-                                            sessionRegistry
-                                    );
+                                    clientHandler.handle(client);
                                 } finally {
                                     activeClients.remove(client);
                                 }
@@ -194,119 +188,4 @@ public class TcpGateway {
         }
     }
 
-    private static void handleClient(
-            Socket client,
-            JdbcPacketIngestion ingestion,
-            AtomicBoolean running,
-            ProtocolAdapter adapter,
-            JdbcDeviceLookup deviceLookup,
-            SessionRegistry sessionRegistry
-    ) {
-
-        log.debug(
-                "TCP connection accepted: remote={}",
-                client.getRemoteSocketAddress()
-        );
-
-        ProtocolSession session = adapter.newSession();
-        DeviceSession registeredSession = null;
-
-        try (
-                client;
-                InputStream input = client.getInputStream()) {
-
-            client.setSoTimeout(READ_TIMEOUT_MS);
-
-            byte[] buffer = new byte[4096];
-            int bytesRead;
-
-            while ((bytesRead = input.read(buffer)) != -1) {
-
-                byte[] received
-                        = Arrays.copyOf(buffer, bytesRead);
-
-                for (ProtocolFrame frame : session.receive(received)) {
-
-                    ReceivedFrame receivedFrame
-                            = new ReceivedFrame(
-                                    adapter.protocolId(),
-                                    frame.deviceIdentity(),
-                                    frame.payload(),
-                                    adapter.decoderVersion()
-                            );
-                    if (registeredSession != null) {
-                        registeredSession.validateIdentity(
-                                frame.deviceIdentity()
-                        );
-                    }
-
-                    var packetId = ingestion.accept(receivedFrame);
-                    if (registeredSession == null) {
-
-                        RegisteredDevice device = deviceLookup.findEnabled(
-                                adapter.protocolId(),
-                                frame.deviceIdentity()
-                        ).orElseThrow(()
-                                -> new IllegalArgumentException(
-                                        "UNKNOWN_OR_DISABLED_DEVICE"
-                                )
-                        );
-
-                        registeredSession = new DeviceSession(
-                                device.tenantId(),
-                                device.deviceId(),
-                                device.protocol(),
-                                device.identity(),
-                                client
-                        );
-
-                        sessionRegistry.register(registeredSession);
-
-                        log.info(
-                                "Device session registered: tenantId={}, deviceId={}",
-                                device.tenantId(),
-                                device.deviceId()
-                        );
-                    }
-
-                    log.info(
-                            "Packet persisted: id={}, protocol={}, identity={}, bytes={}",
-                            packetId,
-                            adapter.protocolId(),
-                            frame.deviceIdentity(),
-                            frame.payload().length
-                    );
-                }
-            }
-
-        } catch (SocketTimeoutException e) {
-
-            log.debug("TCP session timed out");
-
-        } catch (IllegalArgumentException e) {
-
-            log.warn(
-                    "Invalid Suntech frame: {}",
-                    e.getMessage()
-            );
-
-        } catch (IOException e) {
-
-            if (!running.get() && e instanceof SocketException) {
-                log.debug(
-                        "TCP connection closed during gateway shutdown"
-                );
-            } else {
-                log.warn("TCP connection error", e);
-            }
-
-        } catch (IllegalStateException e) {
-
-            log.error("Packet persistence failed", e);
-        } finally {
-            if (registeredSession != null) {
-                sessionRegistry.unregister(registeredSession);
-            }
-        }
-    }
 }

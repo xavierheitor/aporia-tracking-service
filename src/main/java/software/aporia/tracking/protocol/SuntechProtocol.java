@@ -91,16 +91,12 @@ public class SuntechProtocol {
                 || frame.length > MAX_FRAME_SIZE
                 || frame[frame.length - 1] != DELIMITER) {
 
-            throw new IllegalArgumentException(
-                    "INVALID_FRAME"
-            );
+            throw new IllegalArgumentException("INVALID_FRAME");
         }
 
         for (int i = 0; i < frame.length - 1; i++) {
             if (frame[i] < 32 || frame[i] > 126) {
-                throw new IllegalArgumentException(
-                        "INVALID_FRAME"
-                );
+                throw new IllegalArgumentException("INVALID_FRAME");
             }
         }
 
@@ -119,7 +115,23 @@ public class SuntechProtocol {
             );
         }
 
-        String identity = parts[1];
+        int identityIndex = 1;
+
+        if ("RES".equals(parts[0])
+                && parts.length > 1
+                && ("STT".equals(parts[1])
+                || "ASTT".equals(parts[1]))) {
+
+            identityIndex = 2;
+        }
+
+        if (parts.length <= identityIndex) {
+            throw new IllegalArgumentException(
+                    "INVALID_IDENTITY"
+            );
+        }
+
+        String identity = parts[identityIndex];
 
         if (!identity.matches("\\d{10}")) {
             throw new IllegalArgumentException(
@@ -129,4 +141,5 @@ public class SuntechProtocol {
 
         return identity;
     }
+
 }

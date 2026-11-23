@@ -109,4 +109,28 @@ class SuntechDecoderTest {
         assertTrue(exception != null);
     }
 
+    @Test
+    void shouldDecodeTelemetryInsideCommandResponse() {
+
+        SuntechDecoder decoder = new SuntechDecoder();
+
+        // Reutilize aqui um frame STT válido dos testes existentes.
+        byte[] original = ascii(
+                        "STT;1234567890;013831;20261119;13:30:00;"
+                        + "-16.6700;-49.2500;45.5;1\r"
+                );
+
+        String stt = new String(
+                original,
+                StandardCharsets.US_ASCII
+        );
+
+        byte[] response = ("RES;" + stt).getBytes(StandardCharsets.US_ASCII);
+
+        Telemetry expected = decoder.decode(original);
+        Telemetry actual = decoder.decode(response);
+
+        assertEquals(expected, actual);
+    }
+
 }

@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 public final class SessionRegistry {
 
@@ -16,7 +17,7 @@ public final class SessionRegistry {
     private final Map<DeviceKey, DeviceSession> sessions
             = new ConcurrentHashMap<>();
 
-    public void register(DeviceSession session) {
+    public Optional<DeviceSession> register(DeviceSession session) {
 
         Objects.requireNonNull(session);
 
@@ -25,14 +26,20 @@ public final class SessionRegistry {
                 session.deviceId()
         );
 
+        AtomicReference<DeviceSession> replaced
+                = new AtomicReference<>();
+
         sessions.compute(key, (ignored, previous) -> {
 
             if (previous != null && previous != session) {
                 previous.invalidate();
+                replaced.set(previous);
             }
 
             return session;
         });
+
+        return Optional.ofNullable(replaced.get());
     }
 
     public Optional<DeviceSession> find(
@@ -60,5 +67,17 @@ public final class SessionRegistry {
 
     public int size() {
         return sessions.size();
+    }
+
+    public boolean isCurrent(DeviceSession session) {
+
+        Objects.requireNonNull(session);
+
+        DeviceKey key = new DeviceKey(
+                session.tenantId(),
+                session.deviceId()
+        );
+
+        return sessions.get(key) == session;
     }
 }

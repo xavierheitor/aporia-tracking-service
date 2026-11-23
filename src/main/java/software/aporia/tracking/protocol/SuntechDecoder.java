@@ -31,35 +31,64 @@ public class SuntechDecoder implements TelemetryDecoder {
 
     private final SuntechProtocol protocol = new SuntechProtocol();
 
-
     @Override
     public Telemetry decode(byte[] frame) {
 
         String identity = protocol.identify(frame);
 
         String message = new String(
-                frame, 0, frame.length - 1,
+                frame,
+                0,
+                frame.length - 1,
                 StandardCharsets.US_ASCII
         );
 
         String[] parts = message.split(";", -1);
 
         return switch (parts[0]) {
+
             case "ALV" -> {
                 if (parts.length != 2) {
                     throw invalid("INVALID_FIELD_COUNT");
                 }
+
                 yield new Telemetry(
-                identity, null, null, null,
-                null, null, null, null, null
+                identity,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
                 );
             }
+
             case "STT", "ASTT" ->
                 decodePosition(identity, parts);
-            case "RES" ->
+
+            case "RES" -> {
+
+                if (parts.length > 2
+                        && ("STT".equals(parts[1])
+                        || "ASTT".equals(parts[1]))) {
+
+                    String[] embedded
+                            = java.util.Arrays.copyOfRange(
+                                    parts,
+                                    1,
+                                    parts.length
+                            );
+
+                    yield decodePosition(identity, embedded);
+                }
+
                 throw new UnsupportedOperationException(
-                        "Command replies require a separate result type"
+                        "COMMAND_RESPONSE_WITHOUT_TELEMETRY"
                 );
+            }
+
             default ->
                 throw invalid("UNSUPPORTED_MESSAGE");
         };

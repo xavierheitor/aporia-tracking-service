@@ -217,4 +217,44 @@ class SuntechProtocolTest {
         );
     }
 
+    @Test
+    void shouldIdentifyEmbeddedTelemetryResponse() {
+
+        SuntechProtocol protocol = new SuntechProtocol();
+
+        byte[] frame = ("RES;STT;1234567890;013831;20261120;08:45:00;"
+                + "-16.6700;-49.2500;45.5;1\r").getBytes(StandardCharsets.US_ASCII);
+
+        assertEquals(
+                "1234567890",
+                protocol.identify(frame)
+        );
+    }
+
+    @Test
+    void shouldIdentifyNormalCommandResponse() {
+
+        SuntechProtocol protocol = new SuntechProtocol();
+
+        byte[] frame = ("RES;1234567890;03;04;01;STB.201.1.1.11\r").getBytes(StandardCharsets.US_ASCII);
+
+        assertEquals(
+                "1234567890",
+                protocol.identify(frame)
+        );
+    }
+
+    @Test
+    void shouldRejectEmbeddedResponseWithoutIdentity() {
+
+        SuntechProtocol protocol = new SuntechProtocol();
+
+        byte[] frame = ("RES;STT;\r").getBytes(StandardCharsets.US_ASCII);
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> protocol.identify(frame)
+        );
+    }
+
 }

@@ -169,4 +169,66 @@ class SessionRegistryTest {
         );
     }
 
+    @Test
+    void shouldReturnReplacedSession() {
+
+        UUID tenantId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+
+        SessionRegistry registry = new SessionRegistry();
+
+        DeviceSession oldSession = new DeviceSession(
+                tenantId,
+                deviceId,
+                "suntech",
+                "1234567890",
+                new Socket()
+        );
+
+        DeviceSession newSession = new DeviceSession(
+                tenantId,
+                deviceId,
+                "suntech",
+                "1234567890",
+                new Socket()
+        );
+
+        assertTrue(registry.register(oldSession).isEmpty());
+
+        var replaced = registry.register(newSession);
+
+        assertTrue(replaced.isPresent());
+        assertSame(oldSession, replaced.orElseThrow());
+
+        assertFalse(registry.isCurrent(oldSession));
+        assertTrue(registry.isCurrent(newSession));
+    }
+
+    @Test
+    void shouldNotConsiderRemovedSessionCurrent() {
+
+        UUID tenantId = UUID.randomUUID();
+        UUID deviceId = UUID.randomUUID();
+
+        SessionRegistry registry = new SessionRegistry();
+
+        DeviceSession session = new DeviceSession(
+                tenantId,
+                deviceId,
+                "suntech",
+                "1234567890",
+                new Socket()
+        );
+
+        assertFalse(registry.isCurrent(session));
+
+        registry.register(session);
+
+        assertTrue(registry.isCurrent(session));
+
+        registry.unregister(session);
+
+        assertFalse(registry.isCurrent(session));
+    }
+
 }
