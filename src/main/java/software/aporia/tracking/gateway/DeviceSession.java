@@ -33,6 +33,14 @@ public final class DeviceSession implements Endpoint {
 
     /** Tenant proprietário do cadastro do equipamento. */
     private final UUID tenantId;
+    private final UUID sessionToken = UUID.randomUUID();
+
+    /** Identificador estável durante a vida deste socket. */
+    @Override
+    public UUID sessionToken() {
+        return sessionToken;
+    }
+
     /** Identificador interno do equipamento cadastrado. */
     private final UUID deviceId;
     /** Protocolo associado à sessão. */

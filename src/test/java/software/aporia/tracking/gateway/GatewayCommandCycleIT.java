@@ -72,7 +72,7 @@ class GatewayCommandCycleIT {
         env.put("TRACKING_TCP_BIND", "127.0.0.1");
         env.put("TRACKING_TCP_PORT", "0");
         env.put("TRACKING_PROTOCOL", "auto");
-        env.put("TRACKING_DISPATCH_OWNER_FILE", runtime.resolve("owner").toString());
+        env.put("TRACKING_DISPATCH_OWNER_FILE", log.resolveSibling(log.getFileName() + ".owner").toString());
         return new Service(builder.redirectErrorStream(true).redirectOutput(log.toFile()).start());
     }
 
@@ -134,6 +134,44 @@ class GatewayCommandCycleIT {
         }
     }
 
+    /** Obtém a porta efêmera publicada pela JVM que efetivamente abriu o listener. */
+    private int gatewayPort(Service gateway, Path log) throws Exception {
+        var listener = Pattern.compile("Tracking TCP Gateway listening on 127\\.0\\.0\\.1:(\\d+)");
+        await("Gateway did not start", () -> {
+            assertTrue(gateway.process().isAlive());
+            return listener.matcher(Files.readString(log)).find();
+        });
+        var match = listener.matcher(Files.readString(log));
+        assertTrue(match.find());
+        return Integer.parseInt(match.group(1));
+    }
+
+    /** Mantém os dois sockets abertos e observa em qual deles o comando realmente chega. */
+    @Test
+    void reconnectAcrossGatewaysRoutesCommandToNewSocket() throws Exception {
+        Path firstLog = runtime.resolve("first.log");
+        Path secondLog = runtime.resolve("second.log");
+        try (var db = TestDatabase.createDataSource(); var device = new TestFixtures(db);
+             var first = start(TcpGateway.class, db, firstLog);
+             var second = start(TcpGateway.class, db, secondLog);
+             var c = db.getConnection();
+             var oldSocket = new Socket("127.0.0.1", gatewayPort(first, firstLog));
+             var newSocket = new Socket("127.0.0.1", gatewayPort(second, secondLog))) {
+            byte[] alive = ("ALV;" + device.deviceIdentity() + "\r").getBytes(StandardCharsets.US_ASCII);
+            oldSocket.getOutputStream().write(alive);
+            await("Primeira sessão", () -> count(c, "raw_packets", device.tenantId()) == 1);
+            newSocket.getOutputStream().write(alive);
+            await("Segunda sessão", () -> count(c, "raw_packets", device.tenantId()) == 2);
+            UUID id = enqueue(db, device, device.tenantId(), UUID.randomUUID(), UUID.randomUUID());
+            assertNotNull(id);
+            newSocket.setSoTimeout(8000);
+            byte[] expected = FirmwareVersionRequest.encode(device.deviceIdentity());
+            assertArrayEquals(expected, newSocket.getInputStream().readNBytes(expected.length));
+            oldSocket.setSoTimeout(300);
+            assertThrows(java.net.SocketTimeoutException.class, () -> oldSocket.getInputStream().read());
+        }
+    }
+
     /**
      * Percorre enfileiramento offline, reconexão, envio e respostas sem correlação pelas entradas
      * reais do serviço.
@@ -143,19 +181,12 @@ class GatewayCommandCycleIT {
     @Test
     void offlineQueueReconnectAndUncorrelatedResponsesThroughProductionEntryPoints() throws Exception {
         Path log = runtime.resolve("gateway.log");
-        var listener = Pattern.compile("Tracking TCP Gateway listening on 127\\.0\\.0\\.1:(\\d+)");
         var repository = new DeviceCommandRepository();
         try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
              var gateway = start(TcpGateway.class, db, log);
              var worker = start(WorkerApplication.class, db, runtime.resolve("worker.log"));
              var c = db.getConnection()) {
-            await("Gateway did not start", () -> {
-                assertTrue(gateway.process().isAlive());
-                return listener.matcher(Files.readString(log)).find();
-            });
-            var match = listener.matcher(Files.readString(log));
-            assertTrue(match.find());
-            int port = Integer.parseInt(match.group(1));
+            int port = gatewayPort(gateway, log);
             try (var teltonika = new TestFixtures(db)) {
                 verifyAvl(port, c, teltonika);
             }
@@ -233,11 +264,7 @@ class GatewayCommandCycleIT {
         try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
              var c = db.getConnection(); var gateway = start(TcpGateway.class, db, log);
              var worker = start(WorkerApplication.class, db, runtime.resolve("fleet-worker.log"))) {
-            var listener = Pattern.compile("Tracking TCP Gateway listening on 127\\.0\\.0\\.1:(\\d+)");
-            await("Gateway did not start", () -> listener.matcher(Files.readString(log)).find());
-            var match = listener.matcher(Files.readString(log));
-            assertTrue(match.find());
-            int port = Integer.parseInt(match.group(1));
+            int port = gatewayPort(gateway, log);
             var identities = new ArrayList<String>();
             // Uma associação e um ativo distintos garantem que last_positions represente os 200 veículos.
             try (var insert = c.prepareStatement("""

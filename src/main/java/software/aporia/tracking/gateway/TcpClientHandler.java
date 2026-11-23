@@ -185,8 +185,9 @@ public final class TcpClientHandler {
                         );
 
                         //Registra a sessão do dispositivo.
-                        var previous
-                                = sessionRegistry.register(registeredSession);
+                        var token = registeredSession.sessionToken();
+                        var previous = sessionRegistry.register(registeredSession,
+                                () -> deviceLookup.activateSession(device, token));
 
                         //Se a sessão anterior estiver presente, fecha a sessão anterior.
                         if (previous.isPresent()) {
@@ -265,6 +266,8 @@ public final class TcpClientHandler {
             //Se a sessão foi substituída, avisa.
             if ("SESSION_REPLACED".equals(e.getMessage())) {
                 log.info("Obsolete TCP session terminated");
+            } else if ("SESSION_ADMISSION_DEFERRED".equals(e.getMessage())) {
+                log.info("Device session admission deferred");
             } else {
                 //Se a sessão não foi substituída, avisa.
                 log.error("TCP session processing failed", e);

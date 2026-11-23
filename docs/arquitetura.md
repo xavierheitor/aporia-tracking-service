@@ -61,3 +61,14 @@ O chamador verifica as permissões e chama `DeviceCommandRepository.enqueueFirmw
 O dispatcher consulta a fila dos equipamentos online. Há no máximo um comando por tenant e dispositivo nos estados `sending`, `transmitting` ou `sent`. Antes do envio, o gateway confere a operação e a identidade da sessão escolhida. A transição de `sending` para `transmitting`, confirmada no banco com o token da reserva, autoriza o início da tentativa. A transação já terminou quando o gateway escreve no socket.
 
 `sent` registra a conclusão da escrita local. Se a escrita falhar após possível envio parcial, ou se o emissor cair antes de persistir o resultado, a tentativa pode terminar em `delivery_unknown`, sem reenvio automático. Uma reserva revogada perde seu token. Para recuperar uma transmissão com proprietário, o emissor precisa deter o bloqueio exclusivo do arquivo persistente. O prazo da solicitação encerra a espera em `sent` como `timeout`. [Operações disponíveis por protocolo](gateway-tcp.md#suporte-por-protocolo)
+
+## Coordenação entre réplicas
+
+Cada conexão admitida recebe um UUID. O PostgreSQL guarda o UUID mais recentemente admitido em `devices.command_session_token`. O registro em memória resolve o socket local. O UUID no banco permite que qualquer quantidade de gateways compartilhe a decisão de qual conexão pode receber comandos. Ele permanece no cadastro após a desconexão e, sozinho, não indica que o equipamento está online.
+
+A admissão e a reserva de um comando disputam o bloqueio da mesma linha de dispositivo, dentro do tenant. Há dois resultados possíveis.
+
+- **A reconexão entra primeiro.** O novo UUID substitui o anterior. Um gateway que ainda tenha o socket antigo aberto deixa o comando na fila para o novo gateway.
+- **A autorização do comando entra primeiro.** O dispatcher confirma a reserva e o estado `transmitting` em uma única transação e libera a conexão JDBC antes de escrever. Enquanto esse estado persistir, uma nova tentativa de login desse equipamento é encerrada antes do ACK ou da ingestão. O equipamento volta a tentar conforme sua configuração. A admissão pode prosseguir assim que a tentativa terminar, inclusive quando o comando já estiver em `sent` aguardando resposta.
+
+Se o emissor cair nessa janela, o bloqueio de admissão afeta apenas esse equipamento e dura até a recuperação com o arquivo persistente do proprietário. Um timeout unilateral permitiria que um emissor pausado voltasse a escrever depois da troca de sessão. O procedimento de recuperação conserva o resultado incerto e evita o reenvio. Os outros dispositivos e workers continuam independentes. Uma sessão antiga aberta em outra réplica ainda pode receber telemetria até o fechamento do socket. [Operação com balanceador](deploy.md#gateways-atrás-do-mesmo-ip)

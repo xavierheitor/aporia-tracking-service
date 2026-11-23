@@ -36,6 +36,11 @@ public final class SessionRegistry {
      * @return sessão substituída, se havia outra conexão para o equipamento
      */
     public Optional<DeviceSession> register(DeviceSession session) {
+        return register(session, () -> {});
+    }
+
+    /** Publica a sessão local na mesma ordem em que as conexões deste dispositivo são admitidas. */
+    Optional<DeviceSession> register(DeviceSession session, Runnable activate) {
 
         Objects.requireNonNull(session);
 
@@ -49,6 +54,7 @@ public final class SessionRegistry {
 
         sessions.compute(key, (ignored, previous) -> {
 
+            activate.run();
             if (previous != null && previous != session) {
                 previous.invalidate();
                 replaced.set(previous);

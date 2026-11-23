@@ -96,7 +96,7 @@ public final class DeviceCommandDispatchRepository {
             Connection connection
     ) throws SQLException {
 
-        return claim(connection, null, null);
+        return claim(connection, null, null, null);
     }
 
     /**
@@ -228,7 +228,14 @@ public final class DeviceCommandDispatchRepository {
             UUID deviceId
     ) throws SQLException {
 
-        return claim(connection, Objects.requireNonNull(tenantId), Objects.requireNonNull(deviceId));
+        return claim(connection, Objects.requireNonNull(tenantId), Objects.requireNonNull(deviceId), null);
+    }
+
+    /** Reserva para a conexão reconhecida pelo banco e mantém o cadastro bloqueado até o commit. */
+    public Optional<ClaimedCommand> claimForSession(Connection connection, UUID tenantId, UUID deviceId,
+                                                   UUID sessionToken) throws SQLException {
+        return claim(connection, Objects.requireNonNull(tenantId), Objects.requireNonNull(deviceId),
+                Objects.requireNonNull(sessionToken));
     }
 
     /**
@@ -241,7 +248,7 @@ public final class DeviceCommandDispatchRepository {
      * @return comando reservado com seu token, ou vazio se nenhum for elegível
      * @throws SQLException se a operação JDBC falhar
      */
-    private Optional<ClaimedCommand> claim(Connection connection, UUID tenantId, UUID deviceId)
+    private Optional<ClaimedCommand> claim(Connection connection, UUID tenantId, UUID deviceId, UUID sessionToken)
             throws SQLException {
         if (connection.getAutoCommit()) {
             throw new IllegalStateException(
@@ -255,7 +262,7 @@ public final class DeviceCommandDispatchRepository {
             JOIN devices d
               ON d.tenant_id = c.tenant_id
              AND d.id = c.device_id
-            WHERE %s c.status = 'queued'
+            WHERE %s %s c.status = 'queued'
               AND c.available_at <= NOW()
               AND c.expires_at > NOW()
               AND d.enabled = true
@@ -269,13 +276,15 @@ public final class DeviceCommandDispatchRepository {
                 c.id
             FOR UPDATE OF c, d SKIP LOCKED
             LIMIT 1
-        """.formatted(deviceId == null ? "" : "c.tenant_id = ? AND c.device_id = ? AND");
+        """.formatted(deviceId == null ? "" : "c.tenant_id = ? AND c.device_id = ? AND",
+                sessionToken == null ? "" : "d.command_session_token = ? AND");
 
         UUID candidate;
         try (var statement = connection.prepareStatement(select)) {
             if (deviceId != null) {
                 statement.setObject(1, tenantId);
                 statement.setObject(2, deviceId);
+                if (sessionToken != null) statement.setObject(3, sessionToken);
             }
             try (var rows = statement.executeQuery()) {
                 if (!rows.next()) return Optional.empty();

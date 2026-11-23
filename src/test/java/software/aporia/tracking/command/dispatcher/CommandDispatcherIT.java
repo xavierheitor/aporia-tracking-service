@@ -18,6 +18,8 @@ import org.junit.jupiter.api.io.TempDir;
 import software.aporia.tracking.protocol.suntech.FirmwareVersionRequest;
 import software.aporia.tracking.storage.command.DeviceCommandDispatchRepository;
 import software.aporia.tracking.storage.command.DeviceCommandRepository;
+import software.aporia.tracking.storage.device.JdbcDeviceLookup;
+import software.aporia.tracking.storage.device.RegisteredDevice;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
@@ -53,7 +55,22 @@ class CommandDispatcherIT {
      * @return dispatcher conectado ao canal controlado pelo cenário
      */
     private CommandDispatcher dispatcher(DataSource db, DispatchOwner owner, TestFixtures device, Writer writer) {
+        UUID token = UUID.randomUUID();
+        activate(db, device, token);
+        return dispatcher(db, owner, device, token, writer);
+    }
+
+    private void activate(DataSource db, TestFixtures device, UUID token) {
+        new JdbcDeviceLookup(db).activateSession(new RegisteredDevice(device.tenantId(), device.deviceId(),
+                "suntech", device.deviceIdentity()), token);
+    }
+
+    private CommandDispatcher dispatcher(DataSource db, DispatchOwner owner, TestFixtures device, UUID token,
+                                         Writer writer) {
         var endpoint = new CommandTransport.Endpoint() {
+            @Override
+            public UUID sessionToken() { return token; }
+
             /**
              * Informa o protocolo da sessão simulada.
              *
@@ -234,7 +251,10 @@ class CommandDispatcherIT {
                         s.setObject(2, command);
                         assertEquals(1, s.executeUpdate());
                     }
-                    var second = dispatcher(db, other, fixture, payload -> fail("second writer"));
+                    var rejected = assertThrows(IllegalStateException.class,
+                            () -> activate(db, fixture, UUID.randomUUID()));
+                    assertEquals("SESSION_ADMISSION_DEFERRED", rejected.getMessage());
+                    var second = dispatcher(db, other, fixture, UUID.randomUUID(), payload -> fail("second writer"));
                     second.recover();
                     assertEquals("transmitting", status(db, fixture, command));
                     assertEquals(NO_COMMAND, second.dispatchNext(fixture.tenantId(), fixture.deviceId()));
@@ -248,11 +268,32 @@ class CommandDispatcherIT {
                 assertArrayEquals(valid, bytes.toByteArray());
             }
             try (var restarted = DispatchOwner.open(ownerFile)) {
-                var dispatcher = dispatcher(db, restarted, fixture, payload -> fail("unexpected replay"));
+                var dispatcher = dispatcher(db, restarted, fixture, UUID.randomUUID(), payload -> fail("unexpected replay"));
                 dispatcher.recover();
                 assertEquals("delivery_unknown", status(db, fixture, command));
                 assertEquals(NO_COMMAND, dispatcher.dispatchNext(fixture.tenantId(), fixture.deviceId()));
+                activate(db, fixture, UUID.randomUUID());
             }
+        }
+    }
+
+    /** Três gateways ainda enxergam sockets locais, mas só o último login pode consumir a fila. */
+    @Test
+    void onlyNewestOfThreeSessionsCanClaim() throws Exception {
+        try (var db = TestDatabase.createDataSource(); var device = new TestFixtures(db);
+             var a = DispatchOwner.open(directory.resolve("a"));
+             var b = DispatchOwner.open(directory.resolve("b"));
+             var c = DispatchOwner.open(directory.resolve("c"))) {
+            var first = dispatcher(db, a, device, bytes -> fail("sessão antiga"));
+            var second = dispatcher(db, b, device, bytes -> fail("sessão substituída"));
+            var output = new ByteArrayOutputStream();
+            var third = dispatcher(db, c, device, output::writeBytes);
+            UUID id = requestFirmware(db, device);
+            assertEquals(NO_COMMAND, first.dispatchNext(device.tenantId(), device.deviceId()));
+            assertEquals(NO_COMMAND, second.dispatchNext(device.tenantId(), device.deviceId()));
+            assertEquals("queued", status(db, device, id));
+            assertEquals(SENT, third.dispatchNext(device.tenantId(), device.deviceId()));
+            assertArrayEquals(FirmwareVersionRequest.encode(device.deviceIdentity()), output.toByteArray());
         }
     }
 }

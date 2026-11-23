@@ -67,6 +67,7 @@ O Flyway aplica os arquivos por versão e confere o checksum de cada migration j
 | V7 | Identifica o proprietário da transmissão, limita os comandos em voo por dispositivo e reforça o escopo das referências de respostas. |
 | V8 | Registra solicitante e chave de requisição para reconhecer repetições da mesma solicitação. |
 | V9 | Separa descoberta de cadastro e promove o equipamento ao tenant escolhido na aprovação administrativa. |
+| V10 | Identifica a sessão TCP que pode reservar comandos para cada dispositivo entre réplicas do gateway. |
 
 ## Validação
 

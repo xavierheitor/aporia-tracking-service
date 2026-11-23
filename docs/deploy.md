@@ -69,7 +69,7 @@ mvn flyway:validate
 mvn flyway:info
 ```
 
-Confira a aplicação bem-sucedida até V9 para esta revisão. O gateway e o worker pressupõem o schema instalado. A imagem da aplicação empacota o serviço com os testes pulados no estágio Docker; execute a suíte em banco de teste antes de promover a revisão. [Primeiros passos e testes](primeiros-passos.md)
+Confira a aplicação bem-sucedida até V10 para esta revisão. O gateway e o worker pressupõem o schema instalado. A imagem da aplicação empacota o serviço com os testes pulados no estágio Docker; execute a suíte em banco de teste antes de promover a revisão. [Primeiros passos e testes](primeiros-passos.md)
 
 ```sh
 app up -d tracking-gateway tracking-worker
@@ -157,3 +157,11 @@ WHERE status = 'pending' AND available_at <= now();
 Se a espera cresce de um minuto para o outro, verifique erros de processamento e saturação do PostgreSQL. Havendo capacidade no banco, é possível subir um segundo consumidor com `docker compose -f compose.services.yaml up -d --scale tracking-worker=2 tracking-worker` e comparar o tempo de drenagem. Réplicas na mesma máquina aproveitam capacidade disponível, mas compartilham o risco de indisponibilidade do host.
 
 Em operação contínua são **288.000 posições por dia**, ou **8,64 milhões em 30 dias**. Quando cada posição válida chega em um pacote único, crescem também as tabelas de recepções, mensagens, posições e eventos, além de seus índices. Meça o espaço real com uma amostra representativa para definir retenção, espaço de backup e margem para WAL. Para fechar o dimensionamento, repita o ensaio no hardware de homologação e inclua o perfil real de reconexão, lotes armazenados offline e indisponibilidade do banco.
+
+## Gateways atrás do mesmo IP
+
+Configure um balanceador TCP com IP e porta estáveis, verificação de saúde TCP e um timeout de inatividade superior ao intervalo esperado entre mensagens. Distribua os gateways por hosts distintos para tolerar a queda de um host. Uma conexão permanece no gateway que a aceitou. Após uma queda, o equipamento precisa abrir outra conexão para que o balanceador o encaminhe a uma réplica saudável.
+
+Todas as réplicas devem usar o mesmo PostgreSQL primário. Para atender comandos em qualquer réplica, habilite o dispatcher em cada uma com seu próprio arquivo de proprietário em volume persistente exclusivo. Uma réplica adicional deve iniciar com um volume vazio para gerar seu próprio UUID. Somente a substituta de uma instância encerrada deve reutilizar o volume dela. O Compose fornecido publica uma porta fixa e define um volume de proprietário por projeto. Para usar o mesmo manifesto Compose em vários hosts, execute um projeto por host, configure o endereço publicado para o balanceador e aponte todos para o mesmo banco. Em um único host, atribua a cada réplica um projeto, um volume e uma porta de publicação próprios.
+
+Na primeira implantação da V10, pare os gateways antigos, aplique a migration pelo procedimento acima e suba as réplicas atualizadas. Um binário anterior ignora o identificador de sessão. Depois dessa atualização, para manutenção, retire a réplica da rotação, encerre o processo e deixe os equipamentos reconectarem ao IP habitual. Se um equipamento ficar com admissão adiada após a queda de um emissor, restaure a instância com o volume original para reconciliar a tentativa. O balanceador e o PostgreSQL também precisam de redundância para tolerar a perda desses componentes. [Coordenação entre réplicas](arquitetura.md#coordenação-entre-réplicas)

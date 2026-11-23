@@ -6,6 +6,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
 import software.aporia.tracking.protocol.suntech.FirmwareVersionRequest;
@@ -78,20 +79,26 @@ public final class CommandDispatcher {
 
             var session = endpoint.get();
             DeviceCommandDispatchRepository.ClaimedCommand command;
+            Optional<DispatchResult> rejection;
             try (Connection c = dataSource.getConnection()) {
+                c.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
                 c.setAutoCommit(false);
                 try {
-                    var claimed = repository.claimNextForDevice(c, tenantId, deviceId);
-                    c.commit();
-                    if (claimed.isEmpty()) return DispatchResult.NO_COMMAND;
+                    var claimed = repository.claimForSession(c, tenantId, deviceId, session.sessionToken());
+                    if (claimed.isEmpty()) {
+                        c.commit();
+                        return DispatchResult.NO_COMMAND;
+                    }
                     command = claimed.get();
+                    rejection = authorize(c, command, session, ownerId);
+                    c.commit();
                 } catch (SQLException | RuntimeException error) {
                     c.rollback();
                     throw error;
                 }
             }
 
-            DispatchResult result = transmit(command, session, ownerId);
+            DispatchResult result = rejection.isPresent() ? rejection.get() : transmit(command, session);
             LoggerFactory.getLogger(CommandDispatcher.class).info(
                     "Command dispatch tenant={} device={} command={} attempt={} result={}",
                     tenantId, deviceId, command.id(), command.attempts(), result);
@@ -99,32 +106,26 @@ public final class CommandDispatcher {
         }
     }
 
-    /**
-     * Verifica a política, confirma a autorização e escreve na sessão escolhida antes de
-     * persistir o resultado.
-     *
-     * @param command comando da tentativa em curso
-     * @param session sessão escolhida para a operação
-     * @param ownerId UUID persistido do emissor
-     * @return desfecho da tentativa observado pelo dispatcher
-     * @throws SQLException se a operação JDBC falhar
-     */
+    /** Avalia o comando enquanto o bloqueio do cadastro impede uma troca concorrente de sessão. */
+    private Optional<DispatchResult> authorize(Connection c, DeviceCommandDispatchRepository.ClaimedCommand command,
+                                     CommandTransport.Endpoint session, UUID ownerId) throws SQLException {
+        if (!session.protocol().equals(command.protocol())
+                || !FirmwareVersionRequest.permits(command.protocol(), session.identity(), command.payload())) {
+            return Optional.of(repository.finishFailure(c, command, Failure.COMMAND_POLICY_DENIED)
+                    ? DispatchResult.DELIVERY_FAILED : DispatchResult.CLAIM_LOST);
+        }
+        if (!repository.authorizeTransmission(c, command.tenantId(), command.id(), command.claimToken(), ownerId, session.identity())) {
+            return Optional.of(repository.finishFailure(c, command, Failure.AUTHORIZATION_REJECTED)
+                    ? DispatchResult.DELIVERY_FAILED : DispatchResult.CLAIM_LOST);
+        }
+        return Optional.empty();
+    }
+
+    /** Escreve somente após o commit da autorização e registra o resultado observado. */
     private DispatchResult transmit(DeviceCommandDispatchRepository.ClaimedCommand command,
-                                    CommandTransport.Endpoint session, UUID ownerId) throws SQLException {
+                                    CommandTransport.Endpoint session) throws SQLException {
         UUID tenantId = command.tenantId();
         byte[] payload = command.payload();
-        try (Connection c = dataSource.getConnection()) {
-            c.setAutoCommit(true);
-            if (!session.protocol().equals(command.protocol())
-                    || !FirmwareVersionRequest.permits(command.protocol(), session.identity(), payload)) {
-                return repository.finishFailure(c, command, Failure.COMMAND_POLICY_DENIED)
-                        ? DispatchResult.DELIVERY_FAILED : DispatchResult.CLAIM_LOST;
-            }
-            if (!repository.authorizeTransmission(c, tenantId, command.id(), command.claimToken(), ownerId, session.identity())) {
-                return repository.finishFailure(c, command, Failure.AUTHORIZATION_REJECTED)
-                        ? DispatchResult.DELIVERY_FAILED : DispatchResult.CLAIM_LOST;
-            }
-        }
 
         try {
             // A autorização já foi confirmada e a conexão JDBC liberada. Uma falha aqui pode ocorrer após uma escrita parcial.

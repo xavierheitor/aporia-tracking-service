@@ -15,6 +15,9 @@ public interface CommandTransport {
      * destino antes da escrita.
      */
     interface Endpoint {
+        /** Identifica esta conexão TCP entre todas as réplicas. */
+        UUID sessionToken();
+
         /**
          * Informa o protocolo usado pela conexão selecionada.
          *
