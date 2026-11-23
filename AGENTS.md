@@ -4,7 +4,7 @@ Leia este arquivo antes de modificar código, banco, testes ou infraestrutura. O
 
 O escopo atual cobre gateway, worker e persistência. A API será implementada pelo mantenedor. Novos protocolos, painel web e funcionalidades comerciais dependem de prioridade explícita. A homologação com equipamentos físicos, a correlação positiva das respostas Suntech e a preparação para produção continuam pendentes.
 
-Consulte o [README](README.md) para arquitetura e validação, o [guia do gateway](docs/gateway-tcp.md) para descoberta e autorização e o [guia de comandos](docs/comandos.md) para as decisões de concorrência, recuperação e operação.
+Consulte o [README](README.md) para arquitetura e validação, o [guia do gateway](docs/gateway-tcp.md) para descoberta e autorização e o [guia de deploy](docs/deploy.md) para operação e recuperação.
 
 ## Princípios obrigatórios de engenharia
 
@@ -26,7 +26,7 @@ Consulte o [README](README.md) para arquitetura e validação, o [guia do gatewa
 
 ## Alterações no dispatcher
 
-Preserve o contrato descrito no [guia de comandos](docs/comandos.md). A transição confirmada para `transmitting` inicia a tentativa de envio. Uma reserva em `sending` pode expirar. A recuperação de uma transmissão com proprietário exige exclusividade sobre o arquivo do emissor. O tempo decorrido, sozinho, é insuficiente para revogar uma tentativa em curso.
+Preserve o contrato descrito no [fluxo do dispatcher](docs/arquitetura.md#do-comando-ao-rastreador). A transição confirmada para `transmitting` inicia a tentativa de envio. Uma reserva em `sending` pode expirar. A recuperação de uma transmissão com proprietário exige exclusividade sobre o arquivo do emissor. O tempo decorrido, sozinho, é insuficiente para revogar uma tentativa em curso.
 
 Ao alterar esse fluxo, exercite concorrência, substituição da sessão, timeout de escrita e falha entre a escrita e o commit do resultado. Mantenha a operação TCP fora da transação PostgreSQL e valide operação, identidade e sessão antes do envio.
 

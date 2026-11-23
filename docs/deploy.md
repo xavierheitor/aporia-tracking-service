@@ -124,4 +124,9 @@ unset TRACKING_DISPATCH_OWNER_FILE
 app up -d --force-recreate tracking-gateway
 ```
 
-Para voltar o binário, exporte em `TRACKING_RELEASE_IMAGE` a tag anterior **compatível com o schema instalado**, confirme com `app config --images` e recrie os serviços. A troca da imagem preserva as migrations aplicadas. Se a versão anterior exigir outro schema, faça recuperação coordenada a partir de um backup validado em instância isolada. Antes de reativar comandos após restauração, reconcilie as tentativas em curso com o emissor original encerrado. Preserve o arquivo e o volume de propriedade entre recriações. [Backup, recuperação de tentativas e aceite físico](comandos.md)
+Para voltar o binário, exporte em `TRACKING_RELEASE_IMAGE` a tag anterior **compatível com o schema instalado**, confirme com `app config --images` e recrie os serviços. A troca da imagem preserva as migrations aplicadas. Se a versão anterior exigir outro schema, faça recuperação coordenada a partir de um backup validado em instância isolada. Antes de reativar comandos após restauração, reconcilie as tentativas em curso com o emissor original encerrado. Preserve o arquivo e o volume de propriedade entre recriações.
+
+
+O arquivo de propriedade requer um sistema de arquivos local com bloqueios POSIX. Preserve o mesmo arquivo enquanto houver uma instância emissora ativa. Se ele for perdido, confirme o encerramento do emissor original e reconcilie as tentativas em `transmitting` antes de retomar o envio.
+
+Para monitorar a instalação, acompanhe a idade do pacote pendente mais antigo, comandos vencidos ainda em fila e crescimento de `delivery_unknown`. Os logs do dispatcher identificam tenant, dispositivo, comando e tentativa. Faça backup com `pg_dump -Fc`, guarde uma cópia protegida fora do host e ensaie a restauração com `pg_restore --exit-on-error` em uma instância isolada. Antes de expurgar comandos, considere que apagar o registro também libera sua chave idempotente.

@@ -16,7 +16,7 @@ A API HTTP está prevista para uma etapa posterior.
 | Entender o projeto e executar o primeiro teste com um rastreador simulado | [Primeiros passos](docs/primeiros-passos.md) |
 | Acompanhar uma conexão, identificar qual thread trabalha nela e seguir uma posição até o banco | [Arquitetura e fluxos](docs/arquitetura.md) |
 | Configurar, descobrir e autorizar um equipamento físico | [Gateway TCP e protocolos](docs/gateway-tcp.md) |
-| Entender o envio, a recuperação e o significado dos estados de comandos | [Ciclo de comandos](docs/comandos.md) |
+| Entender o envio, a recuperação e o significado dos estados de comandos | [Do comando ao rastreador](docs/arquitetura.md#do-comando-ao-rastreador) |
 | Preparar o ambiente, aplicar migrations, subir os processos e verificar a versão implantada | [Deploy e operação](docs/deploy.md) |
 
 ## Organização do código
@@ -50,7 +50,7 @@ O arquivo `.env.example` mostra a configuração da aplicação para execução 
 
 O serviço de banco responde pelo nome `postgres` na rede `aporia-tracking-db_default`. Configure a senha em `.env`, suba o banco, aplique as migrations e inicie os serviços com a imagem da revisão desejada. As instruções para uma instalação nova ou para migrar dados existentes estão no [guia de deploy](docs/deploy.md).
 
-Para configurar um rastreador, listar pendências e autorizar um equipamento em um tenant, consulte o [guia do gateway TCP](docs/gateway-tcp.md). Para construir a imagem, habilitar o envio da consulta de firmware ou verificar uma tentativa de entrega, consulte o [guia de comandos](docs/comandos.md).
+Para configurar um rastreador, listar pendências e autorizar um equipamento em um tenant, consulte o [guia do gateway TCP](docs/gateway-tcp.md). Para construir a imagem, habilitar o envio da consulta de firmware e acompanhar o emissor, consulte o [guia de deploy](docs/deploy.md).
 
 ## Leitura das migrations
 

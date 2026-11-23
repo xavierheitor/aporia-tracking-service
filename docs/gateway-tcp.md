@@ -2,6 +2,13 @@
 
 O modo padrão `TRACKING_PROTOCOL=auto` atende os dois fabricantes na mesma porta (5500 por padrão). Cada conexão seleciona um adaptador pelo prefixo do primeiro frame e conserva sua própria sessão. Os valores `suntech` e `teltonika` restringem o listener a um fabricante. O timeout inicial de leitura é de 30 segundos. Após identificar um dispositivo habilitado, o timeout de inatividade passa a `TRACKING_TCP_SESSION_IDLE_SECONDS`, com padrão de 180 segundos.
 
+## Suporte por protocolo
+
+| Protocolo | Recepção pelo gateway | Comandos enviados pelo dispatcher |
+| --- | --- | --- |
+| Suntech ASCII (linha ST8310) | Posições, presença e respostas `RES`/`RPR`, inclusive posição embutida | Consulta de versão de firmware |
+| Teltonika AVL Codec 8 e 8E | Login, ping e lotes de telemetria com confirmação após a persistência | Nenhum comando implementado. Os ACKs fazem parte da recepção AVL. |
+
 ## Descoberta e autorização de equipamentos
 
 Com a migration V9 aplicada, aponte o rastreador para o IP e a porta TCP do gateway. Uma mensagem Suntech reconhecida ou um lote AVL válido cria uma pendência administrativa. O formato da mensagem identifica a família de protocolo e a marca compatível. A identidade declarada pelo equipamento distingue reconexões dentro do mesmo protocolo. Um emissor que imita o protocolo também pode aparecer na fila, por isso o operador precisa conferir a identidade e o tenant antes de aprovar.
@@ -25,11 +32,13 @@ A aprovação cria o dispositivo habilitado no tenant escolhido com os metadados
 
 O gateway responde 01 ao login de um IMEI habilitado ou desconhecido. Para o desconhecido, esse byte solicita o primeiro lote, cujo codec e CRC permitem registrar a descoberta. O lote de descoberta fica sem ACK de dados. Um IMEI desabilitado recebe 00. Para cada lote, valida preâmbulo, tamanho, codec, contagens de registros e I/O e CRC-16/IBM. O ACK de quatro bytes informa a quantidade de registros somente após o commit do pacote bruto. A confirmação cobre a ingestão. O worker processa o lote em outra transação e preserva o índice original de cada leitura. A retransmissão do mesmo pacote bruto preserva o histórico de recepção e evita duplicar posições e eventos. [Protocolo AVL sobre TCP](https://wiki.teltonika-gps.com/view/Teltonika_Data_Sending_Protocols).
 
-O worker extrai coordenadas, horário UTC, velocidade, rumo, satélites e ignição quando o I/O 239 estiver presente. Leituras com zero satélites permanecem no pacote bruto e não atualizam a posição. Os demais I/Os, inclusive os campos de tamanho variável do Codec 8E, permanecem disponíveis nos bytes originais. A integração Teltonika cobre ingestão de telemetria. A política de comandos de saída habilita apenas a consulta Suntech de firmware.
+O worker extrai coordenadas, horário UTC, velocidade, rumo, satélites e ignição quando o I/O 239 estiver presente. Leituras com zero satélites permanecem no pacote bruto e não atualizam a posição. Os demais I/Os, inclusive os campos de tamanho variável do Codec 8E, permanecem disponíveis nos bytes originais. A integração Teltonika cobre ingestão de telemetria.
 
 ## Suntech ST8310
 
-O adaptador mantém os frames ASCII terminados por CR, a identidade de dez dígitos e os formatos STT, ASTT, ALV, RES e RPR. O decoder aceita o mapa estendido presente na resposta StatusReq da revisão 4 e preserva os campos adicionais no pacote bruto. A resposta da consulta de firmware nessa revisão ecoa a operação e o valor, sem identificar unicamente a tentativa. O histórico conserva a resposta sem associação automática ao comando. [Ciclo de comandos](comandos.md).
+O adaptador mantém os frames ASCII terminados por CR, a identidade de dez dígitos e os formatos STT, ASTT, ALV, RES e RPR. O decoder aceita o mapa estendido presente na resposta StatusReq da revisão 4 e preserva os campos adicionais no pacote bruto. A resposta da consulta de firmware nessa revisão ecoa a operação e o valor, sem identificar unicamente a tentativa. O histórico conserva a resposta sem associação automática ao comando. O worker conserva o horário de recepção e o conteúdo em `device_command_responses`, com `command_id` nulo e resultado `unknown`. [Fluxo do dispatcher](arquitetura.md#do-comando-ao-rastreador).
+
+Na homologação física do ST8310R, confira a versão conhecida do equipamento, solicite a consulta com uma chave inédita e compare a captura do socket com o estado persistido e a resposta recebida. Repita com desconexão e resposta tardia. Faça o ensaio em rede de acesso controlado: a identidade declarada no protocolo não autentica criptograficamente o aparelho.
 
 ## Validação
 
