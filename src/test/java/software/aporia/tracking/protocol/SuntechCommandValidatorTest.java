@@ -74,41 +74,45 @@ class SuntechCommandValidatorTest {
 
     @Test
     void shouldRejectUnsupportedHeader() {
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> validator.validate(
                         ascii("RES;1234567890;03;04;1")
                 )
         );
+        assertEquals("UNSUPPORTED_COMMAND_HEADER", error.getMessage());
     }
 
     @Test
     void shouldRejectInvalidIdentity() {
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> validator.validate(
                         ascii("CMD;ABC;03;04;1")
                 )
         );
+        assertEquals("INVALID_COMMAND_IDENTITY", error.getMessage());
     }
 
     @Test
     void shouldRejectInvalidAscii() {
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> validator.validate(
                         new byte[]{0, 1, 2}
                 )
         );
+        assertEquals("INVALID_COMMAND_ASCII", error.getMessage());
     }
 
     @Test
     void shouldRejectMalformedProgramCommand() {
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> validator.validate(
                         ascii("PRG;1234567890;16;70")
                 )
         );
+        assertEquals("INVALID_PROGRAM_PARAMETER", error.getMessage());
     }
 }

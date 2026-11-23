@@ -104,7 +104,7 @@ class DeviceCommandRepositoryIT {
                 statement.executeUpdate();
             }
 
-            assertThrows(
+            var error = assertThrows(
                     IllegalArgumentException.class,
                     () -> repository.enqueue(
                             connection,
@@ -115,6 +115,7 @@ class DeviceCommandRepositoryIT {
                             Instant.now().plusSeconds(300)
                     )
             );
+            assertEquals("UNKNOWN_OR_DISABLED_DEVICE", error.getMessage());
         }
     }
 
@@ -126,7 +127,7 @@ class DeviceCommandRepositoryIT {
                 dataSource, "9876500003"
         ); Connection connection = dataSource.getConnection()) {
 
-            assertThrows(
+            var error = assertThrows(
                     IllegalArgumentException.class,
                     () -> repository.enqueue(
                             connection,
@@ -137,6 +138,7 @@ class DeviceCommandRepositoryIT {
                             Instant.now().plusSeconds(300)
                     )
             );
+            assertEquals("UNKNOWN_OR_DISABLED_DEVICE", error.getMessage());
         }
     }
 
@@ -148,7 +150,7 @@ class DeviceCommandRepositoryIT {
                 dataSource, "9876500004"
         ); Connection connection = dataSource.getConnection()) {
 
-            assertThrows(
+            var error = assertThrows(
                     IllegalArgumentException.class,
                     () -> repository.enqueue(
                             connection,
@@ -159,6 +161,7 @@ class DeviceCommandRepositoryIT {
                             Instant.now().minusSeconds(60)
                     )
             );
+            assertEquals("INVALID_EXPIRATION", error.getMessage());
         }
     }
 

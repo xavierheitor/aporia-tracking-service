@@ -42,6 +42,7 @@ class TcpClientHandlerIT {
     private final String identity = "9876543299";
 
     @BeforeEach
+    @SuppressWarnings("unused") // Invocado pelo JUnit.
     void setUp() throws Exception {
 
         HikariConfig config = new HikariConfig();
@@ -101,6 +102,7 @@ class TcpClientHandlerIT {
     }
 
     @AfterEach
+    @SuppressWarnings("unused") // Invocado pelo JUnit.
     void tearDown() throws Exception {
 
         running.set(false);
@@ -151,6 +153,7 @@ class TcpClientHandlerIT {
         output.flush();
     }
 
+    @SuppressWarnings("SleepWhileInLoop") // Polling limitado pelo timeout do teste.
     private void awaitCondition(BooleanSupplier condition) {
 
         assertTimeoutPreemptively(

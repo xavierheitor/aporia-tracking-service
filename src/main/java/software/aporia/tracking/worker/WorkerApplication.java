@@ -12,6 +12,7 @@ public class WorkerApplication {
     private static final Logger log
             = LoggerFactory.getLogger(WorkerApplication.class);
 
+    @SuppressWarnings("SleepWhileInLoop") // Intervalos de polling e de recuperação após falha.
     public static void main(String[] args) {
 
         AtomicBoolean running = new AtomicBoolean(true);

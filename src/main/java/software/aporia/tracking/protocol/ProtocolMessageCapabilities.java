@@ -3,6 +3,7 @@ package software.aporia.tracking.protocol;
 import java.util.Set;
 
 public record ProtocolMessageCapabilities(
+        @SuppressWarnings("MismatchedQueryAndUpdateOfCollection") // Cópia imutável fornecida pelo chamador.
         Set<MessageCapability> values
         ) {
 

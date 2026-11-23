@@ -1,55 +1,39 @@
 package software.aporia.tracking.storage;
 
 import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
 import java.util.UUID;
 
-import org.junit.jupiter.api.AfterAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import com.zaxxer.hikari.HikariDataSource;
-
 import software.aporia.tracking.core.ReceivedFrame;
+import software.aporia.tracking.support.TestDatabase;
+import software.aporia.tracking.support.TestFixtures;
 
 class JdbcPacketIngestionIT {
-
-    private static HikariDataSource dataSource;
-    private static JdbcPacketIngestion ingestion;
-
-    // Test methods for JDBC packet ingestion would go here
-    @BeforeAll
-    static void setup() {
-        dataSource = Database.createDataSource();
-        ingestion = new JdbcPacketIngestion(dataSource);
-    }
-
-    @AfterAll
-    static void cleanup() {
-        if (dataSource != null) {
-            dataSource.close();
-        }
-    }
 
     /**
      * Test case to verify that a registered device can successfully accept a
      * received frame.
      */
     @Test
-    void shouldAcceptRegisteredDevice() {
-        ReceivedFrame frame = new ReceivedFrame(
-                "suntech",
-                "1234567890",
-                "ALV;1234567890\r".getBytes(
-                        StandardCharsets.US_ASCII
-                )
-        );
+    void shouldAcceptRegisteredDevice() throws SQLException {
+        try (var dataSource = TestDatabase.createDataSource();
+             var fixtures = new TestFixtures(dataSource, "9876500061")) {
+            String identity = fixtures.deviceIdentity();
+            ReceivedFrame frame = new ReceivedFrame(
+                    "suntech",
+                    identity,
+                    ("ALV;" + identity + "\r").getBytes(StandardCharsets.US_ASCII)
+            );
 
-        UUID packetId = ingestion.accept(frame);
+            UUID packetId = new JdbcPacketIngestion(dataSource).accept(frame);
 
-        assertNotNull(packetId);
+            assertNotNull(packetId);
+        }
     }
 
     /**
@@ -67,15 +51,18 @@ class JdbcPacketIngestionIT {
                 )
         );
 
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
-                () -> ingestion.accept(frame)
-        );
+        try (var dataSource = TestDatabase.createDataSource()) {
+            var ingestion = new JdbcPacketIngestion(dataSource);
+            IllegalArgumentException exception = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> ingestion.accept(frame)
+            );
 
-        assertEquals(
-                "Unknown or disabled device",
-                exception.getMessage()
-        );
+            assertEquals(
+                    "Unknown or disabled device",
+                    exception.getMessage()
+            );
+        }
     }
 
 }

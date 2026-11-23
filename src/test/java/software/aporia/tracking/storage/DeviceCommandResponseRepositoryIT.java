@@ -218,7 +218,7 @@ class DeviceCommandResponseRepositoryIT {
             DeviceCommandResponseRepository repository
                     = new DeviceCommandResponseRepository();
 
-            assertThrows(
+            var error = assertThrows(
                     IllegalArgumentException.class,
                     () -> repository.save(
                             connection,
@@ -230,6 +230,7 @@ class DeviceCommandResponseRepositoryIT {
                             bytes("STT;1234567890\r")
                     )
             );
+            assertEquals("INVALID_RESPONSE_TYPE", error.getMessage());
         }
     }
 
@@ -264,7 +265,7 @@ class DeviceCommandResponseRepositoryIT {
                 DeviceCommandResponseRepository repository
                         = new DeviceCommandResponseRepository();
 
-                assertThrows(
+                var error = assertThrows(
                         java.sql.SQLException.class,
                         () -> repository.save(
                                 connection,
@@ -276,6 +277,7 @@ class DeviceCommandResponseRepositoryIT {
                                 bytes("RES;" + identity + ";03;04;1\r")
                         )
                 );
+                assertEquals("23503", error.getSQLState());
 
             } finally {
                 connection.rollback();

@@ -251,10 +251,11 @@ class SuntechProtocolTest {
 
         byte[] frame = ("RES;STT;\r").getBytes(StandardCharsets.US_ASCII);
 
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> protocol.identify(frame)
         );
+        assertEquals("INVALID_IDENTITY", error.getMessage());
     }
 
 }

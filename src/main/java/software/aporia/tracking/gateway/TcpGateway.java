@@ -32,7 +32,6 @@ public class TcpGateway {
             System.getenv().getOrDefault("TRACKING_TCP_PORT", "5500")
     );
 
-    private static final int READ_TIMEOUT_MS = 30_000;
     private static final int SHUTDOWN_TIMEOUT_SECONDS = 10;
 
     public static void main(String[] args) throws IOException {

@@ -2,6 +2,7 @@ package software.aporia.tracking.protocol;
 
 import java.nio.charset.StandardCharsets;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -61,9 +62,10 @@ class SuntechMessageRouterTest {
     @Test
     void shouldRejectUnknownMessage() {
 
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> route("UNKNOWN;1234567890")
         );
+        assertEquals("UNSUPPORTED_MESSAGE_CAPABILITIES", error.getMessage());
     }
 }

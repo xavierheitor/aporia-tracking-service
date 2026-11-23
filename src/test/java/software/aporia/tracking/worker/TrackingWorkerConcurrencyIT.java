@@ -10,6 +10,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,13 +31,13 @@ class TrackingWorkerConcurrencyIT {
         )) {
 
             // Dois pacotes distintos do mesmo dispositivo.
-            UUID firstPacketId = insertPacket(
+            insertPacket(
                     dataSource,
                     fixtures,
                     "ALV;1234567890\r"
             );
 
-            UUID secondPacketId = insertPacket(
+            insertPacket(
                     dataSource,
                     fixtures,
                     "STT;1234567890;013831;20261120;08:45:00;"
@@ -55,7 +56,7 @@ class TrackingWorkerConcurrencyIT {
             CountDownLatch finished = new CountDownLatch(2);
 
             AtomicInteger processed = new AtomicInteger();
-            AtomicInteger failures = new AtomicInteger();
+            AtomicReference<Exception> failure = new AtomicReference<>();
 
             Runnable task1 = () -> {
                 try {
@@ -65,9 +66,8 @@ class TrackingWorkerConcurrencyIT {
                         processed.incrementAndGet();
                     }
 
-                } catch (Exception e) {
-                    failures.incrementAndGet();
-                    e.printStackTrace();
+                } catch (InterruptedException | RuntimeException e) {
+                    failure.compareAndSet(null, e);
                 } finally {
                     finished.countDown();
                 }
@@ -81,9 +81,8 @@ class TrackingWorkerConcurrencyIT {
                         processed.incrementAndGet();
                     }
 
-                } catch (Exception e) {
-                    failures.incrementAndGet();
-                    e.printStackTrace();
+                } catch (InterruptedException | RuntimeException e) {
+                    failure.compareAndSet(null, e);
                 } finally {
                     finished.countDown();
                 }
@@ -99,7 +98,9 @@ class TrackingWorkerConcurrencyIT {
                     "Workers did not finish in time"
             );
 
-            assertEquals(0, failures.get());
+            if (failure.get() != null) {
+                throw failure.get();
+            }
             assertEquals(2, processed.get());
 
             try (Connection connection
@@ -149,7 +150,7 @@ class TrackingWorkerConcurrencyIT {
         }
     }
 
-    private UUID insertPacket(
+    private void insertPacket(
             javax.sql.DataSource dataSource,
             TestFixtures fixtures,
             String frame
@@ -186,8 +187,6 @@ class TrackingWorkerConcurrencyIT {
 
             statement.executeUpdate();
         }
-
-        return packetId;
     }
 
     private long count(

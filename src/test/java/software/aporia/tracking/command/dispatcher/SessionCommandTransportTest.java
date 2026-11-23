@@ -6,6 +6,7 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -44,7 +45,7 @@ class SessionCommandTransportTest {
         SessionCommandTransport transport
                 = new SessionCommandTransport(registry);
 
-        assertThrows(
+        var error = assertThrows(
                 IOException.class,
                 () -> transport.send(
                         UUID.randomUUID(),
@@ -54,6 +55,7 @@ class SessionCommandTransportTest {
                         )
                 )
         );
+        assertEquals("DEVICE_SESSION_NOT_AVAILABLE", error.getMessage());
     }
 
     @Test
@@ -119,7 +121,7 @@ class SessionCommandTransportTest {
         UUID tenantId = UUID.randomUUID();
         UUID deviceId = UUID.randomUUID();
 
-        try (ServerSocket server = new ServerSocket(0); Socket client = new Socket(
+        try (ServerSocket server = new ServerSocket(0); Socket _ = new Socket(
                 "127.0.0.1",
                 server.getLocalPort()
         ); Socket gatewaySocket = server.accept()) {
@@ -144,7 +146,7 @@ class SessionCommandTransportTest {
                     transport.isConnected(tenantId, deviceId)
             );
 
-            assertThrows(
+            var error = assertThrows(
                     IOException.class,
                     () -> transport.send(
                             tenantId,
@@ -154,6 +156,7 @@ class SessionCommandTransportTest {
                             )
                     )
             );
+            assertEquals("DEVICE_SESSION_NOT_AVAILABLE", error.getMessage());
         }
     }
 
@@ -164,7 +167,7 @@ class SessionCommandTransportTest {
         UUID tenantId = UUID.randomUUID();
         UUID deviceId = UUID.randomUUID();
 
-        try (ServerSocket server = new ServerSocket(0); Socket client = new Socket(
+        try (ServerSocket server = new ServerSocket(0); Socket _ = new Socket(
                 "127.0.0.1",
                 server.getLocalPort()
         ); Socket gatewaySocket = server.accept()) {
@@ -193,7 +196,7 @@ class SessionCommandTransportTest {
                     )
             );
 
-            assertThrows(
+            var error = assertThrows(
                     IOException.class,
                     () -> transport.send(
                             anotherTenant,
@@ -203,6 +206,7 @@ class SessionCommandTransportTest {
                             )
                     )
             );
+            assertEquals("DEVICE_SESSION_NOT_AVAILABLE", error.getMessage());
         }
     }
 }

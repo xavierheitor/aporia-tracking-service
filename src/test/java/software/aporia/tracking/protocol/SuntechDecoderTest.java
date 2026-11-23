@@ -112,8 +112,6 @@ class SuntechDecoderTest {
     @Test
     void shouldDecodeTelemetryInsideCommandResponse() {
 
-        SuntechDecoder decoder = new SuntechDecoder();
-
         // Reutilize aqui um frame STT válido dos testes existentes.
         byte[] original = ascii(
                         "STT;1234567890;013831;20261119;13:30:00;"

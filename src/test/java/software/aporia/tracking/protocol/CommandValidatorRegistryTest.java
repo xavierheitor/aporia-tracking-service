@@ -85,43 +85,46 @@ class CommandValidatorRegistryTest {
     @Test
     void shouldRejectInvalidAscii() {
 
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> registry.validate(
                         "suntech",
                         new byte[]{0, 1, 2}
                 )
         );
+        assertEquals("INVALID_COMMAND_ASCII", error.getMessage());
     }
 
     @Test
     void shouldRejectMalformedCommand() {
 
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> registry.validate(
                         "suntech",
                         ascii("TEST\r")
                 )
         );
+        assertEquals("INVALID_COMMAND_FORMAT", error.getMessage());
     }
 
     @Test
     void shouldRejectUnknownProtocol() {
 
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> registry.validate(
                         "teltonika",
                         ascii("CMD;1234567890;03;04;1")
                 )
         );
+        assertEquals("UNSUPPORTED_COMMAND_PROTOCOL: teltonika", error.getMessage());
     }
 
     @Test
     void shouldRejectDuplicateValidators() {
 
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> new CommandValidatorRegistry(
                         List.of(
@@ -130,5 +133,6 @@ class CommandValidatorRegistryTest {
                         )
                 )
         );
+        assertEquals("DUPLICATE_COMMAND_VALIDATOR: suntech", error.getMessage());
     }
 }

@@ -2,6 +2,7 @@ package software.aporia.tracking.protocol;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
@@ -30,16 +31,17 @@ class ProtocolRegistryTest {
                 List.of(new SuntechAdapter())
         );
 
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> registry.get("unknown")
         );
+        assertEquals("Unsupported protocol: unknown", error.getMessage());
     }
 
     @Test
     void shouldRejectDuplicateProtocolIds() {
 
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> new ProtocolRegistry(
                         List.of(
@@ -48,5 +50,6 @@ class ProtocolRegistryTest {
                         )
                 )
         );
+        assertEquals("Duplicate protocol: suntech", error.getMessage());
     }
 }

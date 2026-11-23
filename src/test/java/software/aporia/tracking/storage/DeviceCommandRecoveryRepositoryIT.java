@@ -3,6 +3,7 @@ package software.aporia.tracking.storage;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -192,7 +193,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -219,7 +220,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -254,7 +255,7 @@ class DeviceCommandRecoveryRepositoryIT {
                 dispatcher.claimNext(connection).orElseThrow();
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -269,7 +270,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -294,13 +295,14 @@ class DeviceCommandRecoveryRepositoryIT {
         try (
                 var dataSource = TestDatabase.createDataSource(); Connection connection = dataSource.getConnection()) {
 
-            assertThrows(
+            var error = assertThrows(
                     IllegalStateException.class,
                     () -> recovery.markStaleSendingAsUnknown(
                             connection,
                             Duration.ofMinutes(5)
                     )
             );
+            assertEquals("RECOVERY_REQUIRES_TRANSACTION", error.getMessage());
         }
     }
 
@@ -311,13 +313,14 @@ class DeviceCommandRecoveryRepositoryIT {
         try (
                 var dataSource = TestDatabase.createDataSource(); Connection connection = dataSource.getConnection()) {
 
-            assertThrows(
+            var error = assertThrows(
                     IllegalArgumentException.class,
                     () -> recovery.markStaleSendingAsUnknown(
                             connection,
                             Duration.ZERO
                     )
             );
+            assertEquals("INVALID_STALE_DURATION", error.getMessage());
         }
     }
 
@@ -342,7 +345,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -396,7 +399,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -445,7 +448,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -471,7 +474,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -509,7 +512,7 @@ class DeviceCommandRecoveryRepositoryIT {
                         .orElseThrow();
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -567,7 +570,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -583,13 +586,14 @@ class DeviceCommandRecoveryRepositoryIT {
 
             assertTrue(connection.getAutoCommit());
 
-            assertThrows(
+            var error = assertThrows(
                     IllegalStateException.class,
                     () -> recovery.markStaleTransmittingAsUnknown(
                             connection,
                             Duration.ofMinutes(5)
                     )
             );
+            assertEquals("RECOVERY_REQUIRES_TRANSACTION", error.getMessage());
         }
     }
 

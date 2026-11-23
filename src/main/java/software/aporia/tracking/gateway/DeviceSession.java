@@ -106,6 +106,7 @@ public final class DeviceSession {
         }
     }
 
+    @SuppressWarnings("ConvertToTryWithResources") // O socket pertence à sessão até o fechamento explícito.
     public void close() throws IOException {
         invalidate();
         socket.close();

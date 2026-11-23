@@ -2,6 +2,7 @@ package software.aporia.tracking.protocol;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
@@ -30,16 +31,17 @@ class DecoderRegistryTest {
                 List.of(new SuntechDecoder())
         );
 
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> registry.get("unknown-v1")
         );
+        assertEquals("Decoder unavailable: unknown-v1", error.getMessage());
     }
 
     @Test
     void shouldRejectDuplicateDecoderVersions() {
 
-        assertThrows(
+        var error = assertThrows(
                 IllegalArgumentException.class,
                 () -> new DecoderRegistry(
                         List.of(
@@ -48,5 +50,6 @@ class DecoderRegistryTest {
                         )
                 )
         );
+        assertEquals("Duplicate decoder version: suntech-ascii-v3", error.getMessage());
     }
 }

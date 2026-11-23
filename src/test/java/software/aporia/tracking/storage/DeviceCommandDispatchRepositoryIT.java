@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -60,7 +61,7 @@ class DeviceCommandDispatchRepositoryIT {
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -84,7 +85,7 @@ class DeviceCommandDispatchRepositoryIT {
                 );
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -98,10 +99,11 @@ class DeviceCommandDispatchRepositoryIT {
                 var dataSource = TestDatabase.createDataSource(); Connection connection = dataSource.getConnection()) {
             assertTrue(connection.getAutoCommit());
 
-            assertThrows(
+            var error = assertThrows(
                     IllegalStateException.class,
                     () -> dispatcher.claimNext(connection)
             );
+            assertEquals("CLAIM_REQUIRES_TRANSACTION", error.getMessage());
         }
     }
 
@@ -143,7 +145,7 @@ class DeviceCommandDispatchRepositoryIT {
                 first.commit();
                 second.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 first.rollback();
                 second.rollback();
                 throw e;
@@ -206,7 +208,7 @@ class DeviceCommandDispatchRepositoryIT {
 
                 second.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 first.rollback();
                 second.rollback();
                 throw e;
@@ -242,7 +244,7 @@ class DeviceCommandDispatchRepositoryIT {
                         .orElseThrow();
 
                 connection.commit();
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -299,7 +301,7 @@ class DeviceCommandDispatchRepositoryIT {
                         .orElseThrow();
 
                 connection.commit();
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -380,7 +382,7 @@ class DeviceCommandDispatchRepositoryIT {
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -429,7 +431,7 @@ class DeviceCommandDispatchRepositoryIT {
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -524,7 +526,7 @@ class DeviceCommandDispatchRepositoryIT {
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -585,15 +587,13 @@ class DeviceCommandDispatchRepositoryIT {
 
             connection.setAutoCommit(false);
 
-            DeviceCommandDispatchRepository.ClaimedCommand claimed;
-
             try {
-                claimed = dispatcher.claimNext(connection)
+                dispatcher.claimNext(connection)
                         .orElseThrow();
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
@@ -657,7 +657,7 @@ class DeviceCommandDispatchRepositoryIT {
 
                 connection.commit();
 
-            } catch (Exception e) {
+            } catch (SQLException | RuntimeException e) {
                 connection.rollback();
                 throw e;
             }
