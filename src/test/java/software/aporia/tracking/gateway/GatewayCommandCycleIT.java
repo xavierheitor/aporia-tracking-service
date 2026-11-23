@@ -169,20 +169,57 @@ class GatewayCommandCycleIT {
         var hex = java.util.HexFormat.of();
         byte[] login = java.nio.ByteBuffer.allocate(17).putShort((short)15)
                 .put(imei.getBytes(StandardCharsets.US_ASCII)).array();
-        try (var denied = new Socket("127.0.0.1", port)) {
-            denied.setSoTimeout(3000);
-            denied.getOutputStream().write(login);
-            assertEquals(0, denied.getInputStream().read());
+        // Two fixes per batch, southern/western coordinates, ignition and extended variable-size IO.
+        byte[] codec8 = hex.parseHex("00000000000000430802000001a3185c500000e3fc5e80f268ff00007b001f070019000101ef01000000000001a3185c500100e3fc5e80f268ff00007b001f070019000101ef010000000200005a0c");
+        byte[] extended = hex.parseHex("00000000000000638e02000001a3185c500000e3fc5e80f268ff00007b001f07001900000002000100ef01000000000000000101000003616263000001a3185c500100e3fc5e80f268ff00007b001f07001900000002000100ef01000000000000000101000003616263020000dd1a");
+        UUID approved;
+        byte[] invalid = codec8.clone();
+        invalid[invalid.length - 1] ^= 1;
+        for (byte[] batch : new byte[][]{invalid, codec8, extended}) {
+            try (var pending = new Socket("127.0.0.1", port)) {
+                pending.setSoTimeout(5000);
+                pending.getOutputStream().write(login);
+                assertEquals(1, pending.getInputStream().read());
+                pending.getOutputStream().write(batch);
+                assertEquals(-1, pending.getInputStream().read());
+            }
         }
-        try (var update = c.prepareStatement("UPDATE devices SET identity=?,protocol='teltonika' WHERE tenant_id=? AND id=?")) {
-            update.setString(1, imei);
+        assertEquals(0, count(c, "raw_packets", fixture.tenantId()));
+        try (var query = c.prepareStatement("""
+                SELECT id, manufacturer, device_type, wire_format, reported_model, observations
+                FROM pending_device_discoveries WHERE protocol='teltonika' AND identity=?
+                """)) {
+            query.setString(1, imei);
+            try (var row = query.executeQuery()) {
+                assertTrue(row.next());
+                approved = row.getObject(1, UUID.class);
+                assertEquals("Teltonika", row.getString(2));
+                assertEquals("gps_tracker", row.getString(3));
+                assertEquals("Codec 8E", row.getString(4));
+                assertNull(row.getString(5));
+                assertEquals(2, row.getInt(6));
+                assertFalse(row.next());
+            }
+        }
+        try (var approve = c.prepareStatement("SELECT approve_device_discovery(?,?)")) {
+            approve.setObject(1, approved);
+            approve.setObject(2, fixture.tenantId());
+            for (int attempt = 0; attempt < 2; attempt++) {
+                try (var row = approve.executeQuery()) {
+                    assertTrue(row.next());
+                    assertEquals(approved, row.getObject(1, UUID.class));
+                }
+            }
+            approve.setObject(2, UUID.randomUUID());
+            var conflict = assertThrows(java.sql.SQLException.class, approve::executeQuery);
+            assertTrue(conflict.getMessage().contains("DISCOVERY_ALREADY_APPROVED"));
+        }
+        try (var update = c.prepareStatement("UPDATE assignments SET device_id=? WHERE tenant_id=? AND device_id=?")) {
+            update.setObject(1, approved);
             update.setObject(2, fixture.tenantId());
             update.setObject(3, fixture.deviceId());
             assertEquals(1, update.executeUpdate());
         }
-        // Two fixes per batch, southern/western coordinates, ignition and extended variable-size IO.
-        byte[] codec8 = hex.parseHex("00000000000000430802000001a3185c500000e3fc5e80f268ff00007b001f070019000101ef01000000000001a3185c500100e3fc5e80f268ff00007b001f070019000101ef010000000200005a0c");
-        byte[] extended = hex.parseHex("00000000000000638e02000001a3185c500000e3fc5e80f268ff00007b001f07001900000002000100ef01000000000000000101000003616263000001a3185c500100e3fc5e80f268ff00007b001f07001900000002000100ef01000000000000000101000003616263020000dd1a");
         try (var tracker = new Socket("127.0.0.1", port)) {
             tracker.setSoTimeout(5000);
             tracker.getOutputStream().write(login);
@@ -195,11 +232,16 @@ class GatewayCommandCycleIT {
             // Revalidation at ingest must fail closed even after a successful login.
             try (var disable = c.prepareStatement("UPDATE devices SET enabled=false WHERE tenant_id=? AND id=?")) {
                 disable.setObject(1, fixture.tenantId());
-                disable.setObject(2, fixture.deviceId());
+                disable.setObject(2, approved);
                 assertEquals(1, disable.executeUpdate());
             }
             tracker.getOutputStream().write(codec8);
             assertEquals(-1, tracker.getInputStream().read());
+        }
+        try (var disabled = new Socket("127.0.0.1", port)) {
+            disabled.setSoTimeout(5000);
+            disabled.getOutputStream().write(login);
+            assertEquals(0, disabled.getInputStream().read());
         }
         await("Worker did not persist both batches", () -> count(c, "positions", fixture.tenantId()) == 4);
         assertEquals(3, count(c, "raw_packets", fixture.tenantId()));

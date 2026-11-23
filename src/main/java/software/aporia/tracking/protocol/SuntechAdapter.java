@@ -23,6 +23,28 @@ public final class SuntechAdapter implements ProtocolAdapter {
         return new SuntechSession();
     }
 
+    @Override
+    public DeviceDescription describe(ProtocolFrame frame) {
+        byte[] payload = frame.payload();
+        new SuntechDecoder().decodePacket(payload, frame.deviceIdentity());
+        String[] fields = new String(payload, 0, payload.length - 1, StandardCharsets.US_ASCII).split(";", -1);
+        boolean embedded = "RES".equals(fields[0]) && fields.length > 2
+                && ("STT".equals(fields[1]) || "ASTT".equals(fields[1]));
+        String model = null;
+        if (embedded || "STT".equals(fields[0]) || "ASTT".equals(fields[0])) {
+            int mapIndex = embedded ? 3 : 2;
+            if ((Integer.parseInt(fields[mapIndex], 16) & 2) != 0 && fields[mapIndex + 1].matches("[0-9]{1,10}")) {
+                model = fields[mapIndex + 1];
+            }
+        } else if ("RES".equals(fields[0]) || "RPR".equals(fields[0])) {
+            if (fields.length < 4 || !fields[3].matches("[0-9]{2}")
+                    || ("RES".equals(fields[0]) && !fields[2].matches("[0-9]{2}"))) {
+                throw new IllegalArgumentException("INVALID_DISCOVERY_RESPONSE");
+            }
+        }
+        return new DeviceDescription("Suntech", "gps_tracker", "Suntech ASCII", model);
+    }
+
     private static final class SuntechSession
             implements ProtocolSession {
 

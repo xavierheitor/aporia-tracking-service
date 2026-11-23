@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+case "${1:-}" in
+    listar)
+        [ "$#" -eq 1 ] || exit 2
+        exec psql -X -v ON_ERROR_STOP=1 -c 'SELECT * FROM pending_device_discoveries ORDER BY last_seen_at DESC, id'
+        ;;
+    autorizar)
+        [ "$#" -eq 3 ] || { echo 'Uso: equipamentos autorizar UUID_DA_DESCOBERTA UUID_DO_TENANT' >&2; exit 2; }
+        exec psql -X -v ON_ERROR_STOP=1 -v discovery="$2" -v tenant="$3" <<'SQL'
+SELECT approve_device_discovery(:'discovery'::uuid, :'tenant'::uuid) AS device_id;
+SQL
+        ;;
+    *)
+        echo 'Uso: equipamentos listar | autorizar UUID_DA_DESCOBERTA UUID_DO_TENANT' >&2
+        exit 2
+        ;;
+esac

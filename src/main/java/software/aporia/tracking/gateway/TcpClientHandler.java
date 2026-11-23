@@ -7,6 +7,7 @@ import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,6 +66,7 @@ public final class TcpClientHandler {
 
         try (client; InputStream input = client.getInputStream()) {
 
+            long loginDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(LOGIN_TIMEOUT_MS);
             client.setSoTimeout(LOGIN_TIMEOUT_MS);
 
             byte[] buffer = new byte[4096];
@@ -93,12 +95,21 @@ public final class TcpClientHandler {
                         }
 
                     } else {
-                        var found = deviceLookup.findEnabled(adapter.protocolId(), frame.deviceIdentity());
+                        var found = deviceLookup.find(adapter.protocolId(), frame.deviceIdentity());
                         if (found.isEmpty()) {
-                            if (frame.isLogin()) client.getOutputStream().write(protocolSession.rejectLogin());
-                            throw new IllegalArgumentException("UNKNOWN_OR_DISABLED_DEVICE");
+                            if (frame.isLogin()) {
+                                // Permit the first AVL batch only to verify the wire format.
+                                client.getOutputStream().write(protocolSession.acknowledge(frame));
+                                continue;
+                            }
+                            deviceLookup.recordDiscovery(adapter.protocolId(), frame.deviceIdentity(), adapter.describe(frame));
+                            return;
                         }
-                        RegisteredDevice device = found.get();
+                        if (!found.get().enabled()) {
+                            if (frame.isLogin()) client.getOutputStream().write(protocolSession.rejectLogin());
+                            return;
+                        }
+                        RegisteredDevice device = found.get().device();
 
                         client.setSoTimeout(SESSION_IDLE_MS);
                         registeredSession = new DeviceSession(
@@ -157,6 +168,11 @@ public final class TcpClientHandler {
                             packetId,
                             adapter.protocolId()
                     );
+                }
+                if (registeredSession == null) {
+                    long remaining = loginDeadline - System.nanoTime();
+                    if (remaining <= 0) return;
+                    client.setSoTimeout((int) Math.max(1, TimeUnit.NANOSECONDS.toMillis(remaining)));
                 }
             } while (running.get() && (bytesRead = input.read(buffer)) != -1);
 

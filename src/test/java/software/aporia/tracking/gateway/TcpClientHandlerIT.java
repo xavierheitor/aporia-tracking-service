@@ -264,7 +264,7 @@ class TcpClientHandlerIT {
     }
 
     @Test
-    void shouldRejectUnknownDevice() throws Exception {
+    void shouldDiscoverUnknownSuntechWithoutStartingSession() throws Exception {
 
         try (ServerSocket server = new ServerSocket(0);
              var executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -278,10 +278,25 @@ class TcpClientHandlerIT {
                     () -> handler.handle(gatewaySocket)
             );
 
-            send(tracker, frame("0000000002"));
+            send(tracker, frame("0000000002").replace("013831;", "013833;201;"));
 
             task.get();
 
+            try (var connection = dataSource.getConnection();
+                 var query = connection.prepareStatement("""
+                         SELECT manufacturer, wire_format, reported_model FROM pending_device_discoveries
+                         WHERE protocol='suntech' AND identity='0000000002'
+                         """); var rows = query.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals("Suntech", rows.getString(1));
+                assertEquals("Suntech ASCII", rows.getString(2));
+                assertEquals("201", rows.getString(3));
+            }
+            try (var connection = dataSource.getConnection();
+                 var cleanup = connection.prepareStatement(
+                         "DELETE FROM device_discoveries WHERE protocol='suntech' AND identity='0000000002'")) {
+                assertEquals(1, cleanup.executeUpdate());
+            }
             assertEquals(0, sessionRegistry.size());
         }
     }

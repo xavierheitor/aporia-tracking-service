@@ -209,6 +209,10 @@ public final class TestFixtures implements AutoCloseable {
                         tenantId
                 );
 
+                execute(connection, """
+                        DELETE FROM device_discoveries WHERE id IN (SELECT id FROM devices WHERE tenant_id=?)
+                        """, tenantId);
+
                 // 10. Dispositivos
                 execute(
                         connection,

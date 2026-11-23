@@ -14,6 +14,14 @@ public final class TeltonikaAdapter implements ProtocolAdapter {
     @Override public String decoderVersion() { return DECODER.decoderVersion(); }
     @Override public ProtocolSession newSession() { return new Session(); }
 
+    @Override
+    public DeviceDescription describe(ProtocolFrame frame) {
+        // The session emits AVL only after verifying its full structure and CRC.
+        if (!"AVL".equals(frame.messageType())) throw new IllegalArgumentException("AVL_BATCH_REQUIRED");
+        String format = frame.payload()[8] == 8 ? "Codec 8" : "Codec 8E";
+        return new DeviceDescription("Teltonika", "gps_tracker", format, null);
+    }
+
     private static final class Session implements ProtocolSession {
         private final ByteBuffer buffer = ByteBuffer.allocate(TeltonikaAvl.MAX_PACKET);
         private String imei;

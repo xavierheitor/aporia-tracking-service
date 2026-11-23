@@ -8,5 +8,7 @@ public interface ProtocolAdapter {
 
     boolean acceptsFirstByte(int first);
 
+    DeviceDescription describe(ProtocolFrame frame);
+
     ProtocolSession newSession();
 }

@@ -4,6 +4,11 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import software.aporia.tracking.protocol.DeviceDescription;
+import software.aporia.tracking.support.TestFixtures;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -100,6 +105,40 @@ class JdbcDeviceLookupIT {
                         connection.rollback();
                         throw e;
                     }
+        }
+    }
+
+    @Test
+    void concurrentApprovalsAssignDiscoveryToExactlyOneTenant() throws Exception {
+        try (var db = createDataSource(); var first = new TestFixtures(db); var second = new TestFixtures(db);
+             var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            String identity = "35000" + first.deviceIdentity();
+            var lookup = new JdbcDeviceLookup(db);
+            lookup.recordDiscovery("teltonika", identity, new DeviceDescription("Teltonika", "gps_tracker", "Codec 8", null));
+            var barrier = new CyclicBarrier(2);
+            var a = executor.submit(() -> approve(db, identity, first.tenantId(), barrier));
+            var b = executor.submit(() -> approve(db, identity, second.tenantId(), barrier));
+            boolean firstApproved = a.get(10, TimeUnit.SECONDS);
+            assertEquals(!firstApproved, b.get(10, TimeUnit.SECONDS));
+            var registered = lookup.findEnabled("teltonika", identity).orElseThrow();
+            assertEquals(firstApproved ? first.tenantId() : second.tenantId(), registered.tenantId());
+        }
+    }
+
+    private boolean approve(HikariDataSource db, String identity, UUID tenant, CyclicBarrier barrier) throws Exception {
+        try (var c = db.getConnection(); var query = c.prepareStatement("""
+                SELECT approve_device_discovery(id, ?) FROM device_discoveries WHERE protocol='teltonika' AND identity=?
+                """)) {
+            query.setObject(1, tenant);
+            query.setString(2, identity);
+            barrier.await(5, TimeUnit.SECONDS);
+            try (var row = query.executeQuery()) {
+                assertTrue(row.next());
+                return true;
+            } catch (SQLException conflict) {
+                if (conflict.getMessage().contains("DISCOVERY_ALREADY_APPROVED")) return false;
+                throw conflict;
+            }
         }
     }
 
