@@ -33,4 +33,4 @@ O adaptador mantém os frames ASCII terminados por CR, a identidade de dez dígi
 
 ## Validação
 
-A suíte integra TcpGateway, worker, PostgreSQL/PostGIS e sockets locais. Testa os dois codecs na mesma porta usada por Suntech, descoberta, aprovação, recusa de IMEI desabilitado, ping, fragmentação, CRC inválido, ACK de lote, posição com índice e retransmissão. Para executar, configurar as variáveis de conexão de aporia_tracking_test e usar `mvn clean package '-Dtest=*Test,*IT'`. A homologação física depende dos equipamentos e da rede de teste.
+A suíte integra TcpGateway, worker, PostgreSQL/PostGIS e sockets locais. Testa os dois codecs na mesma porta usada por Suntech, descoberta, aprovação, recusa de IMEI desabilitado, ping, fragmentação, CRC inválido, ACK de lote, posição com índice e retransmissão. A homologação física depende dos equipamentos e da rede de teste. Consulte o [README para executar a suíte](../README.md#validação).

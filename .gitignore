@@ -12,6 +12,7 @@ replay_pid*
 
 # Local IDE files
 .idea/
+.vscode/
 *.iml
 .classpath
 .project
@@ -19,6 +20,8 @@ replay_pid*
 
 # macOS
 .DS_Store
+
+# Local environment and database backups
 .env
 .env.*
 !.env.example
