@@ -1,36 +1,50 @@
 package software.aporia.tracking.gateway;
 
-import software.aporia.tracking.support.CommandTestFixtures;
-import com.zaxxer.hikari.HikariDataSource;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
-import java.util.UUID;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
-import org.junit.jupiter.api.BeforeAll;
+
 import org.junit.jupiter.api.AfterAll;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.io.TempDir;
+
+import com.zaxxer.hikari.HikariDataSource;
+
 import software.aporia.tracking.protocol.suntech.FirmwareVersionRequest;
 import software.aporia.tracking.storage.command.DeviceCommandRepository;
+import software.aporia.tracking.support.CommandTestFixtures;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 import software.aporia.tracking.worker.WorkerApplication;
 
-import static org.junit.jupiter.api.Assertions.*;
-
-/** Inicia gateway e worker em processos separados para observar descoberta, aprovação, ingestão e envio de comandos pelo socket. */
+/**
+ * Inicia gateway e worker em processos separados para observar descoberta,
+ * aprovação, ingestão e envio de comandos pelo socket.
+ */
 class GatewayCommandCycleIT {
     /** Diretório temporário que isola os arquivos gerados pelo cenário. */
-    @TempDir Path runtime;
+    @TempDir
+    Path runtime;
 
     private static final String suffix = UUID.randomUUID().toString().replace("-", "");
     private static final String gatewayLogin = "gateway_it_" + suffix;
@@ -39,7 +53,10 @@ class GatewayCommandCycleIT {
     private static final String workerPassword = UUID.randomUUID().toString();
     private static boolean rolesCreated;
 
-    /** Aplica as permissões do deploy a logins efêmeros no schema isolado desta suíte. */
+    /**
+     * Aplica as permissões do deploy a logins efêmeros no schema isolado desta
+     * suíte.
+     */
     @BeforeAll
     static void provisionRuntimeRoles() throws Exception {
         try (var db = TestDatabase.createDataSource(); var c = db.getConnection(); var sql = c.createStatement()) {
@@ -56,10 +73,12 @@ class GatewayCommandCycleIT {
 
     @AfterAll
     static void removeRuntimeRoles() throws Exception {
-        if (!rolesCreated) return;
+        if (!rolesCreated)
+            return;
         try (var db = TestDatabase.createDataSource(); var c = db.getConnection(); var sql = c.createStatement()) {
             c.setAutoCommit(false);
-            // Só os dois logins gerados nesta execução receberam privilégios no schema de teste.
+            // Só os dois logins gerados nesta execução receberam privilégios no schema de
+            // teste.
             sql.execute("DROP OWNED BY " + gatewayLogin + ", " + workerLogin);
             sql.execute("DROP ROLE " + gatewayLogin + ", " + workerLogin);
             c.commit();
@@ -72,8 +91,9 @@ class GatewayCommandCycleIT {
             for (String login : List.of(gatewayLogin, workerLogin)) {
                 String password = login.equals(gatewayLogin) ? gatewayPassword : workerPassword;
                 try (var c = java.sql.DriverManager.getConnection(db.getJdbcUrl(), login, password);
-                     var sql = c.createStatement()) {
-                    for (String forbidden : List.of("SELECT approve_device_discovery(gen_random_uuid(),gen_random_uuid())",
+                        var sql = c.createStatement()) {
+                    for (String forbidden : List.of(
+                            "SELECT approve_device_discovery(gen_random_uuid(),gen_random_uuid())",
                             "ALTER TABLE devices ADD COLUMN forbidden int", "CREATE TABLE forbidden(id int)")) {
                         var failure = assertThrows(java.sql.SQLException.class, () -> sql.execute(forbidden));
                         assertEquals("42501", failure.getSQLState());
@@ -85,13 +105,15 @@ class GatewayCommandCycleIT {
 
     /**
      * * Controla o ciclo de vida de uma JVM iniciada pelo teste.
+     * 
      * @param process processo filho iniciado para o ensaio
      */
     private record Service(Process process) implements AutoCloseable {
         /**
          * Solicita o encerramento do processo filho e aguarda até o limite do cenário.
          */
-        @Override public void close() {
+        @Override
+        public void close() {
             process.destroy();
             try {
                 if (!process.waitFor(10, TimeUnit.SECONDS)) {
@@ -110,8 +132,8 @@ class GatewayCommandCycleIT {
      * Inicia gateway ou worker com a conexão do schema isolado e captura seus logs.
      *
      * @param main classe com o ponto de entrada do processo filho
-     * @param db fonte de conexões JDBC para a operação
-     * @param log arquivo que recebe a saída do processo de teste
+     * @param db   fonte de conexões JDBC para a operação
+     * @param log  arquivo que recebe a saída do processo de teste
      * @return processo filho acompanhado pelo cenário
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -131,19 +153,21 @@ class GatewayCommandCycleIT {
         return new Service(builder.redirectErrorStream(true).redirectOutput(log.toFile()).start());
     }
 
-    // Os processos são externos à JVM de teste. A espera intercala consultas até o prazo de dez segundos.
+    // Os processos são externos à JVM de teste. A espera intercala consultas até o
+    // prazo de dez segundos.
     /**
      * Repete a observação até a condição se cumprir ou o prazo expirar.
      *
      * @param description descrição da observação
-     * @param predicate condição observada até o prazo do cenário
+     * @param predicate   condição observada até o prazo do cenário
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
     @SuppressWarnings("SleepWhileInLoop")
     private void await(String description, Callable<Boolean> predicate) throws Exception {
         long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < end) {
-            if (predicate.call()) return;
+            if (predicate.call())
+                return;
             Thread.sleep(25);
         }
         fail(description);
@@ -152,8 +176,8 @@ class GatewayCommandCycleIT {
     /**
      * Conta os registros da tabela no tenant do cenário.
      *
-     * @param c conexão JDBC usada pelo chamador
-     * @param table tabela consultada pelo cenário
+     * @param c      conexão JDBC usada pelo chamador
+     * @param table  tabela consultada pelo cenário
      * @param tenant identificador do tenant que delimita a operação
      * @return quantidade de registros no escopo da consulta
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
@@ -171,11 +195,11 @@ class GatewayCommandCycleIT {
     /**
      * Persiste a consulta de firmware com a chave idempotente da requisição.
      *
-     * @param db fonte de conexões JDBC para a operação
-     * @param fixture cadastro de teste utilizado no cenário
-     * @param tenant identificador do tenant que delimita a operação
+     * @param db        fonte de conexões JDBC para a operação
+     * @param fixture   cadastro de teste utilizado no cenário
+     * @param tenant    identificador do tenant que delimita a operação
      * @param principal identificador do solicitante auditado
-     * @param key chave que identifica repetições da mesma solicitação
+     * @param key       chave que identifica repetições da mesma solicitação
      * @return UUID da consulta, ou nulo se o dispositivo não for elegível
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -183,13 +207,16 @@ class GatewayCommandCycleIT {
             throws Exception {
         try (var c = db.getConnection()) {
             c.setAutoCommit(false);
-            var id = new DeviceCommandRepository().enqueueFirmwareVersion(c, tenant, fixture.deviceId(), principal, key);
+            var id = new DeviceCommandRepository().enqueueFirmwareVersion(c, tenant, fixture.deviceId(), principal,
+                    key);
             c.commit();
             return id.orElse(null);
         }
     }
 
-    /** Obtém a porta efêmera publicada pela JVM que efetivamente abriu o listener. */
+    /**
+     * Obtém a porta efêmera publicada pela JVM que efetivamente abriu o listener.
+     */
     private int gatewayPort(Service gateway, Path log) throws Exception {
         var listener = Pattern.compile("Tracking TCP Gateway listening on 127\\.0\\.0\\.1:(\\d+)");
         await("Gateway did not start", () -> {
@@ -201,17 +228,21 @@ class GatewayCommandCycleIT {
         return Integer.parseInt(match.group(1));
     }
 
-    /** Mantém os dois sockets abertos e observa em qual deles o comando realmente chega. */
+    /**
+     * Mantém os dois sockets abertos e observa em qual deles o comando realmente
+     * chega.
+     */
     @Test
     void reconnectAcrossGatewaysRoutesCommandToNewSocket() throws Exception {
         Path firstLog = runtime.resolve("first.log");
         Path secondLog = runtime.resolve("second.log");
-        try (var db = TestDatabase.createDataSource(); var device = new TestFixtures(db);
-             var first = start(TcpGateway.class, db, firstLog);
-             var second = start(TcpGateway.class, db, secondLog);
-             var c = db.getConnection();
-             var oldSocket = new Socket("127.0.0.1", gatewayPort(first, firstLog));
-             var newSocket = new Socket("127.0.0.1", gatewayPort(second, secondLog))) {
+        try (var db = TestDatabase.createDataSource();
+                var device = new TestFixtures(db);
+                var first = start(TcpGateway.class, db, firstLog);
+                var second = start(TcpGateway.class, db, secondLog);
+                var c = db.getConnection();
+                var oldSocket = new Socket("127.0.0.1", gatewayPort(first, firstLog));
+                var newSocket = new Socket("127.0.0.1", gatewayPort(second, secondLog))) {
             byte[] alive = ("ALV;" + device.deviceIdentity() + "\r").getBytes(StandardCharsets.US_ASCII);
             oldSocket.getOutputStream().write(alive);
             await("Primeira sessão", () -> count(c, "raw_packets", device.tenantId()) == 1);
@@ -227,13 +258,18 @@ class GatewayCommandCycleIT {
         }
     }
 
-    /** Reproduz no banco a tentativa deixada por um emissor interrompido após confirmar a autorização. */
+    /**
+     * Reproduz no banco a tentativa deixada por um emissor interrompido após
+     * confirmar a autorização.
+     */
     @Test
     void receivesPositionWhilePreviousOwnerIsUnavailable() throws Exception {
         var log = runtime.resolve("replacement.log");
-        try (var db = TestDatabase.createDataSource(); var device = new TestFixtures(db);
-             var c = db.getConnection(); var gateway = start(TcpGateway.class, db, log);
-             var worker = start(WorkerApplication.class, db, runtime.resolve("worker.log"))) {
+        try (var db = TestDatabase.createDataSource();
+                var device = new TestFixtures(db);
+                var c = db.getConnection();
+                var gateway = start(TcpGateway.class, db, log);
+                var worker = start(WorkerApplication.class, db, runtime.resolve("worker.log"))) {
             var tenant = device.tenantId();
             UUID interrupted = enqueue(db, device, tenant, UUID.randomUUID(), UUID.randomUUID());
             var dispatch = new software.aporia.tracking.storage.command.DeviceCommandDispatchRepository();
@@ -254,7 +290,7 @@ class GatewayCommandCycleIT {
                 });
                 socket.setSoTimeout(1500);
                 assertThrows(java.net.SocketTimeoutException.class, () -> socket.getInputStream().read());
-                var commands = new DeviceCommandRepository();
+
                 assertEquals("transmitting", CommandTestFixtures.findStatus(c, tenant, interrupted).orElseThrow());
                 assertEquals("queued", CommandTestFixtures.findStatus(c, tenant, next).orElseThrow());
             }
@@ -262,7 +298,8 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * Percorre enfileiramento offline, reconexão, envio e respostas sem correlação pelas entradas
+     * Percorre enfileiramento offline, reconexão, envio e respostas sem correlação
+     * pelas entradas
      * reais do serviço.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
@@ -270,11 +307,11 @@ class GatewayCommandCycleIT {
     @Test
     void offlineQueueReconnectAndUncorrelatedResponsesThroughProductionEntryPoints() throws Exception {
         Path log = runtime.resolve("gateway.log");
-        var repository = new DeviceCommandRepository();
-        try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
-             var gateway = start(TcpGateway.class, db, log);
-             var worker = start(WorkerApplication.class, db, runtime.resolve("worker.log"));
-             var c = db.getConnection()) {
+        try (var db = TestDatabase.createDataSource();
+                var fixture = new TestFixtures(db);
+                var gateway = start(TcpGateway.class, db, log);
+                var worker = start(WorkerApplication.class, db, runtime.resolve("worker.log"));
+                var c = db.getConnection()) {
             int port = gatewayPort(gateway, log);
             try (var teltonika = new TestFixtures(db)) {
                 verifyAvl(port, c, teltonika);
@@ -297,10 +334,12 @@ class GatewayCommandCycleIT {
                 tracker.setSoTimeout(8000);
                 tracker.getOutputStream().write(alive);
                 assertArrayEquals(expected, tracker.getInputStream().readNBytes(expected.length));
-                await("First write was not committed", () -> CommandTestFixtures.findStatus(c, tenant, first).orElseThrow().equals("sent"));
+                await("First write was not committed",
+                        () -> CommandTestFixtures.findStatus(c, tenant, first).orElseThrow().equals("sent"));
                 assertEquals("queued", CommandTestFixtures.findStatus(c, tenant, second).orElseThrow());
             }
-            // Antecipa o vencimento para simular a espera pela resposta durante a desconexão.
+            // Antecipa o vencimento para simular a espera pela resposta durante a
+            // desconexão.
             try (var s = c.prepareStatement("""
                     UPDATE device_commands SET created_at=now()-interval '3 minutes',
                     expires_at=now()-interval '1 second' WHERE tenant_id=? AND id=? AND status='sent'
@@ -309,7 +348,8 @@ class GatewayCommandCycleIT {
                 s.setObject(2, first);
                 assertEquals(1, s.executeUpdate());
             }
-            await("First command did not time out", () -> CommandTestFixtures.findStatus(c, tenant, first).orElseThrow().equals("timeout"));
+            await("First command did not time out",
+                    () -> CommandTestFixtures.findStatus(c, tenant, first).orElseThrow().equals("timeout"));
             try (var tracker = new Socket("127.0.0.1", port)) {
                 tracker.setSoTimeout(8000);
                 tracker.getOutputStream().write(alive);
@@ -339,9 +379,12 @@ class GatewayCommandCycleIT {
             }
         }
     }
+
     /**
-     * Mede três rajadas de 200 posições em sockets persistentes, separadas por um minuto.
-     * O cronômetro inclui envio, ingestão e commit da última posição de cada rodada.
+     * Mede três rajadas de 200 posições em sockets persistentes, separadas por um
+     * minuto.
+     * O cronômetro inclui envio, ingestão e commit da última posição de cada
+     * rodada.
      *
      * @throws Exception se o ambiente isolado ou os processos do ensaio falharem
      */
@@ -350,12 +393,15 @@ class GatewayCommandCycleIT {
     void processesTwoHundredDevicesEveryMinute() throws Exception {
         final int fleetSize = 200;
         Path log = runtime.resolve("fleet-gateway.log");
-        try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
-             var c = db.getConnection(); var gateway = start(TcpGateway.class, db, log);
-             var worker = start(WorkerApplication.class, db, runtime.resolve("fleet-worker.log"))) {
+        try (var db = TestDatabase.createDataSource();
+                var fixture = new TestFixtures(db);
+                var c = db.getConnection();
+                var gateway = start(TcpGateway.class, db, log);
+                var worker = start(WorkerApplication.class, db, runtime.resolve("fleet-worker.log"))) {
             int port = gatewayPort(gateway, log);
             var identities = new ArrayList<String>();
-            // Uma associação e um ativo distintos garantem que last_positions represente os 200 veículos.
+            // Uma associação e um ativo distintos garantem que last_positions represente os
+            // 200 veículos.
             try (var insert = c.prepareStatement("""
                     WITH fleet AS MATERIALIZED (
                         SELECT gen_random_uuid() AS device, gen_random_uuid() AS asset,
@@ -376,13 +422,15 @@ class GatewayCommandCycleIT {
                 insert.setObject(1, fixture.tenantId());
                 insert.setInt(2, fleetSize);
                 try (var rows = insert.executeQuery()) {
-                    while (rows.next()) identities.add(rows.getString(1));
+                    while (rows.next())
+                        identities.add(rows.getString(1));
                 }
             }
             assertEquals(fleetSize, identities.size());
             List<Socket> sockets = new ArrayList<>();
             try {
-                for (int i = 0; i < fleetSize; i++) sockets.add(new Socket("127.0.0.1", port));
+                for (int i = 0; i < fleetSize; i++)
+                    sockets.add(new Socket("127.0.0.1", port));
                 long first = System.nanoTime();
                 for (int round = 0; round < 3; round++) {
                     TimeUnit.NANOSECONDS.sleep(first + TimeUnit.MINUTES.toNanos(round) - System.nanoTime());
@@ -420,32 +468,37 @@ class GatewayCommandCycleIT {
                             round + 1, elapsed / 1_000_000_000.0, expected);
                 }
             } finally {
-                for (Socket socket : sockets) socket.close();
+                for (Socket socket : sockets)
+                    socket.close();
             }
         }
     }
 
     /**
-     * Exercita descoberta AVL, aprovação, ingestão, retransmissão e desabilitação na mesma porta
+     * Exercita descoberta AVL, aprovação, ingestão, retransmissão e desabilitação
+     * na mesma porta
      * TCP.
      *
-     * @param port porta TCP atribuída ao gateway de teste
-     * @param c conexão JDBC usada pelo chamador
+     * @param port    porta TCP atribuída ao gateway de teste
+     * @param c       conexão JDBC usada pelo chamador
      * @param fixture cadastro de teste utilizado no cenário
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
     private void verifyAvl(int port, Connection c, TestFixtures fixture) throws Exception {
         String imei = "35000" + fixture.deviceIdentity();
         var hex = java.util.HexFormat.of();
-        byte[] login = java.nio.ByteBuffer.allocate(17).putShort((short)15)
+        byte[] login = java.nio.ByteBuffer.allocate(17).putShort((short) 15)
                 .put(imei.getBytes(StandardCharsets.US_ASCII)).array();
-        // Cada lote traz duas posições nos hemisférios sul e oeste. O lote estendido também inclui um campo de tamanho variável.
-        byte[] codec8 = hex.parseHex("00000000000000430802000001a3185c500000e3fc5e80f268ff00007b001f070019000101ef01000000000001a3185c500100e3fc5e80f268ff00007b001f070019000101ef010000000200005a0c");
-        byte[] extended = hex.parseHex("00000000000000638e02000001a3185c500000e3fc5e80f268ff00007b001f07001900000002000100ef01000000000000000101000003616263000001a3185c500100e3fc5e80f268ff00007b001f07001900000002000100ef01000000000000000101000003616263020000dd1a");
+        // Cada lote traz duas posições nos hemisférios sul e oeste. O lote estendido
+        // também inclui um campo de tamanho variável.
+        byte[] codec8 = hex.parseHex(
+                "00000000000000430802000001a3185c500000e3fc5e80f268ff00007b001f070019000101ef01000000000001a3185c500100e3fc5e80f268ff00007b001f070019000101ef010000000200005a0c");
+        byte[] extended = hex.parseHex(
+                "00000000000000638e02000001a3185c500000e3fc5e80f268ff00007b001f07001900000002000100ef01000000000000000101000003616263000001a3185c500100e3fc5e80f268ff00007b001f07001900000002000100ef01000000000000000101000003616263020000dd1a");
         UUID approved;
         byte[] invalid = codec8.clone();
         invalid[invalid.length - 1] ^= 1;
-        for (byte[] batch : new byte[][]{invalid, codec8, extended}) {
+        for (byte[] batch : new byte[][] { invalid, codec8, extended }) {
             try (var pending = new Socket("127.0.0.1", port)) {
                 pending.setSoTimeout(5000);
                 pending.getOutputStream().write(login);
@@ -495,11 +548,12 @@ class GatewayCommandCycleIT {
             tracker.getOutputStream().write(login);
             assertEquals(1, tracker.getInputStream().read());
             tracker.getOutputStream().write(0xff);
-            for (byte[] bytes : new byte[][]{codec8, extended, extended}) {
+            for (byte[] bytes : new byte[][] { codec8, extended, extended }) {
                 tracker.getOutputStream().write(bytes);
-                assertArrayEquals(new byte[]{0,0,0,2}, tracker.getInputStream().readNBytes(4));
+                assertArrayEquals(new byte[] { 0, 0, 0, 2 }, tracker.getInputStream().readNBytes(4));
             }
-            // Desabilitar o cadastro após o login deve impedir a confirmação do lote seguinte.
+            // Desabilitar o cadastro após o login deve impedir a confirmação do lote
+            // seguinte.
             try (var disable = c.prepareStatement("UPDATE devices SET enabled=false WHERE tenant_id=? AND id=?")) {
                 disable.setObject(1, fixture.tenantId());
                 disable.setObject(2, approved);

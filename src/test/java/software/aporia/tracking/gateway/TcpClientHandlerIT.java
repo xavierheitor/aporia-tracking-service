@@ -14,22 +14,25 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
-import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.AfterEach;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import com.zaxxer.hikari.HikariDataSource;
 
 import software.aporia.tracking.protocol.suntech.SuntechAdapter;
 import software.aporia.tracking.storage.device.JdbcDeviceLookup;
 import software.aporia.tracking.storage.packet.JdbcPacketIngestion;
 import software.aporia.tracking.support.TestDatabase;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
-/** Exercita a descoberta e o ciclo de registro, substituição e encerramento de sessões TCP com banco real. */
+/**
+ * Exercita a descoberta e o ciclo de registro, substituição e encerramento de
+ * sessões TCP com banco real.
+ */
 class TcpClientHandlerIT {
 
     /** Fonte de conexões JDBC usadas pela instância. */
@@ -55,7 +58,6 @@ class TcpClientHandlerIT {
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
     @BeforeEach
-    @SuppressWarnings("unused") // Invocado pelo JUnit.
     void setUp() throws Exception {
 
         dataSource = TestDatabase.createDataSource();
@@ -65,23 +67,19 @@ class TcpClientHandlerIT {
 
         try (Connection connection = dataSource.getConnection()) {
 
-            try (PreparedStatement statement =
-                    connection.prepareStatement(
-                            "INSERT INTO tenants (id, name) VALUES (?, ?)"
-                    )) {
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO tenants (id, name) VALUES (?, ?)")) {
                 statement.setObject(1, tenantId);
                 statement.setString(2, "TCP Integration Test");
                 statement.executeUpdate();
             }
 
-            try (PreparedStatement statement =
-                    connection.prepareStatement(
-                            """
+            try (PreparedStatement statement = connection.prepareStatement(
+                    """
                             INSERT INTO devices
                                 (id, tenant_id, protocol, identity, enabled)
                             VALUES (?, ?, 'suntech', ?, true)
-                            """
-                    )) {
+                            """)) {
                 statement.setObject(1, deviceId);
                 statement.setObject(2, tenantId);
                 statement.setString(3, identity);
@@ -97,8 +95,7 @@ class TcpClientHandlerIT {
                 new JdbcDeviceLookup(dataSource),
                 sessionRegistry,
                 new SuntechAdapter(),
-                running
-        );
+                running);
     }
 
     /**
@@ -107,7 +104,6 @@ class TcpClientHandlerIT {
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
     @AfterEach
-    @SuppressWarnings("unused") // Invocado pelo JUnit.
     void tearDown() throws Exception {
 
         running.set(false);
@@ -117,26 +113,20 @@ class TcpClientHandlerIT {
             try (Connection connection = dataSource.getConnection()) {
 
                 // Os testes geram pacotes relacionados ao dispositivo.
-                try (PreparedStatement statement =
-                        connection.prepareStatement(
-                                "DELETE FROM raw_packets WHERE device_id = ?"
-                        )) {
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "DELETE FROM raw_packets WHERE device_id = ?")) {
                     statement.setObject(1, deviceId);
                     statement.executeUpdate();
                 }
 
-                try (PreparedStatement statement =
-                        connection.prepareStatement(
-                                "DELETE FROM devices WHERE id = ?"
-                        )) {
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "DELETE FROM devices WHERE id = ?")) {
                     statement.setObject(1, deviceId);
                     statement.executeUpdate();
                 }
 
-                try (PreparedStatement statement =
-                        connection.prepareStatement(
-                                "DELETE FROM tenants WHERE id = ?"
-                        )) {
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "DELETE FROM tenants WHERE id = ?")) {
                     statement.setObject(1, tenantId);
                     statement.executeUpdate();
                 }
@@ -161,7 +151,7 @@ class TcpClientHandlerIT {
     /**
      * Grava os bytes ASCII no socket e descarrega o buffer.
      *
-     * @param socket socket TCP da conexão do equipamento
+     * @param socket  socket TCP da conexão do equipamento
      * @param payload bytes do conteúdo da mensagem
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -185,8 +175,7 @@ class TcpClientHandlerIT {
                     while (!condition.getAsBoolean()) {
                         Thread.sleep(10);
                     }
-                }
-        );
+                });
     }
 
     /**
@@ -198,24 +187,21 @@ class TcpClientHandlerIT {
     void shouldRegisterAndRemoveSession() throws Exception {
 
         try (ServerSocket server = new ServerSocket(0);
-             var executor = Executors.newVirtualThreadPerTaskExecutor();
-             Socket tracker = new Socket(
-                     "127.0.0.1",
-                     server.getLocalPort()
-             );
-             Socket gatewaySocket = server.accept()) {
+                var executor = Executors.newVirtualThreadPerTaskExecutor();
+                Socket tracker = new Socket(
+                        "127.0.0.1",
+                        server.getLocalPort());
+                Socket gatewaySocket = server.accept()) {
 
             Future<?> task = executor.submit(
-                    () -> handler.handle(gatewaySocket)
-            );
+                    () -> handler.handle(gatewaySocket));
 
             send(tracker, frame(identity));
 
             awaitCondition(() -> sessionRegistry.size() == 1);
 
             assertTrue(
-                    sessionRegistry.find(tenantId, deviceId).isPresent()
-            );
+                    sessionRegistry.find(tenantId, deviceId).isPresent());
 
             tracker.shutdownOutput();
 
@@ -225,13 +211,16 @@ class TcpClientHandlerIT {
         }
     }
 
-    /** Confere a recomposição do quadro entre leituras sem perder a admissão da sessão. */
+    /**
+     * Confere a recomposição do quadro entre leituras sem perder a admissão da
+     * sessão.
+     */
     @Test
     void shouldRegisterAfterFragmentedFrame() throws Exception {
         try (ServerSocket server = new ServerSocket(0);
-             var executor = Executors.newVirtualThreadPerTaskExecutor();
-             Socket tracker = new Socket("127.0.0.1", server.getLocalPort());
-             Socket gateway = server.accept()) {
+                var executor = Executors.newVirtualThreadPerTaskExecutor();
+                Socket tracker = new Socket("127.0.0.1", server.getLocalPort());
+                Socket gateway = server.accept()) {
             Future<?> task = executor.submit(() -> handler.handle(gateway));
             send(tracker, "STT;");
             assertEquals(0, sessionRegistry.size());
@@ -247,23 +236,23 @@ class TcpClientHandlerIT {
     @Test
     void shouldRejectDisabledDevice() throws Exception {
         try (var connection = dataSource.getConnection();
-             var update = connection.prepareStatement(
-                     "UPDATE devices SET enabled=false WHERE tenant_id=? AND id=?")) {
+                var update = connection.prepareStatement(
+                        "UPDATE devices SET enabled=false WHERE tenant_id=? AND id=?")) {
             update.setObject(1, tenantId);
             update.setObject(2, deviceId);
             assertEquals(1, update.executeUpdate());
         }
         try (ServerSocket server = new ServerSocket(0);
-             var executor = Executors.newVirtualThreadPerTaskExecutor();
-             Socket tracker = new Socket("127.0.0.1", server.getLocalPort());
-             Socket gateway = server.accept()) {
+                var executor = Executors.newVirtualThreadPerTaskExecutor();
+                Socket tracker = new Socket("127.0.0.1", server.getLocalPort());
+                Socket gateway = server.accept()) {
             Future<?> task = executor.submit(() -> handler.handle(gateway));
             send(tracker, frame(identity));
             task.get(5, java.util.concurrent.TimeUnit.SECONDS);
             assertEquals(0, sessionRegistry.size());
             try (var connection = dataSource.getConnection();
-                 var query = connection.prepareStatement(
-                         "SELECT count(*) FROM raw_packets WHERE tenant_id=? AND device_id=?")) {
+                    var query = connection.prepareStatement(
+                            "SELECT count(*) FROM raw_packets WHERE tenant_id=? AND device_id=?")) {
                 query.setObject(1, tenantId);
                 query.setObject(2, deviceId);
                 try (var rows = query.executeQuery()) {
@@ -283,16 +272,14 @@ class TcpClientHandlerIT {
     void shouldRejectIdentityChange() throws Exception {
 
         try (ServerSocket server = new ServerSocket(0);
-             var executor = Executors.newVirtualThreadPerTaskExecutor();
-             Socket tracker = new Socket(
-                     "127.0.0.1",
-                     server.getLocalPort()
-             );
-             Socket gatewaySocket = server.accept()) {
+                var executor = Executors.newVirtualThreadPerTaskExecutor();
+                Socket tracker = new Socket(
+                        "127.0.0.1",
+                        server.getLocalPort());
+                Socket gatewaySocket = server.accept()) {
 
             Future<?> task = executor.submit(
-                    () -> handler.handle(gatewaySocket)
-            );
+                    () -> handler.handle(gatewaySocket));
 
             send(tracker, frame(identity));
 
@@ -315,21 +302,18 @@ class TcpClientHandlerIT {
     void shouldReplacePreviousConnection() throws Exception {
 
         try (ServerSocket server = new ServerSocket(0);
-             var executor = Executors.newVirtualThreadPerTaskExecutor();
-             Socket tracker1 = new Socket(
-                     "127.0.0.1",
-                     server.getLocalPort()
-             );
-             Socket gateway1 = server.accept();
-             Socket tracker2 = new Socket(
-                     "127.0.0.1",
-                     server.getLocalPort()
-             );
-             Socket gateway2 = server.accept()) {
+                var executor = Executors.newVirtualThreadPerTaskExecutor();
+                Socket tracker1 = new Socket(
+                        "127.0.0.1",
+                        server.getLocalPort());
+                Socket gateway1 = server.accept();
+                Socket tracker2 = new Socket(
+                        "127.0.0.1",
+                        server.getLocalPort());
+                Socket gateway2 = server.accept()) {
 
             Future<?> task1 = executor.submit(
-                    () -> handler.handle(gateway1)
-            );
+                    () -> handler.handle(gateway1));
 
             send(tracker1, frame(identity));
 
@@ -340,16 +324,13 @@ class TcpClientHandlerIT {
                     .orElseThrow();
 
             Future<?> task2 = executor.submit(
-                    () -> handler.handle(gateway2)
-            );
+                    () -> handler.handle(gateway2));
 
             send(tracker2, frame(identity));
 
-            awaitCondition(() ->
-                    sessionRegistry.find(tenantId, deviceId)
-                            .filter(session -> session != firstSession)
-                            .isPresent()
-            );
+            awaitCondition(() -> sessionRegistry.find(tenantId, deviceId)
+                    .filter(session -> session != firstSession)
+                    .isPresent());
 
             assertFalse(firstSession.isConnected());
             assertTrue(gateway1.isClosed());
@@ -372,34 +353,33 @@ class TcpClientHandlerIT {
     void shouldDiscoverUnknownSuntechWithoutStartingSession() throws Exception {
 
         try (ServerSocket server = new ServerSocket(0);
-             var executor = Executors.newVirtualThreadPerTaskExecutor();
-             Socket tracker = new Socket(
-                     "127.0.0.1",
-                     server.getLocalPort()
-             );
-             Socket gatewaySocket = server.accept()) {
+                var executor = Executors.newVirtualThreadPerTaskExecutor();
+                Socket tracker = new Socket(
+                        "127.0.0.1",
+                        server.getLocalPort());
+                Socket gatewaySocket = server.accept()) {
 
             Future<?> task = executor.submit(
-                    () -> handler.handle(gatewaySocket)
-            );
+                    () -> handler.handle(gatewaySocket));
 
             send(tracker, frame("0000000002").replace("013831;", "013833;201;"));
 
             task.get();
 
             try (var connection = dataSource.getConnection();
-                 var query = connection.prepareStatement("""
-                         SELECT manufacturer, wire_format, reported_model FROM pending_device_discoveries
-                         WHERE protocol='suntech' AND identity='0000000002'
-                         """); var rows = query.executeQuery()) {
+                    var query = connection.prepareStatement("""
+                            SELECT manufacturer, wire_format, reported_model FROM pending_device_discoveries
+                            WHERE protocol='suntech' AND identity='0000000002'
+                            """);
+                    var rows = query.executeQuery()) {
                 assertTrue(rows.next());
                 assertEquals("Suntech", rows.getString(1));
                 assertEquals("Suntech ASCII", rows.getString(2));
                 assertEquals("201", rows.getString(3));
             }
             try (var connection = dataSource.getConnection();
-                 var cleanup = connection.prepareStatement(
-                         "DELETE FROM device_discoveries WHERE protocol='suntech' AND identity='0000000002'")) {
+                    var cleanup = connection.prepareStatement(
+                            "DELETE FROM device_discoveries WHERE protocol='suntech' AND identity='0000000002'")) {
                 assertEquals(1, cleanup.executeUpdate());
             }
             assertEquals(0, sessionRegistry.size());

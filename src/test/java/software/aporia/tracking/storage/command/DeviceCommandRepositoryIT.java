@@ -1,26 +1,34 @@
 package software.aporia.tracking.storage.command;
 
-import software.aporia.tracking.support.CommandTestFixtures;
-import java.sql.Connection;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
+
 import software.aporia.tracking.protocol.suntech.FirmwareVersionRequest;
+import software.aporia.tracking.support.CommandTestFixtures;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
-import static org.junit.jupiter.api.Assertions.*;
 
-/** Exercita a entrada auditada de produção, seus limites e o isolamento entre tenants. */
+/**
+ * Exercita a entrada auditada de produção, seus limites e o isolamento entre
+ * tenants.
+ */
 class DeviceCommandRepositoryIT {
     private final DeviceCommandRepository repository = new DeviceCommandRepository();
 
     /** Confere bytes, auditoria e prazo definidos pela operação permitida. */
     @Test
     void shouldEnqueueAuditedFirmwareRequest() throws Exception {
-        try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
-             var connection = db.getConnection()) {
+        try (var db = TestDatabase.createDataSource();
+                var fixture = new TestFixtures(db);
+                var connection = db.getConnection()) {
             connection.setAutoCommit(false);
             UUID principal = UUID.randomUUID();
             UUID key = UUID.randomUUID();
@@ -42,7 +50,8 @@ class DeviceCommandRepositoryIT {
                     assertEquals(key, row.getObject("request_key", UUID.class));
                     assertEquals(0, row.getInt("attempts"));
                     assertEquals("queued", row.getString("status"));
-                    long delay = Duration.between(before, row.getObject("expires_at", OffsetDateTime.class).toInstant()).toSeconds();
+                    long delay = Duration.between(before, row.getObject("expires_at", OffsetDateTime.class).toInstant())
+                            .toSeconds();
                     assertTrue(delay >= 119 && delay <= 122);
                 }
             }
@@ -52,10 +61,12 @@ class DeviceCommandRepositoryIT {
     /** Um equipamento desabilitado não aceita uma nova solicitação. */
     @Test
     void shouldRejectDisabledDevice() throws Exception {
-        try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
-             var connection = db.getConnection()) {
+        try (var db = TestDatabase.createDataSource();
+                var fixture = new TestFixtures(db);
+                var connection = db.getConnection()) {
             connection.setAutoCommit(false);
-            try (var update = connection.prepareStatement("UPDATE devices SET enabled=false WHERE tenant_id=? AND id=?")) {
+            try (var update = connection
+                    .prepareStatement("UPDATE devices SET enabled=false WHERE tenant_id=? AND id=?")) {
                 update.setObject(1, fixture.tenantId());
                 update.setObject(2, fixture.deviceId());
                 assertEquals(1, update.executeUpdate());
@@ -66,11 +77,15 @@ class DeviceCommandRepositoryIT {
         }
     }
 
-    /** O tenant não pode solicitar comandos para o dispositivo de outro proprietário. */
+    /**
+     * O tenant não pode solicitar comandos para o dispositivo de outro
+     * proprietário.
+     */
     @Test
     void shouldRejectCrossTenantRequest() throws Exception {
-        try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
-             var connection = db.getConnection()) {
+        try (var db = TestDatabase.createDataSource();
+                var fixture = new TestFixtures(db);
+                var connection = db.getConnection()) {
             connection.setAutoCommit(false);
             assertTrue(repository.enqueueFirmwareVersion(connection, UUID.randomUUID(), fixture.deviceId(),
                     UUID.randomUUID(), UUID.randomUUID()).isEmpty());
@@ -81,20 +96,30 @@ class DeviceCommandRepositoryIT {
         }
     }
 
-    /** Idempotência é verificada antes da capacidade: repetir uma requisição não ocupa outra vaga. */
+    /**
+     * Idempotência é verificada antes da capacidade: repetir uma requisição não
+     * ocupa outra vaga.
+     */
     @Test
     void shouldPreserveIdempotencyWhenQueueIsFull() throws Exception {
-        try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
-             var connection = db.getConnection()) {
+        try (var db = TestDatabase.createDataSource();
+                var fixture = new TestFixtures(db);
+                var connection = db.getConnection()) {
             connection.setAutoCommit(false);
             UUID principal = UUID.randomUUID();
             UUID key = UUID.randomUUID();
-            UUID first = repository.enqueueFirmwareVersion(connection, fixture.tenantId(), fixture.deviceId(), principal, key).orElseThrow();
+            UUID first = repository
+                    .enqueueFirmwareVersion(connection, fixture.tenantId(), fixture.deviceId(), principal, key)
+                    .orElseThrow();
             for (int i = 1; i < 10; i++) {
-                repository.enqueueFirmwareVersion(connection, fixture.tenantId(), fixture.deviceId(), principal, UUID.randomUUID()).orElseThrow();
+                repository.enqueueFirmwareVersion(connection, fixture.tenantId(), fixture.deviceId(), principal,
+                        UUID.randomUUID()).orElseThrow();
             }
             connection.commit();
-            assertEquals(first, repository.enqueueFirmwareVersion(connection, fixture.tenantId(), fixture.deviceId(), principal, key).orElseThrow());
+            assertEquals(first,
+                    repository
+                            .enqueueFirmwareVersion(connection, fixture.tenantId(), fixture.deviceId(), principal, key)
+                            .orElseThrow());
             assertThrows(DeviceCommandRepository.QueueFullException.class, () -> repository.enqueueFirmwareVersion(
                     connection, fixture.tenantId(), fixture.deviceId(), principal, UUID.randomUUID()));
             connection.rollback();
@@ -104,8 +129,9 @@ class DeviceCommandRepositoryIT {
     /** A entrada pública exige transação e os dados de auditoria completos. */
     @Test
     void shouldRequireTransactionAndAudit() throws Exception {
-        try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
-             var connection = db.getConnection()) {
+        try (var db = TestDatabase.createDataSource();
+                var fixture = new TestFixtures(db);
+                var connection = db.getConnection()) {
             var error = assertThrows(IllegalStateException.class, () -> repository.enqueueFirmwareVersion(
                     connection, fixture.tenantId(), fixture.deviceId(), UUID.randomUUID(), UUID.randomUUID()));
             assertEquals("ENQUEUE_REQUIRES_TRANSACTION", error.getMessage());
