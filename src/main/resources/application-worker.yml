@@ -4,6 +4,20 @@ server:
 management:
   server:
     port: ${TRACKING_MANAGEMENT_PORT:9102}
+  
+  endpoint:
+    health:
+      group:
+        liveness:
+          include:
+            - livenessState
+            - trackingWorker
+
+        readiness:
+          include:
+            - readinessState
+            - trackingWorker
+            - db
 
   metrics:
     tags:

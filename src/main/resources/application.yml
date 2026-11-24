@@ -17,7 +17,8 @@ spring:
       pool-name: aporia-tracking-pool
       maximum-pool-size: ${TRACKING_DB_POOL_MAX:10}
       minimum-idle: ${TRACKING_DB_POOL_MIN:2}
-      connection-timeout: 10000
+      connection-timeout: ${TRACKING_DB_CONNECTION_TIMEOUT_MS:3000}
+      validation-timeout: ${TRACKING_DB_VALIDATION_TIMEOUT_MS:1000}
       idle-timeout: 300000
       max-lifetime: 1800000
 

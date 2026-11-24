@@ -8,6 +8,20 @@ management:
   metrics:
     tags:
       component: gateway
+  
+  endpoint:
+    health:
+      group:
+        liveness:
+          include:
+            - livenessState
+            - trackingGateway
+
+        readiness:
+          include:
+            - readinessState
+            - trackingGateway
+            - db
 
 tracking:
   gateway:
