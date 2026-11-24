@@ -185,6 +185,7 @@ public class TrackingWorker {
             WHERE rp.status = 'pending'
               AND rp.available_at <= clock_timestamp()
               AND (?::uuid IS NULL OR rp.tenant_id = ?::uuid)
+              AND rp.decoder_version = ANY (?::varchar[])
             ORDER BY rp.received_at, rp.id
             FOR UPDATE OF rp SKIP LOCKED
             LIMIT 1
@@ -209,6 +210,7 @@ public class TrackingWorker {
             // Configurar os parâmetros ANTES da consulta.
             statement.setObject(1, tenantFilter);
             statement.setObject(2, tenantFilter);
+            statement.setArray(3, connection.createArrayOf("varchar", decoderRegistry.versions().toArray(String[]::new)));
 
             // Executar a consulta depois de configurar.
             try (ResultSet result = statement.executeQuery()) {
@@ -235,16 +237,7 @@ public class TrackingWorker {
         }
 
         // 2. Verificar a versão do decoder.
-        TelemetryDecoder decoder;
-
-        try {
-            decoder = decoderRegistry.get(decoderVersion);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalStateException(
-                    "DECODER_UNAVAILABLE: " + decoderVersion,
-                    e
-            );
-        }
+        TelemetryDecoder decoder = decoderRegistry.get(decoderVersion);
 
         // 3. Validar integridade e determinar os processamentos.
         DecodedPacket decoded;
@@ -271,6 +264,19 @@ public class TrackingWorker {
                     packetId,
                     e.getErrorCode(),
                     1
+            );
+        }
+
+        // A resposta pertence ao pacote mesmo quando a posição ainda aguarda associação ao ativo.
+        if (decoded.responseType() != null) {
+            responseRepository.save(
+                    connection,
+                    tenantId,
+                    deviceId,
+                    packetId,
+                    protocol,
+                    decoded.responseType(),
+                    payload
             );
         }
 
@@ -329,18 +335,6 @@ public class TrackingWorker {
                         tenantId,
                         assetId,
                         positionId
-                );
-            }
-
-            if (decoded.responseType() != null) {
-                responseRepository.save(
-                        connection,
-                        tenantId,
-                        deviceId,
-                        packetId,
-                        protocol,
-                        decoded.responseType(),
-                        payload
                 );
             }
 

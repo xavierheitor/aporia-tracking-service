@@ -21,44 +21,64 @@ import software.aporia.tracking.storage.device.RegisteredDevice;
 import software.aporia.tracking.storage.packet.JdbcPacketIngestion;
 
 /**
- * Conduz uma conexão da identificação do protocolo à descoberta do equipamento ou à ingestão dos
- * pacotes de uma sessão autorizada.
+ * Conduz uma conexão da identificação do protocolo à descoberta do equipamento
+ * ou à ingestão dos pacotes de uma sessão autorizada.
  */
 public final class TcpClientHandler {
 
-    /** Registra eventos e falhas associados a esta classe. */
+    /**
+     * Registra eventos e falhas associados a esta classe.
+     */
     private static final Logger log
             = LoggerFactory.getLogger(TcpClientHandler.class);
 
-    /** Prazo em milissegundos para a fase anterior ao registro de sessão. */
+    /**
+     * Prazo em milissegundos para a fase anterior ao registro de sessão.
+     */
     private static final int LOGIN_TIMEOUT_MS = 30_000;
-    /** Tempo máximo de inatividade da sessão identificada, em milissegundos. */
+    /**
+     * Tempo máximo de inatividade da sessão identificada, em milissegundos.
+     */
     private static final int SESSION_IDLE_MS = sessionIdleMillis();
 
     /**
-     * Converte em milissegundos o prazo configurado para inatividade de sessões identificadas.
+     * Converte em milissegundos o prazo configurado para inatividade de sessões
+     * identificadas.
      *
      * @return prazo de inatividade em milissegundos
      */
     private static int sessionIdleMillis() {
         int seconds = Integer.parseInt(System.getenv().getOrDefault("TRACKING_TCP_SESSION_IDLE_SECONDS", "180"));
-        if (seconds <= 0) throw new IllegalArgumentException("INVALID_TCP_SESSION_IDLE_SECONDS");
+        if (seconds <= 0) {
+            throw new IllegalArgumentException("INVALID_TCP_SESSION_IDLE_SECONDS");
+        }
         return Math.multiplyExact(seconds, 1000);
     }
 
-    /** Persiste o pacote bruto antes da confirmação de recebimento. */
+    /**
+     * Persiste o pacote bruto antes da confirmação de recebimento.
+     */
     private final JdbcPacketIngestion ingestion;
-    /** Consulta o cadastro e registra a descoberta de identidades desconhecidas. */
+    /**
+     * Consulta o cadastro e registra a descoberta de identidades desconhecidas.
+     */
     private final JdbcDeviceLookup deviceLookup;
-    /** Registro que associa tenant e dispositivo à sessão atual. */
+    /**
+     * Registro que associa tenant e dispositivo à sessão atual.
+     */
     private final SessionRegistry sessionRegistry;
-    /** Seleciona o adaptador que conduzirá a conexão após a primeira leitura. */
+    /**
+     * Seleciona o adaptador que conduzirá a conexão após a primeira leitura.
+     */
     private final java.util.function.IntFunction<ProtocolAdapter> selectAdapter;
-    /** Sinal de execução compartilhado com as tarefas do gateway. */
+    /**
+     * Sinal de execução compartilhado com as tarefas do gateway.
+     */
     private final AtomicBoolean running;
 
     /**
-     * Restringe todas as conexões tratadas por esta instância ao adaptador fornecido.
+     * Restringe todas as conexões tratadas por esta instância ao adaptador
+     * fornecido.
      *
      * @param ingestion componente que persiste os quadros recebidos
      * @param deviceLookup consulta responsável pelo cadastro e pela descoberta
@@ -77,7 +97,8 @@ public final class TcpClientHandler {
     }
 
     /**
-     * Seleciona um adaptador pelo primeiro byte e mantém a escolha durante toda a conexão.
+     * Seleciona um adaptador pelo primeiro byte e mantém a escolha durante toda
+     * a conexão.
      *
      * @param ingestion componente que persiste os quadros recebidos
      * @param deviceLookup consulta responsável pelo cadastro e pela descoberta
@@ -86,8 +107,8 @@ public final class TcpClientHandler {
      * @param running indicador compartilhado de execução do serviço
      */
     public TcpClientHandler(JdbcPacketIngestion ingestion, JdbcDeviceLookup deviceLookup,
-                            SessionRegistry sessionRegistry, java.util.function.IntFunction<ProtocolAdapter> selectAdapter,
-                            AtomicBoolean running) {
+            SessionRegistry sessionRegistry, java.util.function.IntFunction<ProtocolAdapter> selectAdapter,
+            AtomicBoolean running) {
         this.ingestion = java.util.Objects.requireNonNull(ingestion);
         this.deviceLookup = java.util.Objects.requireNonNull(deviceLookup);
         this.sessionRegistry = java.util.Objects.requireNonNull(sessionRegistry);
@@ -96,8 +117,8 @@ public final class TcpClientHandler {
     }
 
     /**
-     * Consome leituras até o encerramento da conexão e remove condicionalmente a sessão
-     * registrada na saída.
+     * Consome leituras até o encerramento da conexão e remove condicionalmente
+     * a sessão registrada na saída.
      *
      * @param client socket TCP da conexão do equipamento
      */
@@ -116,11 +137,15 @@ public final class TcpClientHandler {
             //Buffer para leitura dos dados do cliente.
             byte[] buffer = new byte[4096];
             //Se o serviço não estiver em execução, sai da função.
-            if (!running.get()) return;
+            if (!running.get()) {
+                return;
+            }
             //Lê os dados do cliente.
             int bytesRead = input.read(buffer);
             //Se não houver dados, sai da função.
-            if (bytesRead == -1) return;
+            if (bytesRead == -1) {
+                return;
+            }
 
             //Seleciona o adaptador.
             ProtocolAdapter adapter = selectAdapter.apply(Byte.toUnsignedInt(buffer[0]));
@@ -147,7 +172,6 @@ public final class TcpClientHandler {
                             );
                         }
 
-
                     } else {
                         //Busca o dispositivo no banco de dados.
                         var found = deviceLookup.find(adapter.protocolId(), frame.deviceIdentity());
@@ -166,7 +190,9 @@ public final class TcpClientHandler {
 
                         //Se o dispositivo não estiver habilitado, envia um ACK de login rejeitado.
                         if (!found.get().enabled()) {
-                            if (frame.isLogin()) client.getOutputStream().write(protocolSession.rejectLogin());
+                            if (frame.isLogin()) {
+                                client.getOutputStream().write(protocolSession.rejectLogin());
+                            }
                             return;
                         }
 
@@ -232,7 +258,9 @@ public final class TcpClientHandler {
                     var packetId = ingestion.accept(receivedFrame, registeredSession.tenantId(), registeredSession.deviceId());
 
                     // A confirmação do lote só segue para o rastreador depois que accept retorna com o commit concluído.
-                    if (frame.acknowledgmentRequired()) registeredSession.send(protocolSession.acknowledge(frame));
+                    if (frame.acknowledgmentRequired()) {
+                        registeredSession.send(protocolSession.acknowledge(frame));
+                    }
 
                     log.debug(
                             "Packet persisted: id={}, protocol={}",
@@ -245,7 +273,9 @@ public final class TcpClientHandler {
                     //Obtém o tempo restante de login.
                     long remaining = loginDeadline - System.nanoTime();
                     //Se o prazo de login expirou, sai da função.
-                    if (remaining <= 0) return;
+                    if (remaining <= 0) {
+                        return;
+                    }
                     //Define o timeout de login.
                     client.setSoTimeout((int) Math.max(1, TimeUnit.NANOSECONDS.toMillis(remaining)));
                 }
@@ -255,7 +285,7 @@ public final class TcpClientHandler {
         } catch (SocketTimeoutException e) {
             //Se o timeout de login expirou, avisa.
             log.debug("TCP session timed out");
-        //Se o frame for inválido, avisa.
+            //Se o frame for inválido, avisa.
         } catch (IllegalArgumentException e) {
             //Se o frame for inválido, avisa.
             log.warn(
@@ -263,14 +293,19 @@ public final class TcpClientHandler {
                     e.getMessage()
             );
         } catch (IllegalStateException e) {
-            //Se a sessão foi substituída, avisa.
-            if ("SESSION_REPLACED".equals(e.getMessage())) {
-                log.info("Obsolete TCP session terminated");
-            } else if ("SESSION_ADMISSION_DEFERRED".equals(e.getMessage())) {
-                log.info("Device session admission deferred");
-            } else {
+            if (null == e.getMessage()) {
                 //Se a sessão não foi substituída, avisa.
                 log.error("TCP session processing failed", e);
+            } else //Se a sessão foi substituída, avisa.
+            {
+                switch (e.getMessage()) {
+                    case "SESSION_REPLACED" ->
+                        log.info("Obsolete TCP session terminated");
+                    case "SESSION_ADMISSION_DEFERRED" ->
+                        log.info("Device session admission deferred");
+                    default -> //Se a sessão não foi substituída, avisa.
+                        log.error("TCP session processing failed", e);
+                }
             }
 
         } catch (IOException e) {
@@ -278,7 +313,7 @@ public final class TcpClientHandler {
             if (!running.get() && e instanceof SocketException) {
                 //Se o serviço não estiver em execução e o erro for de socket, avisa.
                 log.debug("TCP connection closed during shutdown");
-            //Se o serviço estiver em execução e o erro for de socket, avisa.
+                //Se o serviço estiver em execução e o erro for de socket, avisa.
             } else {
                 log.warn("TCP connection error", e);
             }

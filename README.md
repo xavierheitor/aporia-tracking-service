@@ -48,7 +48,7 @@ O arquivo `.env.example` mostra a configuração da aplicação para execução 
 | [compose.database.yaml](compose.database.yaml) | Um PostgreSQL 16 com PostGIS, volume persistente e porta local 55434. O mesmo arquivo também cria uma instância isolada para testes usando outro projeto Compose. |
 | [compose.services.yaml](compose.services.yaml) | Gateway e worker na rede do banco. O dispatcher é opcional dentro do gateway. |
 
-O serviço de banco responde pelo nome `postgres` na rede `aporia-tracking-db_default`. Configure a senha em `.env`, suba o banco, aplique as migrations e inicie os serviços com a imagem da revisão desejada. As instruções para uma instalação nova ou para migrar dados existentes estão no [guia de deploy](docs/deploy.md).
+O serviço de banco responde pelo nome `postgres` na rede `aporia-tracking-db_default`. Configure as senhas em `.env`, suba o banco, aplique as migrations, provisione os logins de gateway e worker e inicie os serviços com a imagem da revisão desejada. As instruções para uma instalação nova ou para migrar dados existentes estão no [guia de deploy](docs/deploy.md).
 
 Para configurar um rastreador, listar pendências e autorizar um equipamento em um tenant, consulte o [guia do gateway TCP](docs/gateway-tcp.md). Para construir a imagem, habilitar o envio da consulta de firmware e acompanhar o emissor, consulte o [guia de deploy](docs/deploy.md).
 
@@ -78,7 +78,7 @@ mvn -Plint clean test-compile
 mvn clean test
 ```
 
-Para incluir as integrações JDBC e TCP, configure `TRACKING_TEST_DB_URL`, `TRACKING_TEST_DB_USER` e `TRACKING_TEST_DB_PASSWORD` para o banco `aporia_tracking_test`. A suíte cria e remove um schema isolado por execução.
+Para incluir as integrações JDBC e TCP, configure `TRACKING_TEST_DB_URL`, `TRACKING_TEST_DB_USER` e `TRACKING_TEST_DB_PASSWORD` para o banco `aporia_tracking_test`. A suíte cria e remove um schema isolado por execução. Os testes que iniciam as JVMs também criam e removem dois logins exclusivos para validar as permissões reais dos serviços. Use uma credencial de teste com permissão para criar roles.
 
 ```sh
 mvn -Plint clean verify '-Dtest=*Test,*IT'

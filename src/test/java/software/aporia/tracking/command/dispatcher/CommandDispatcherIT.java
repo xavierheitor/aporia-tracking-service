@@ -251,10 +251,9 @@ class CommandDispatcherIT {
                         s.setObject(2, command);
                         assertEquals(1, s.executeUpdate());
                     }
-                    var rejected = assertThrows(IllegalStateException.class,
-                            () -> activate(db, fixture, UUID.randomUUID()));
-                    assertEquals("SESSION_ADMISSION_DEFERRED", rejected.getMessage());
-                    var second = dispatcher(db, other, fixture, UUID.randomUUID(), payload -> fail("second writer"));
+                    UUID newToken = UUID.randomUUID();
+                    activate(db, fixture, newToken);
+                    var second = dispatcher(db, other, fixture, newToken, payload -> fail("second writer"));
                     second.recover();
                     assertEquals("transmitting", status(db, fixture, command));
                     assertEquals(NO_COMMAND, second.dispatchNext(fixture.tenantId(), fixture.deviceId()));

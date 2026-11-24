@@ -40,7 +40,7 @@ Ao encerrar, o gateway interrompe o aceite e fecha sockets para liberar as leitu
 
 ## Do pacote à posição
 
-O worker seleciona uma linha `pending` com `available_at` vencido. O PostgreSQL usa `FOR UPDATE OF rp SKIP LOCKED` para que consumidores concorrentes possam avançar sobre linhas diferentes. O worker verifica o SHA-256, localiza a versão do decodificador gravada na ingestão e compara a identidade interpretada com o cadastro.
+Cada worker considera apenas as versões presentes no seu registro de decodificadores. Um pacote incompatível permanece pendente, com seus bytes e tentativas preservados, até que uma instância compatível o processe. O worker seleciona uma linha `pending` com `available_at` vencido. O PostgreSQL usa `FOR UPDATE OF rp SKIP LOCKED` para que consumidores concorrentes possam avançar sobre linhas diferentes. O worker verifica o SHA-256, localiza a versão do decodificador gravada na ingestão e compara a identidade interpretada com o cadastro.
 
 Uma transação cobre a mensagem processada, as posições, a atualização de última posição, os eventos de outbox, as respostas aplicáveis e o estado do pacote. Para cada leitura com horário, coordenadas e fix válido, `assignments` resolve o ativo pela vigência **no horário da leitura**. Uma posição atrasada entra no histórico e só avança `last_positions` se for mais recente. O PostGIS recebe longitude e latitude nessa ordem, em SRID 4326.
 
@@ -49,7 +49,7 @@ Uma transação cobre a mensagem processada, as posições, a atualização de �
 | Mesmo conteúdo recebido novamente | Cada recepção tem seu pacote bruto. A chave de mensagem por tenant, dispositivo e hash evita duplicar posições e eventos. Respostas são registradas por pacote bruto. |
 | Lote AVL com várias leituras | O histórico conserva o índice original de cada leitura válida. Leituras sem fix válido permanecem nos bytes brutos. |
 | Resposta Suntech com posição embutida | O mesmo quadro pode produzir posição e resposta. A resposta fica sem vínculo de comando quando falta evidência de correlação. |
-| Associação ao ativo ausente | O worker volta ao savepoint e agenda nova tentativa. O atraso é de 10, 30, 60 e 120 s após as quatro primeiras falhas. Na quinta, o pacote fica `rejected`. |
+| Associação ao ativo ausente | O worker volta ao savepoint e agenda nova tentativa. A resposta válida de um quadro composto é gravada antes do savepoint e preservada nas retentativas. O atraso é de 10, 30, 60 e 120 s após as quatro primeiras falhas. Na quinta, o pacote fica `rejected`. |
 | Pacote inválido ou falha de banco | Falhas de validação tratadas como definitivas ficam registradas no pacote. Uma falha SQL que escapa da transação provoca rollback, preservando a consistência das gravações. |
 
 O evento é persistido em `outbox_events` junto com a posição. O escopo atual termina nessa gravação. [Worker](../src/main/java/software/aporia/tracking/worker/TrackingWorker.java) · [Histórico das migrations](../README.md#leitura-das-migrations)
@@ -69,6 +69,6 @@ Cada conexão admitida recebe um UUID. O PostgreSQL guarda o UUID mais recenteme
 A admissão e a reserva de um comando disputam o bloqueio da mesma linha de dispositivo, dentro do tenant. Há dois resultados possíveis.
 
 - **A reconexão entra primeiro.** O novo UUID substitui o anterior. Um gateway que ainda tenha o socket antigo aberto deixa o comando na fila para o novo gateway.
-- **A autorização do comando entra primeiro.** O dispatcher confirma a reserva e o estado `transmitting` em uma única transação e libera a conexão JDBC antes de escrever. Enquanto esse estado persistir, uma nova tentativa de login desse equipamento é encerrada antes do ACK ou da ingestão. O equipamento volta a tentar conforme sua configuração. A admissão pode prosseguir assim que a tentativa terminar, inclusive quando o comando já estiver em `sent` aguardando resposta.
+- **A autorização do comando entra primeiro.** O dispatcher confirma a reserva e o estado `transmitting` em uma única transação e libera a conexão JDBC antes de escrever. A nova conexão pode assumir o UUID e ingerir telemetria imediatamente. A tentativa já autorizada continua vinculada ao socket capturado pelo emissor anterior. O índice exclusivo e a consulta de reserva impedem um segundo comando em voo para o dispositivo.
 
-Se o emissor cair nessa janela, o bloqueio de admissão afeta apenas esse equipamento e dura até a recuperação com o arquivo persistente do proprietário. Um timeout unilateral permitiria que um emissor pausado voltasse a escrever depois da troca de sessão. O procedimento de recuperação conserva o resultado incerto e evita o reenvio. Os outros dispositivos e workers continuam independentes. Uma sessão antiga aberta em outra réplica ainda pode receber telemetria até o fechamento do socket. [Operação com balanceador](deploy.md#gateways-atrás-do-mesmo-ip)
+Se o emissor cair, apenas novos comandos desse dispositivo aguardam a recuperação com o arquivo persistente do proprietário. Uma tentativa incerta termina em `delivery_unknown` sem reenvio. O próximo comando elegível usa a conexão mais recente. [Operação com balanceador](deploy.md#gateways-atrás-do-mesmo-ip)

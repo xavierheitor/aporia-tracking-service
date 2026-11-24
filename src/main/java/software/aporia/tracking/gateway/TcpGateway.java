@@ -80,19 +80,19 @@ public class TcpGateway {
              
             //se o datasource for criado, segue com a inicialização do gateway.
 
-            //Cria o JdbcPacketIngestion para o ingestão de pacotes.
+            //Cria o JdbcPacketIngestion para o ingestão de pacotes.(salvamento)
             JdbcPacketIngestion ingestion
                     = new JdbcPacketIngestion(dataSource);
 
-            //Cria o JdbcDeviceLookup para a busca de dispositivos.
+            //Cria o JdbcDeviceLookup para a busca de dispositivos. (disositivos registrados no banco)
             JdbcDeviceLookup deviceLookup
                     = new JdbcDeviceLookup(dataSource);
 
-            //Cria o SessionRegistry para o registro de sessões.
+            //Cria o SessionRegistry para o registro de sessões. (acompanha as sessoes ativas)
             SessionRegistry sessionRegistry
                     = new SessionRegistry();
 
-            //Cria o ProtocolRegistry para o registro de protocolos.
+            //Cria o ProtocolRegistry para o registro de protocolos. (aqui vc instancia os disponiveis, Suntech, Teltonika, etc)
             ProtocolRegistry registry = new ProtocolRegistry(
                     List.of(new SuntechAdapter(), new TeltonikaAdapter())
             );

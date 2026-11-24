@@ -313,6 +313,65 @@ class TrackingWorkerMessageRoutingIT {
         }
     }
 
+    /** Uma versão desconhecida aguarda outro worker sem impedir a leitura da próxima recepção. */
+    @Test
+    void skipsUnknownVersionAndKeepsPacketPending() throws Exception {
+        try (var db = TestDatabase.createDataSource(); var device = new TestFixtures(db, IDENTITY);
+             var c = db.getConnection()) {
+            var worker = new TrackingWorker(db, device.tenantId());
+            var alive = bytes("ALV;" + IDENTITY + "\r");
+            UUID older = insertPacket(c, device, alive);
+            try (var update = c.prepareStatement("UPDATE raw_packets SET decoder_version='future', "
+                    + "received_at=now()-interval '1 minute' WHERE id=?")) {
+                update.setObject(1, older);
+                update.executeUpdate();
+            }
+            UUID newer = insertPacket(c, device, alive);
+            assertTrue(worker.processOne());
+            assertPacketProcessed(c, newer);
+            assertFalse(worker.processOne());
+            try (var query = c.prepareStatement("SELECT status,attempts FROM raw_packets WHERE id=?")) {
+                query.setObject(1, older);
+                try (var row = query.executeQuery()) {
+                    assertTrue(row.next());
+                    assertEquals("pending", row.getString(1));
+                    assertEquals(0, row.getInt(2));
+                }
+            }
+        }
+    }
+
+    /** Uma posição sem ativo esgota as tentativas sem desfazer ou duplicar a resposta do pacote. */
+    @Test
+    void preservesResponseWhenEmbeddedPositionIsRejected() throws Exception {
+        try (var db = TestDatabase.createDataSource(); var device = new TestFixtures(db, IDENTITY);
+             var c = db.getConnection()) {
+            var payload = bytes("RES;STT;" + IDENTITY + ";013831;20261120;08:45:00;-16.67;-49.25;45.5;1\r");
+            UUID id = insertPacket(c, device, payload);
+            try (var remove = c.prepareStatement("DELETE FROM assignments WHERE tenant_id=?")) {
+                remove.setObject(1, device.tenantId());
+                remove.executeUpdate();
+            }
+            var worker = new TrackingWorker(db, device.tenantId());
+            try (var due = c.prepareStatement("UPDATE raw_packets SET available_at=now() WHERE id=?")) {
+                due.setObject(1, id);
+                for (int attempt = 0; attempt < RetryPolicy.MAX_ATTEMPTS; attempt++) {
+                    due.executeUpdate();
+                    assertTrue(worker.processOne());
+                    assertResponse(c, id, "RES", payload);
+                }
+            }
+            assertEquals(0, countPositions(c, id));
+            try (var query = c.prepareStatement("SELECT status FROM raw_packets WHERE id=?")) {
+                query.setObject(1, id);
+                try (var row = query.executeQuery()) {
+                    assertTrue(row.next());
+                    assertEquals("rejected", row.getString(1));
+                }
+            }
+        }
+    }
+
     /**
      * Confere a posição e a resposta produzidas pelo mesmo quadro composto.
      *

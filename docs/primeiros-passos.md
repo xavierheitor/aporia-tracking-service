@@ -49,7 +49,7 @@ export TRACKING_TEST_DB_PASSWORD
 mvn -Plint -Dtest=GatewayCommandCycleIT test
 ```
 
-O teste cria um schema isolado, aplica as migrations e inicia gateway e worker como processos filhos em loopback. O rastreador simulado conecta na porta escolhida pelo sistema. O cenário verifica descoberta e aprovação Teltonika, confirmação de lotes AVL, persistência de posições e envio de consultas de firmware Suntech após reconexão. O critério de sucesso é o teste concluir com zero falhas e zero erros. O relatório fica em `target/surefire-reports/`. Na saída normal da JVM, o schema temporário é removido. [GatewayCommandCycleIT.java](../src/test/java/software/aporia/tracking/gateway/GatewayCommandCycleIT.java) · [TestDatabase.java](../src/test/java/software/aporia/tracking/support/TestDatabase.java)
+O teste cria um schema isolado, aplica as migrations e provisiona dois logins temporários com os grants de deploy. A credencial da suíte precisa poder criar roles no banco dedicado de testes. O teste inicia gateway e worker como processos filhos em loopback. O rastreador simulado conecta na porta escolhida pelo sistema. O cenário verifica descoberta e aprovação Teltonika, confirmação de lotes AVL, persistência de posições e envio de consultas de firmware Suntech após reconexão. O critério de sucesso é o teste concluir com zero falhas e zero erros. O relatório fica em `target/surefire-reports/`. Na saída normal da JVM, o schema temporário é removido. [GatewayCommandCycleIT.java](../src/test/java/software/aporia/tracking/gateway/GatewayCommandCycleIT.java) · [TestDatabase.java](../src/test/java/software/aporia/tracking/support/TestDatabase.java)
 
 Para rodar toda a suíte, incluindo testes de integração com sufixo `IT`, execute:
 

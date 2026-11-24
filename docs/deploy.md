@@ -57,16 +57,33 @@ Para uma atualização, registre a imagem anterior, faça um backup recuperável
 Com o cliente `psql` configurado para o banco alvo, confira explicitamente banco, usuário e endereço. No exemplo local, o operador usa a porta **55434 no host**. Os contêineres usarão a porta **5432 na rede Docker**.
 
 ```sh
-psql -X -h 127.0.0.1 -p 55434 -U tracking -d aporia_tracking_v2 \
+psql -X -h 127.0.0.1 -p 55434 -U tracking_admin -d aporia_tracking_v2 \
   -c 'SELECT current_database(), current_user, inet_server_addr(), inet_server_port()'
 
 export FLYWAY_URL=jdbc:postgresql://127.0.0.1:55434/aporia_tracking_v2
-export FLYWAY_USER=tracking
+export FLYWAY_USER=tracking_admin
 # Forneça FLYWAY_PASSWORD pelo ambiente do operador.
 mvn flyway:info
 mvn flyway:migrate
 mvn flyway:validate
 mvn flyway:info
+```
+
+Em banco novo, o Compose inicializa o administrador com `TRACKING_ADMIN_DB_USER` e `TRACKING_ADMIN_DB_PASSWORD`. Em volume existente, use o administrador real (por exemplo, `tracking`) também no Flyway. A alteração do Compose preserva os usuários já cadastrados.
+
+Depois das migrations, conecte o psql como administrador ao banco da aplicação. Na primeira instalação dos logins, execute o bloco abaixo em sessão interativa. Informe senhas distintas nos prompts e configure os mesmos valores em `TRACKING_GATEWAY_DB_PASSWORD` e `TRACKING_WORKER_DB_PASSWORD`. Para instalações atualizadas, crie logins novos, exclusivos dos serviços. Se já existirem, confira titularidade, privilégios e associações de roles antes de reutilizá-los.
+
+```sql
+CREATE ROLE tracking_gateway LOGIN;
+CREATE ROLE tracking_worker LOGIN;
+\password tracking_gateway
+\password tracking_worker
+```
+
+Aplique os grants a partir da raiz do repositório. O script pode ser reaplicado. Use o schema da aplicação (por padrão, `public` com CREATE restrito ao proprietário, padrão de bancos novos do PostgreSQL 16). Em bancos atualizados, verifique também privilégios herdados de PUBLIC antes de liberar os logins. Cada um deve retornar falso para `has_schema_privilege(current_user,'public','CREATE')` e `has_function_privilege(current_user,'approve_device_discovery(uuid,uuid)','EXECUTE')`. Na execução direta da JVM, injete o par `TRACKING_DB_USER` e `TRACKING_DB_PASSWORD` do serviço correspondente.
+
+```sh
+psql -X -1 -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 55434 -U tracking_admin -d aporia_tracking_v2 -f docker/postgres/runtime-grants.sql
 ```
 
 Confira a aplicação bem-sucedida até V10 para esta revisão. O gateway e o worker pressupõem o schema instalado. A imagem da aplicação empacota o serviço com os testes pulados no estágio Docker; execute a suíte em banco de teste antes de promover a revisão. [Primeiros passos e testes](primeiros-passos.md)
@@ -164,4 +181,4 @@ Configure um balanceador TCP com IP e porta estáveis, verificação de saúde T
 
 Todas as réplicas devem usar o mesmo PostgreSQL primário. Para atender comandos em qualquer réplica, habilite o dispatcher em cada uma com seu próprio arquivo de proprietário em volume persistente exclusivo. Uma réplica adicional deve iniciar com um volume vazio para gerar seu próprio UUID. Somente a substituta de uma instância encerrada deve reutilizar o volume dela. O Compose fornecido publica uma porta fixa e define um volume de proprietário por projeto. Para usar o mesmo manifesto Compose em vários hosts, execute um projeto por host, configure o endereço publicado para o balanceador e aponte todos para o mesmo banco. Em um único host, atribua a cada réplica um projeto, um volume e uma porta de publicação próprios.
 
-Na primeira implantação da V10, pare os gateways antigos, aplique a migration pelo procedimento acima e suba as réplicas atualizadas. Um binário anterior ignora o identificador de sessão. Depois dessa atualização, para manutenção, retire a réplica da rotação, encerre o processo e deixe os equipamentos reconectarem ao IP habitual. Se um equipamento ficar com admissão adiada após a queda de um emissor, restaure a instância com o volume original para reconciliar a tentativa. O balanceador e o PostgreSQL também precisam de redundância para tolerar a perda desses componentes. [Coordenação entre réplicas](arquitetura.md#coordenação-entre-réplicas)
+Na primeira implantação da V10, pare os gateways antigos, aplique a migration pelo procedimento acima e suba as réplicas atualizadas. Um binário anterior ignora o identificador de sessão. Depois dessa atualização, para manutenção, retire a réplica da rotação, encerre o processo e deixe os equipamentos reconectarem ao IP habitual. Após a queda de um emissor em plena transmissão, outra réplica aceita a telemetria. Para liberar novos comandos para esse equipamento, recupere o emissor com o volume original e reconcilie a tentativa interrompida. O balanceador e o PostgreSQL também precisam de redundância para tolerar a perda desses componentes. [Coordenação entre réplicas](arquitetura.md#coordenação-entre-réplicas)

@@ -49,6 +49,11 @@ public final class DecoderRegistry {
 
     }
 
+    /** Versões elegíveis para reserva por esta instância do worker. */
+    public java.util.Set<String> versions() {
+        return decoders.keySet();
+    }
+
     /**
      * Resolve a versão gravada no pacote bruto. Uma versão desconhecida impede a decodificação.
      *

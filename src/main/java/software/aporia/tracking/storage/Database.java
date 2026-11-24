@@ -23,10 +23,10 @@ public final class Database{
             "jdbc:postgresql://localhost:55432/aporia_tracking_v2"
         );
 
-        String username = System.getenv().getOrDefault(
-            "TRACKING_DB_USER",
-            "tracking"
-        );
+        String username = System.getenv("TRACKING_DB_USER");
+        if (username == null || username.isBlank()) {
+            throw new IllegalStateException("TRACKING_DB_USER is required");
+        }
 
         String password = System.getenv("TRACKING_DB_PASSWORD");
 

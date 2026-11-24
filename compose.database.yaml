@@ -9,8 +9,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${TRACKING_DATABASE_NAME:-aporia_tracking_v2}
-      POSTGRES_USER: ${TRACKING_DB_USER:-tracking}
-      POSTGRES_PASSWORD: ${TRACKING_DB_PASSWORD:?configure a senha do banco}
+      POSTGRES_USER: ${TRACKING_ADMIN_DB_USER:-tracking_admin}
+      POSTGRES_PASSWORD: ${TRACKING_ADMIN_DB_PASSWORD:?configure a senha administrativa}
     ports:
       - "127.0.0.1:${TRACKING_DATABASE_PORT:-55434}:5432"
     volumes:

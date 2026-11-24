@@ -13,6 +13,8 @@ import java.util.Locale;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.io.TempDir;
@@ -28,6 +30,57 @@ import static org.junit.jupiter.api.Assertions.*;
 class GatewayCommandCycleIT {
     /** Diretório temporário que isola os arquivos gerados pelo cenário. */
     @TempDir Path runtime;
+
+    private static final String suffix = UUID.randomUUID().toString().replace("-", "");
+    private static final String gatewayLogin = "gateway_it_" + suffix;
+    private static final String workerLogin = "worker_it_" + suffix;
+    private static final String gatewayPassword = UUID.randomUUID().toString();
+    private static final String workerPassword = UUID.randomUUID().toString();
+    private static boolean rolesCreated;
+
+    /** Aplica as permissões do deploy a logins efêmeros no schema isolado desta suíte. */
+    @BeforeAll
+    static void provisionRuntimeRoles() throws Exception {
+        try (var db = TestDatabase.createDataSource(); var c = db.getConnection(); var sql = c.createStatement()) {
+            c.setAutoCommit(false);
+            String grants = Files.readString(Path.of("docker/postgres/runtime-grants.sql"))
+                    .replace("tracking_gateway", gatewayLogin).replace("tracking_worker", workerLogin);
+            sql.execute("CREATE ROLE " + gatewayLogin + " LOGIN PASSWORD '" + gatewayPassword + "'");
+            sql.execute("CREATE ROLE " + workerLogin + " LOGIN PASSWORD '" + workerPassword + "'");
+            sql.execute(grants);
+            c.commit();
+            rolesCreated = true;
+        }
+    }
+
+    @AfterAll
+    static void removeRuntimeRoles() throws Exception {
+        if (!rolesCreated) return;
+        try (var db = TestDatabase.createDataSource(); var c = db.getConnection(); var sql = c.createStatement()) {
+            c.setAutoCommit(false);
+            // Só os dois logins gerados nesta execução receberam privilégios no schema de teste.
+            sql.execute("DROP OWNED BY " + gatewayLogin + ", " + workerLogin);
+            sql.execute("DROP ROLE " + gatewayLogin + ", " + workerLogin);
+            c.commit();
+        }
+    }
+
+    @Test
+    void runtimeRolesCannotApproveOrChangeSchema() throws Exception {
+        try (var db = TestDatabase.createDataSource()) {
+            for (String login : List.of(gatewayLogin, workerLogin)) {
+                String password = login.equals(gatewayLogin) ? gatewayPassword : workerPassword;
+                try (var c = java.sql.DriverManager.getConnection(db.getJdbcUrl(), login, password);
+                     var sql = c.createStatement()) {
+                    for (String forbidden : List.of("SELECT approve_device_discovery(gen_random_uuid(),gen_random_uuid())",
+                            "ALTER TABLE devices ADD COLUMN forbidden int", "CREATE TABLE forbidden(id int)")) {
+                        var failure = assertThrows(java.sql.SQLException.class, () -> sql.execute(forbidden));
+                        assertEquals("42501", failure.getSQLState());
+                    }
+                }
+            }
+        }
+    }
 
     /**
      * * Controla o ciclo de vida de uma JVM iniciada pelo teste.
@@ -67,8 +120,9 @@ class GatewayCommandCycleIT {
                 System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")), main.getName());
         var env = builder.environment();
         env.put("TRACKING_DB_URL", db.getJdbcUrl());
-        env.put("TRACKING_DB_USER", db.getUsername());
-        env.put("TRACKING_DB_PASSWORD", db.getPassword());
+        boolean gateway = main == TcpGateway.class;
+        env.put("TRACKING_DB_USER", gateway ? gatewayLogin : workerLogin);
+        env.put("TRACKING_DB_PASSWORD", gateway ? gatewayPassword : workerPassword);
         env.put("TRACKING_TCP_BIND", "127.0.0.1");
         env.put("TRACKING_TCP_PORT", "0");
         env.put("TRACKING_PROTOCOL", "auto");
@@ -169,6 +223,40 @@ class GatewayCommandCycleIT {
             assertArrayEquals(expected, newSocket.getInputStream().readNBytes(expected.length));
             oldSocket.setSoTimeout(300);
             assertThrows(java.net.SocketTimeoutException.class, () -> oldSocket.getInputStream().read());
+        }
+    }
+
+    /** Reproduz no banco a tentativa deixada por um emissor interrompido após confirmar a autorização. */
+    @Test
+    void receivesPositionWhilePreviousOwnerIsUnavailable() throws Exception {
+        var log = runtime.resolve("replacement.log");
+        try (var db = TestDatabase.createDataSource(); var device = new TestFixtures(db);
+             var c = db.getConnection(); var gateway = start(TcpGateway.class, db, log);
+             var worker = start(WorkerApplication.class, db, runtime.resolve("worker.log"))) {
+            var tenant = device.tenantId();
+            UUID interrupted = enqueue(db, device, tenant, UUID.randomUUID(), UUID.randomUUID());
+            var dispatch = new software.aporia.tracking.storage.command.DeviceCommandDispatchRepository();
+            c.setAutoCommit(false);
+            var claim = dispatch.claimNextForDevice(c, tenant, device.deviceId()).orElseThrow();
+            assertEquals(interrupted, claim.id());
+            assertTrue(dispatch.authorizeTransmission(c, tenant, interrupted, claim.claimToken(),
+                    UUID.randomUUID(), device.deviceIdentity()));
+            c.commit();
+            c.setAutoCommit(true);
+            UUID next = enqueue(db, device, tenant, UUID.randomUUID(), UUID.randomUUID());
+            try (var socket = new Socket("127.0.0.1", gatewayPort(gateway, log))) {
+                String frame = "STT;" + device.deviceIdentity() + ";013831;20261120;08:45:00;-16.67;-49.25;45.5;1\r";
+                socket.getOutputStream().write(frame.getBytes(StandardCharsets.US_ASCII));
+                await("Posição pela réplica", () -> {
+                    assertTrue(worker.process().isAlive());
+                    return count(c, "positions", tenant) == 1;
+                });
+                socket.setSoTimeout(1500);
+                assertThrows(java.net.SocketTimeoutException.class, () -> socket.getInputStream().read());
+                var commands = new DeviceCommandRepository();
+                assertEquals("transmitting", commands.findStatus(c, tenant, interrupted).orElseThrow());
+                assertEquals("queued", commands.findStatus(c, tenant, next).orElseThrow());
+            }
         }
     }
 

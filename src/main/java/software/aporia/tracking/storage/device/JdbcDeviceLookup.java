@@ -98,39 +98,22 @@ public final class JdbcDeviceLookup {
     }
 
     /**
-     * Troca a sessão autorizada sob o mesmo bloqueio da reserva de comandos. Enquanto uma
-     * escrita autorizada estiver em curso, o rastreador poderá tentar novamente na reconexão.
+     * A troca do UUID serializa com a reserva na linha do dispositivo. O índice de comandos
+     * em voo protege a tentativa já autorizada, enquanto a nova conexão pode ingerir pacotes.
      */
     public void activateSession(RegisteredDevice device, UUID token) {
-        try (var c = dataSource.getConnection()) {
-            c.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
-            c.setAutoCommit(false);
-            try (var lock = c.prepareStatement("""
-                    SELECT id FROM devices WHERE tenant_id=? AND id=? AND protocol=? AND identity=?
-                        AND enabled FOR UPDATE
-                    """);
-                 var update = c.prepareStatement("""
-                    UPDATE devices d SET command_session_token=? WHERE d.tenant_id=? AND d.id=?
-                      AND NOT EXISTS (SELECT 1 FROM device_commands c WHERE c.tenant_id=d.tenant_id
-                          AND c.device_id=d.id AND c.status='transmitting')
-                    """)) {
-                lock.setObject(1, device.tenantId());
-                lock.setObject(2, device.deviceId());
-                lock.setString(3, device.protocol());
-                lock.setString(4, device.identity());
-                try (var rows = lock.executeQuery()) {
-                    if (!rows.next()) throw new IllegalStateException("SESSION_ADMISSION_DEFERRED");
-                }
-                // Em READ COMMITTED esta segunda consulta vê a autorização confirmada antes do bloqueio.
-                update.setObject(1, Objects.requireNonNull(token));
-                update.setObject(2, device.tenantId());
-                update.setObject(3, device.deviceId());
-                if (update.executeUpdate() != 1) throw new IllegalStateException("SESSION_ADMISSION_DEFERRED");
-                c.commit();
-            } catch (SQLException | RuntimeException e) {
-                c.rollback();
-                throw e;
-            }
+        try (var c = dataSource.getConnection();
+             var update = c.prepareStatement("""
+                     UPDATE devices SET command_session_token=?
+                     WHERE tenant_id=? AND id=? AND protocol=? AND identity=? AND enabled
+                     """)) {
+            c.setAutoCommit(true);
+            update.setObject(1, Objects.requireNonNull(token));
+            update.setObject(2, device.tenantId());
+            update.setObject(3, device.deviceId());
+            update.setString(4, device.protocol());
+            update.setString(5, device.identity());
+            if (update.executeUpdate() != 1) throw new IllegalStateException("SESSION_ADMISSION_DEFERRED");
         } catch (SQLException e) {
             throw new IllegalStateException("SESSION_ACTIVATION_FAILED", e);
         }
