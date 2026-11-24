@@ -21,9 +21,11 @@ public final class Database {
      * @return pool de conexões configurado
      */
     public static HikariDataSource createDataSource() {
-        String url = System.getenv().getOrDefault(
-                "TRACKING_DB_URL",
-                "jdbc:postgresql://localhost:55432/aporia_tracking_v2");
+        String url = System.getenv("TRACKING_DB_URL");
+        if (url == null || url.isBlank()) {
+            throw new IllegalStateException(
+                    "TRACKING_DB_URL is required");
+        }
 
         String username = System.getenv("TRACKING_DB_USER");
         if (username == null || username.isBlank()) {
@@ -31,7 +33,6 @@ public final class Database {
         }
 
         String password = System.getenv("TRACKING_DB_PASSWORD");
-
         if (password == null || password.isBlank()) {
             throw new IllegalStateException(
                     "TRACKING_DB_PASSWORD is required");

@@ -1,0 +1,57 @@
+name: aporia-tracking-service
+
+x-postgres: &postgres
+  image: aporia-postgres-postgis:16
+  build:
+    context: .
+    dockerfile: docker/postgres/Dockerfile
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+    interval: 5s
+    timeout: 3s
+    retries: 10
+    start_period: 10s
+  stop_grace_period: 30s
+
+services:
+  postgres:
+    <<: *postgres
+    profiles: [dev]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: aporia_tracking
+      POSTGRES_USER: tracking_admin
+      POSTGRES_PASSWORD: ${TRACKING_ADMIN_DB_PASSWORD:?required}
+    ports:
+      - "127.0.0.1:5437:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - backend
+
+  postgres-test:
+    <<: *postgres
+    profiles: [test]
+    restart: "no"
+    environment:
+      POSTGRES_DB: aporia_tracking_test
+      POSTGRES_USER: tracking_test_admin
+      POSTGRES_PASSWORD: ${TRACKING_TEST_DB_PASSWORD:?required}
+    ports:
+      - "127.0.0.1:15437:5432"
+    volumes:
+      - postgres-test-data:/var/lib/postgresql/data
+    networks:
+      - testing
+
+networks:
+  backend:
+    driver: bridge
+  testing:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  postgres-test-data:

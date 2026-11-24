@@ -1,0 +1,69 @@
+spring:
+  application:
+    name: aporia-tracking-service
+
+  profiles:
+    default: none
+
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+  datasource:
+    url: ${TRACKING_DB_URL}
+    username: ${TRACKING_DB_USER}
+    password: ${TRACKING_DB_PASSWORD}
+
+    hikari:
+      pool-name: aporia-tracking-pool
+      maximum-pool-size: ${TRACKING_DB_POOL_MAX:10}
+      minimum-idle: ${TRACKING_DB_POOL_MIN:2}
+      connection-timeout: 10000
+      idle-timeout: 300000
+      max-lifetime: 1800000
+
+  flyway:
+    enabled: false
+
+  security:
+    user:
+      name: ${TRACKING_MONITORING_USER:monitoring}
+      password: ${TRACKING_MONITORING_PASSWORD}
+      roles:
+        - MONITORING
+
+server:
+  address: ${TRACKING_HTTP_BIND:127.0.0.1}
+  port: ${TRACKING_HTTP_PORT:8080}
+  shutdown: graceful
+
+management:
+  server:
+    address: ${TRACKING_MANAGEMENT_BIND:127.0.0.1}
+    port: ${TRACKING_MANAGEMENT_PORT:9100}
+
+  endpoints:
+    web:
+      exposure:
+        include:
+          - health
+          - prometheus
+          - info
+
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  structured:
+    format:
+      console: logstash
+
+  level:
+    root: INFO
+    software.aporia.tracking: INFO

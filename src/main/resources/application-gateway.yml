@@ -1,0 +1,17 @@
+server:
+  port: -1
+
+management:
+  server:
+    port: ${TRACKING_MANAGEMENT_PORT:9101}
+
+  metrics:
+    tags:
+      component: gateway
+
+tracking:
+  gateway:
+    bind: ${TRACKING_TCP_BIND:0.0.0.0}
+    port: ${TRACKING_TCP_PORT:5500}
+    protocol: ${TRACKING_PROTOCOL:auto}
+    dispatch-owner-file: ${TRACKING_DISPATCH_OWNER_FILE:}
