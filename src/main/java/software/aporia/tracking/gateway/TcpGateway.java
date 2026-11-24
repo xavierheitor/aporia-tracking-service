@@ -27,35 +27,14 @@ import software.aporia.tracking.protocol.ProtocolAdapter;
 import software.aporia.tracking.protocol.ProtocolRegistry;
 import software.aporia.tracking.protocol.suntech.SuntechAdapter;
 import software.aporia.tracking.protocol.teltonika.TeltonikaAdapter;
-import software.aporia.tracking.storage.Database;
 import software.aporia.tracking.storage.command.DeviceCommandDispatchRepository;
 import software.aporia.tracking.storage.device.JdbcDeviceLookup;
 import software.aporia.tracking.storage.packet.JdbcPacketIngestion;
 
 /**
- * Controla o ciclo de vida do listener TCP, das conexões e do envio opcional de comandos. O {@link TcpClientHandler}
- * identifica os equipamentos e publica suas sessões no {@link SessionRegistry}, também consultado pelo dispatcher.
- *
- * <ol>
- * <li>O construtor recebe o pool e a configuração. {@link #start()} cria o registro de sessões, o handler, o listener
- * e, quando configurado, abre o arquivo persistente do emissor com bloqueio exclusivo.</li>
- * <li>{@code runGateway()} executa em uma thread própria e cria os executores de atendimento TCP e polling. Se houver
- * proprietário, {@code startCommandPolling()} agenda {@code poll()}: a primeira rodada é imediata e as seguintes
- * começam um segundo após a conclusão da rodada anterior.</li>
- * <li>{@code acceptClients()} recebe sockets e os entrega a {@code submitClient()}. Cada conexão é atendida em uma
- * thread virtual e acompanhada para fechamento.</li>
- * <li>{@link #requestStop()} sinaliza a parada e fecha o listener e os clientes. Ao sair da aceitação,
- * {@code runGateway()} fecha os recursos em ordem inversa: polling, proprietário, executor TCP e listener. O bloqueio
- * do emissor permanece até as rodadas terminarem.</li>
- * <li>{@link #awaitTermination()} aguarda a thread e a liberação desses recursos, sem timeout. Falhas da thread ficam
- * disponíveis em {@link #getFailure()}.</li>
- * </ol>
- *
- * <p>
- * O pool JDBC pertence ao chamador e deve permanecer aberto até a terminação do gateway. O {@link #main(String[])}
- * oferece a execução independente: lê as variáveis de ambiente, cria o pool e registra o hook de encerramento. Quem usa
- * a instância diretamente controla a configuração, a parada e o fechamento do pool.
- * </p>
+ * Gerencia o servidor TCP de rastreamento, as conexões dos dispositivos e o polling de comandos. O ciclo de vida é
+ * coordenado externamente pelo GatewayLifecycle. O DataSource é fornecido pela infraestrutura e não pertence ao
+ * gateway.
  */
 public class TcpGateway {
 
@@ -289,71 +268,6 @@ public class TcpGateway {
     public int getLocalPort() {
         ServerSocket listener = server;
         return listener == null ? -1 : listener.getLocalPort();
-    }
-
-    /**
-     * Executa o gateway independente com configuração de ambiente. Cria o pool, chama {@link #start()}, instala o hook
-     * de parada e aguarda a terminação. Ao terminar, solicita a parada, aguarda novamente e tenta remover o hook antes
-     * de fechar o pool.
-     *
-     * <p>
-     * {@code TRACKING_TCP_BIND} e {@code TRACKING_TCP_PORT} configuram o listener; {@code
-     * TRACKING_PROTOCOL} seleciona o protocolo. Um caminho não vazio em {@code
-     * TRACKING_DISPATCH_OWNER_FILE} habilita o emissor de comandos.
-     * </p>
-     *
-     * @param args argumentos da linha de comando, atualmente ignorados
-     * @throws IOException           se a partida falhar ao abrir o listener ou o arquivo do emissor
-     * @throws InterruptedException  se a espera pela terminação for interrompida
-     * @throws IllegalStateException se a thread do gateway terminar com uma falha registrada
-     */
-    public static void main(String[] args)
-            throws IOException, InterruptedException {
-        try (var dataSource = Database.createDataSource()) {
-            var gateway = new TcpGateway(
-                    dataSource,
-                    System.getenv().getOrDefault(
-                            "TRACKING_TCP_BIND",
-                            "0.0.0.0"),
-                    Integer.parseInt(
-                            System.getenv().getOrDefault(
-                                    "TRACKING_TCP_PORT",
-                                    "5500")),
-                    System.getenv().getOrDefault(
-                            "TRACKING_PROTOCOL",
-                            "auto"),
-                    System.getenv("TRACKING_DISPATCH_OWNER_FILE"));
-            gateway.start();
-
-            // O hook aguarda a liberação dos recursos TCP antes de terminar o encerramento da JVM.
-            Thread shutdownHook = new Thread(() -> {
-                gateway.requestStop();
-                try {
-                    gateway.awaitTermination();
-                } catch (InterruptedException error) {
-                    Thread.currentThread().interrupt();
-                }
-            }, "tracking-gateway-shutdown");
-
-            try {
-                Runtime.getRuntime().addShutdownHook(shutdownHook);
-                gateway.awaitTermination();
-                // O join termina também em caso de falha; confira o resultado antes de retornar.
-                if (gateway.getFailure() != null) {
-                    throw new IllegalStateException(
-                            "TCP Gateway terminated unexpectedly",
-                            gateway.getFailure());
-                }
-            } finally {
-                gateway.requestStop();
-                gateway.awaitTermination();
-                try {
-                    Runtime.getRuntime().removeShutdownHook(shutdownHook);
-                } catch (IllegalStateException ignored) {
-                    // Durante o encerramento da JVM, a remoção do hook deixa de ser permitida.
-                }
-            }
-        }
     }
 
     /**

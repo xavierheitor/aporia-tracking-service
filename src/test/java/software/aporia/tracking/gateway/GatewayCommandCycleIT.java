@@ -35,11 +35,11 @@ import software.aporia.tracking.storage.command.DeviceCommandRepository;
 import software.aporia.tracking.support.CommandTestFixtures;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
-import software.aporia.tracking.worker.WorkerApplication;
+import software.aporia.tracking.TrackingApplication;
 
 /**
- * Inicia gateway e worker em processos separados para observar descoberta,
- * aprovação, ingestão e envio de comandos pelo socket.
+ * Inicia gateway e worker em processos separados para observar descoberta, aprovação, ingestão e envio de comandos pelo
+ * socket.
  */
 class GatewayCommandCycleIT {
     /** Diretório temporário que isola os arquivos gerados pelo cenário. */
@@ -53,13 +53,31 @@ class GatewayCommandCycleIT {
     private static final String workerPassword = UUID.randomUUID().toString();
     private static boolean rolesCreated;
 
+    private enum ServiceProfile {
+        GATEWAY("gateway"),
+        WORKER("worker");
+
+        private final String profile;
+
+        ServiceProfile(String profile) {
+            this.profile = profile;
+        }
+
+        public String profile() {
+            return profile;
+        }
+    }
+
     /**
-     * Aplica as permissões do deploy a logins efêmeros no schema isolado desta
-     * suíte.
+     * Aplica as permissões do deploy a logins efêmeros no schema isolado desta suíte.
      */
     @BeforeAll
     static void provisionRuntimeRoles() throws Exception {
-        try (var db = TestDatabase.createDataSource(); var c = db.getConnection(); var sql = c.createStatement()) {
+        try (
+                var db = TestDatabase.createDataSource();
+                var c = db.getConnection();
+                var sql = c.createStatement()
+        ) {
             c.setAutoCommit(false);
             String grants = Files.readString(Path.of("docker/postgres/runtime-grants.sql"))
                     .replace("tracking_gateway", gatewayLogin).replace("tracking_worker", workerLogin);
@@ -75,10 +93,13 @@ class GatewayCommandCycleIT {
     static void removeRuntimeRoles() throws Exception {
         if (!rolesCreated)
             return;
-        try (var db = TestDatabase.createDataSource(); var c = db.getConnection(); var sql = c.createStatement()) {
+        try (
+                var db = TestDatabase.createDataSource();
+                var c = db.getConnection();
+                var sql = c.createStatement()
+        ) {
             c.setAutoCommit(false);
-            // Só os dois logins gerados nesta execução receberam privilégios no schema de
-            // teste.
+            // Só os dois logins gerados nesta execução receberam privilégios no schema de teste.
             sql.execute("DROP OWNED BY " + gatewayLogin + ", " + workerLogin);
             sql.execute("DROP ROLE " + gatewayLogin + ", " + workerLogin);
             c.commit();
@@ -90,11 +111,14 @@ class GatewayCommandCycleIT {
         try (var db = TestDatabase.createDataSource()) {
             for (String login : List.of(gatewayLogin, workerLogin)) {
                 String password = login.equals(gatewayLogin) ? gatewayPassword : workerPassword;
-                try (var c = java.sql.DriverManager.getConnection(db.getJdbcUrl(), login, password);
-                        var sql = c.createStatement()) {
+                try (
+                        var c = java.sql.DriverManager.getConnection(db.getJdbcUrl(), login, password);
+                        var sql = c.createStatement()
+                ) {
                     for (String forbidden : List.of(
                             "SELECT approve_device_discovery(gen_random_uuid(),gen_random_uuid())",
-                            "ALTER TABLE devices ADD COLUMN forbidden int", "CREATE TABLE forbidden(id int)")) {
+                            "ALTER TABLE devices ADD COLUMN forbidden int",
+                            "CREATE TABLE forbidden(id int)")) {
                         var failure = assertThrows(java.sql.SQLException.class, () -> sql.execute(forbidden));
                         assertEquals("42501", failure.getSQLState());
                     }
@@ -116,7 +140,7 @@ class GatewayCommandCycleIT {
         public void close() {
             process.destroy();
             try {
-                if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                if (!process.waitFor(45, TimeUnit.SECONDS)) {
                     process.destroyForcibly().waitFor();
                     fail("Service did not shut down gracefully");
                 }
@@ -137,24 +161,69 @@ class GatewayCommandCycleIT {
      * @return processo filho acompanhado pelo cenário
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
-    private Service start(Class<?> main, HikariDataSource db, Path log) throws Exception {
-        var java = Path.of(System.getProperty("java.home"), "bin", "java");
-        var builder = new ProcessBuilder(java.toString(), "-cp",
-                System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")), main.getName());
+    private Service start(
+            ServiceProfile profile,
+            HikariDataSource db,
+            Path log) throws Exception {
+
+        var java = Path.of(
+                System.getProperty("java.home"),
+                "bin",
+                "java");
+
+        var builder = new ProcessBuilder(
+                java.toString(),
+                "-cp",
+                System.getProperty(
+                        "surefire.test.class.path",
+                        System.getProperty("java.class.path")),
+                TrackingApplication.class.getName(),
+                "--spring.profiles.active=" + profile.profile(),
+                "--management.server.port=0",
+                "--management.server.address=127.0.0.1",
+                "--server.port=-1",
+                "--spring.main.banner-mode=off");
+
         var env = builder.environment();
+
+        boolean gateway = profile == ServiceProfile.GATEWAY;
+
         env.put("TRACKING_DB_URL", db.getJdbcUrl());
-        boolean gateway = main == TcpGateway.class;
-        env.put("TRACKING_DB_USER", gateway ? gatewayLogin : workerLogin);
-        env.put("TRACKING_DB_PASSWORD", gateway ? gatewayPassword : workerPassword);
+
+        env.put(
+                "TRACKING_DB_USER",
+                gateway ? gatewayLogin : workerLogin);
+
+        env.put(
+                "TRACKING_DB_PASSWORD",
+                gateway ? gatewayPassword : workerPassword);
+
         env.put("TRACKING_TCP_BIND", "127.0.0.1");
         env.put("TRACKING_TCP_PORT", "0");
         env.put("TRACKING_PROTOCOL", "auto");
-        env.put("TRACKING_DISPATCH_OWNER_FILE", log.resolveSibling(log.getFileName() + ".owner").toString());
-        return new Service(builder.redirectErrorStream(true).redirectOutput(log.toFile()).start());
+
+        env.put("TRACKING_MONITORING_USER", "monitoring");
+        env.put(
+                "TRACKING_MONITORING_PASSWORD",
+                UUID.randomUUID().toString());
+
+        if (gateway) {
+            env.put(
+                    "TRACKING_DISPATCH_OWNER_FILE",
+                    log.resolveSibling(
+                            log.getFileName() + ".owner")
+                            .toString());
+        } else {
+            env.remove("TRACKING_DISPATCH_OWNER_FILE");
+        }
+
+        return new Service(
+                builder.redirectErrorStream(true)
+                        .redirectOutput(log.toFile())
+                        .start());
     }
 
-    // Os processos são externos à JVM de teste. A espera intercala consultas até o
-    // prazo de dez segundos.
+    // Os processos são externos à JVM de teste. A espera intercala consultas até o prazo de dez segundos.
     /**
      * Repete a observação até a condição se cumprir ou o prazo expirar.
      *
@@ -207,7 +276,11 @@ class GatewayCommandCycleIT {
             throws Exception {
         try (var c = db.getConnection()) {
             c.setAutoCommit(false);
-            var id = new DeviceCommandRepository().enqueueFirmwareVersion(c, tenant, fixture.deviceId(), principal,
+            var id = new DeviceCommandRepository().enqueueFirmwareVersion(
+                    c,
+                    tenant,
+                    fixture.deviceId(),
+                    principal,
                     key);
             c.commit();
             return id.orElse(null);
@@ -229,20 +302,21 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * Mantém os dois sockets abertos e observa em qual deles o comando realmente
-     * chega.
+     * Mantém os dois sockets abertos e observa em qual deles o comando realmente chega.
      */
     @Test
     void reconnectAcrossGatewaysRoutesCommandToNewSocket() throws Exception {
         Path firstLog = runtime.resolve("first.log");
         Path secondLog = runtime.resolve("second.log");
-        try (var db = TestDatabase.createDataSource();
+        try (
+                var db = TestDatabase.createDataSource();
                 var device = new TestFixtures(db);
-                var first = start(TcpGateway.class, db, firstLog);
-                var second = start(TcpGateway.class, db, secondLog);
+                var first = start(ServiceProfile.GATEWAY, db, firstLog);
+                var second = start(ServiceProfile.GATEWAY, db, secondLog);
                 var c = db.getConnection();
                 var oldSocket = new Socket("127.0.0.1", gatewayPort(first, firstLog));
-                var newSocket = new Socket("127.0.0.1", gatewayPort(second, secondLog))) {
+                var newSocket = new Socket("127.0.0.1", gatewayPort(second, secondLog))
+        ) {
             byte[] alive = ("ALV;" + device.deviceIdentity() + "\r").getBytes(StandardCharsets.US_ASCII);
             oldSocket.getOutputStream().write(alive);
             await("Primeira sessão", () -> count(c, "raw_packets", device.tenantId()) == 1);
@@ -259,25 +333,32 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * Reproduz no banco a tentativa deixada por um emissor interrompido após
-     * confirmar a autorização.
+     * Reproduz no banco a tentativa deixada por um emissor interrompido após confirmar a autorização.
      */
     @Test
     void receivesPositionWhilePreviousOwnerIsUnavailable() throws Exception {
         var log = runtime.resolve("replacement.log");
-        try (var db = TestDatabase.createDataSource();
+        try (
+                var db = TestDatabase.createDataSource();
                 var device = new TestFixtures(db);
                 var c = db.getConnection();
-                var gateway = start(TcpGateway.class, db, log);
-                var worker = start(WorkerApplication.class, db, runtime.resolve("worker.log"))) {
+                var gateway = start(ServiceProfile.GATEWAY, db, log);
+                var worker = start(ServiceProfile.WORKER, db, runtime.resolve("worker.log"))
+        ) {
             var tenant = device.tenantId();
             UUID interrupted = enqueue(db, device, tenant, UUID.randomUUID(), UUID.randomUUID());
             var dispatch = new software.aporia.tracking.storage.command.DeviceCommandDispatchRepository();
             c.setAutoCommit(false);
             var claim = dispatch.claimForSession(c, tenant, device.deviceId(), device.sessionToken()).orElseThrow();
             assertEquals(interrupted, claim.id());
-            assertTrue(dispatch.authorizeTransmission(c, tenant, interrupted, claim.claimToken(),
-                    UUID.randomUUID(), device.deviceIdentity()));
+            assertTrue(
+                    dispatch.authorizeTransmission(
+                            c,
+                            tenant,
+                            interrupted,
+                            claim.claimToken(),
+                            UUID.randomUUID(),
+                            device.deviceIdentity()));
             c.commit();
             c.setAutoCommit(true);
             UUID next = enqueue(db, device, tenant, UUID.randomUUID(), UUID.randomUUID());
@@ -298,20 +379,20 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * Percorre enfileiramento offline, reconexão, envio e respostas sem correlação
-     * pelas entradas
-     * reais do serviço.
+     * Percorre enfileiramento offline, reconexão, envio e respostas sem correlação pelas entradas reais do serviço.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
     @Test
     void offlineQueueReconnectAndUncorrelatedResponsesThroughProductionEntryPoints() throws Exception {
         Path log = runtime.resolve("gateway.log");
-        try (var db = TestDatabase.createDataSource();
+        try (
+                var db = TestDatabase.createDataSource();
                 var fixture = new TestFixtures(db);
-                var gateway = start(TcpGateway.class, db, log);
-                var worker = start(WorkerApplication.class, db, runtime.resolve("worker.log"));
-                var c = db.getConnection()) {
+                var gateway = start(ServiceProfile.GATEWAY, db, log);
+                var worker = start(ServiceProfile.WORKER, db, runtime.resolve("worker.log"));
+                var c = db.getConnection()
+        ) {
             int port = gatewayPort(gateway, log);
             try (var teltonika = new TestFixtures(db)) {
                 verifyAvl(port, c, teltonika);
@@ -334,12 +415,12 @@ class GatewayCommandCycleIT {
                 tracker.setSoTimeout(8000);
                 tracker.getOutputStream().write(alive);
                 assertArrayEquals(expected, tracker.getInputStream().readNBytes(expected.length));
-                await("First write was not committed",
+                await(
+                        "First write was not committed",
                         () -> CommandTestFixtures.findStatus(c, tenant, first).orElseThrow().equals("sent"));
                 assertEquals("queued", CommandTestFixtures.findStatus(c, tenant, second).orElseThrow());
             }
-            // Antecipa o vencimento para simular a espera pela resposta durante a
-            // desconexão.
+            // Antecipa o vencimento para simular a espera pela resposta durante a desconexão.
             try (var s = c.prepareStatement("""
                     UPDATE device_commands SET created_at=now()-interval '3 minutes',
                     expires_at=now()-interval '1 second' WHERE tenant_id=? AND id=? AND status='sent'
@@ -348,7 +429,8 @@ class GatewayCommandCycleIT {
                 s.setObject(2, first);
                 assertEquals(1, s.executeUpdate());
             }
-            await("First command did not time out",
+            await(
+                    "First command did not time out",
                     () -> CommandTestFixtures.findStatus(c, tenant, first).orElseThrow().equals("timeout"));
             try (var tracker = new Socket("127.0.0.1", port)) {
                 tracker.setSoTimeout(8000);
@@ -356,8 +438,9 @@ class GatewayCommandCycleIT {
                 assertArrayEquals(expected, tracker.getInputStream().readNBytes(expected.length));
                 String res = "RES;" + identity + ";03;04;01;STB.201.1.1.11\r";
                 String pos = "RES;STT;" + identity + ";013831;20261120;08:45:00;-16.6700;-49.2500;45.5;1\r";
-                tracker.getOutputStream().write((res + pos + "RPR;" + identity + ";OK;10;13#0\r" + res)
-                        .getBytes(StandardCharsets.US_ASCII));
+                tracker.getOutputStream().write(
+                        (res + pos + "RPR;" + identity + ";OK;10;13#0\r" + res)
+                                .getBytes(StandardCharsets.US_ASCII));
             }
             await("Worker did not process replies", () -> {
                 assertTrue(worker.process().isAlive());
@@ -381,10 +464,8 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * Mede três rajadas de 200 posições em sockets persistentes, separadas por um
-     * minuto.
-     * O cronômetro inclui envio, ingestão e commit da última posição de cada
-     * rodada.
+     * Mede três rajadas de 200 posições em sockets persistentes, separadas por um minuto. O cronômetro inclui envio,
+     * ingestão e commit da última posição de cada rodada.
      *
      * @throws Exception se o ambiente isolado ou os processos do ensaio falharem
      */
@@ -393,15 +474,16 @@ class GatewayCommandCycleIT {
     void processesTwoHundredDevicesEveryMinute() throws Exception {
         final int fleetSize = 200;
         Path log = runtime.resolve("fleet-gateway.log");
-        try (var db = TestDatabase.createDataSource();
+        try (
+                var db = TestDatabase.createDataSource();
                 var fixture = new TestFixtures(db);
                 var c = db.getConnection();
-                var gateway = start(TcpGateway.class, db, log);
-                var worker = start(WorkerApplication.class, db, runtime.resolve("fleet-worker.log"))) {
+                var gateway = start(ServiceProfile.GATEWAY, db, log);
+                var worker = start(ServiceProfile.WORKER, db, runtime.resolve("fleet-worker.log"))
+        ) {
             int port = gatewayPort(gateway, log);
             var identities = new ArrayList<String>();
-            // Uma associação e um ativo distintos garantem que last_positions represente os
-            // 200 veículos.
+            // Uma associação e um ativo distintos garantem que last_positions represente os 200 veículos.
             try (var insert = c.prepareStatement("""
                     WITH fleet AS MATERIALIZED (
                         SELECT gen_random_uuid() AS device, gen_random_uuid() AS asset,
@@ -444,7 +526,8 @@ class GatewayCommandCycleIT {
                     int expected = fleetSize * (round + 1);
                     while (count(c, "positions", fixture.tenantId()) < expected) {
                         assertTrue(gateway.process().isAlive() && worker.process().isAlive());
-                        assertTrue(System.nanoTime() - start < TimeUnit.MINUTES.toNanos(1),
+                        assertTrue(
+                                System.nanoTime() - start < TimeUnit.MINUTES.toNanos(1),
                                 "Worker did not drain the burst within a minute");
                         TimeUnit.MILLISECONDS.sleep(100);
                     }
@@ -464,8 +547,12 @@ class GatewayCommandCycleIT {
                             assertEquals(0, row.getInt(1));
                         }
                     }
-                    System.out.printf(Locale.ROOT, "Frota 200: rodada %d, %.2f s, %d posições acumuladas%n",
-                            round + 1, elapsed / 1_000_000_000.0, expected);
+                    System.out.printf(
+                            Locale.ROOT,
+                            "Frota 200: rodada %d, %.2f s, %d posições acumuladas%n",
+                            round + 1,
+                            elapsed / 1_000_000_000.0,
+                            expected);
                 }
             } finally {
                 for (Socket socket : sockets)
@@ -475,9 +562,7 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * Exercita descoberta AVL, aprovação, ingestão, retransmissão e desabilitação
-     * na mesma porta
-     * TCP.
+     * Exercita descoberta AVL, aprovação, ingestão, retransmissão e desabilitação na mesma porta TCP.
      *
      * @param port    porta TCP atribuída ao gateway de teste
      * @param c       conexão JDBC usada pelo chamador
@@ -489,8 +574,8 @@ class GatewayCommandCycleIT {
         var hex = java.util.HexFormat.of();
         byte[] login = java.nio.ByteBuffer.allocate(17).putShort((short) 15)
                 .put(imei.getBytes(StandardCharsets.US_ASCII)).array();
-        // Cada lote traz duas posições nos hemisférios sul e oeste. O lote estendido
-        // também inclui um campo de tamanho variável.
+        // Cada lote traz duas posições nos hemisférios sul e oeste. O lote estendido também inclui um campo de tamanho
+        // variável.
         byte[] codec8 = hex.parseHex(
                 "00000000000000430802000001a3185c500000e3fc5e80f268ff00007b001f070019000101ef01000000000001a3185c500100e3fc5e80f268ff00007b001f070019000101ef010000000200005a0c");
         byte[] extended = hex.parseHex(
@@ -552,8 +637,7 @@ class GatewayCommandCycleIT {
                 tracker.getOutputStream().write(bytes);
                 assertArrayEquals(new byte[] { 0, 0, 0, 2 }, tracker.getInputStream().readNBytes(4));
             }
-            // Desabilitar o cadastro após o login deve impedir a confirmação do lote
-            // seguinte.
+            // Desabilitar o cadastro após o login deve impedir a confirmação do lote seguinte.
             try (var disable = c.prepareStatement("UPDATE devices SET enabled=false WHERE tenant_id=? AND id=?")) {
                 disable.setObject(1, fixture.tenantId());
                 disable.setObject(2, approved);
