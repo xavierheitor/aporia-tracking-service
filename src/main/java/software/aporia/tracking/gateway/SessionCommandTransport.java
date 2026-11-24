@@ -20,13 +20,13 @@ public final class SessionCommandTransport
      * @param sessions registro de sessões ativas do gateway
      */
     public SessionCommandTransport(
-            SessionRegistry sessions
-    ) {
+            SessionRegistry sessions) {
         this.sessions = Objects.requireNonNull(sessions);
     }
 
     /**
-     * Seleciona a sessão conectada do dispositivo dentro do tenant para esta tentativa de envio.
+     * Seleciona a sessão conectada do dispositivo dentro do tenant para esta
+     * tentativa de envio.
      *
      * @param tenantId identificador do tenant que delimita a operação
      * @param deviceId identificador do equipamento cadastrado

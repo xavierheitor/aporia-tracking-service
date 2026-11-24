@@ -8,7 +8,7 @@ import java.util.Set;
  * @param values capacidades reconhecidas no quadro
  */
 public record ProtocolMessageCapabilities(
-        @SuppressWarnings("MismatchedQueryAndUpdateOfCollection") // Cópia imutável fornecida pelo chamador.
+        @SuppressWarnings("MismatchedQueryAndUpdateOfCollection") // O construtor cria uma cópia imutável.
         Set<MessageCapability> values
         ) {
 

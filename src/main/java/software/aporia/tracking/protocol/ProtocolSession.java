@@ -5,6 +5,10 @@ import java.util.List;
 /**
  * Mantém o estado de enquadramento de uma conexão, inclusive os bytes restantes entre duas
  * leituras TCP.
+ *
+ * <p>Enquadrar significa encontrar os limites das mensagens dentro do fluxo de
+ * bytes. Uma sessão pertence a uma conexão e não deve ser compartilhada entre
+ * sockets. Os métodos de ACK apenas produzem bytes; não escrevem na rede.</p>
  */
 public interface ProtocolSession {
 

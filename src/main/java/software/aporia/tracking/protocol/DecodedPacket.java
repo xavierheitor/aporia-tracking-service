@@ -6,6 +6,9 @@ import software.aporia.tracking.core.Telemetry;
 /**
  * Agrupa a identidade, as leituras em ordem de recepção e o tipo de resposta de comando quando presente.
  *
+ * <p>Uma lista vazia é válida para respostas sem telemetria. O tipo de resposta
+ * descreve o conteúdo e não identifica, sozinho, qual comando o originou.</p>
+ *
  * @param identity identidade declarada pelo equipamento no protocolo
  * @param readings leituras na ordem em que aparecem no pacote
  * @param responseType tipo de resposta quando há conteúdo de comando

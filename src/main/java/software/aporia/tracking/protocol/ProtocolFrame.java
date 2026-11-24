@@ -32,6 +32,7 @@ public record ProtocolFrame(
         Objects.requireNonNull(payload, "payload");
         Objects.requireNonNull(messageType, "messageType");
 
+        // Arrays são mutáveis: copiar impede que o buffer do chamador altere o quadro.
         payload = Arrays.copyOf(payload, payload.length);
     }
 

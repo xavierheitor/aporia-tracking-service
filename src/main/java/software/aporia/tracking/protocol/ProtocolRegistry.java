@@ -59,6 +59,8 @@ public final class ProtocolRegistry {
      * @throws IllegalArgumentException se nenhum protocolo reconhecer o prefixo
      */
     public ProtocolAdapter detect(int first) {
+        // Não retorna no primeiro acerto: outro adaptador pode aceitar o mesmo byte.
+        // Nesse caso, falhar evita escolher o protocolo pela ordem do mapa.
         ProtocolAdapter selected = null;
         for (var adapter : adapters.values()) {
             if (adapter.acceptsFirstByte(first)) {

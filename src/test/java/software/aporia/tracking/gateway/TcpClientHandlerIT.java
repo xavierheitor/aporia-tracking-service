@@ -225,6 +225,55 @@ class TcpClientHandlerIT {
         }
     }
 
+    /** Confere a recomposição do quadro entre leituras sem perder a admissão da sessão. */
+    @Test
+    void shouldRegisterAfterFragmentedFrame() throws Exception {
+        try (ServerSocket server = new ServerSocket(0);
+             var executor = Executors.newVirtualThreadPerTaskExecutor();
+             Socket tracker = new Socket("127.0.0.1", server.getLocalPort());
+             Socket gateway = server.accept()) {
+            Future<?> task = executor.submit(() -> handler.handle(gateway));
+            send(tracker, "STT;");
+            assertEquals(0, sessionRegistry.size());
+            send(tracker, frame(identity).substring(4));
+            awaitCondition(() -> sessionRegistry.find(tenantId, deviceId).isPresent());
+            tracker.shutdownOutput();
+            task.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(0, sessionRegistry.size());
+        }
+    }
+
+    /** Um cadastro desabilitado não pode publicar sessão nem persistir pacotes. */
+    @Test
+    void shouldRejectDisabledDevice() throws Exception {
+        try (var connection = dataSource.getConnection();
+             var update = connection.prepareStatement(
+                     "UPDATE devices SET enabled=false WHERE tenant_id=? AND id=?")) {
+            update.setObject(1, tenantId);
+            update.setObject(2, deviceId);
+            assertEquals(1, update.executeUpdate());
+        }
+        try (ServerSocket server = new ServerSocket(0);
+             var executor = Executors.newVirtualThreadPerTaskExecutor();
+             Socket tracker = new Socket("127.0.0.1", server.getLocalPort());
+             Socket gateway = server.accept()) {
+            Future<?> task = executor.submit(() -> handler.handle(gateway));
+            send(tracker, frame(identity));
+            task.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(0, sessionRegistry.size());
+            try (var connection = dataSource.getConnection();
+                 var query = connection.prepareStatement(
+                         "SELECT count(*) FROM raw_packets WHERE tenant_id=? AND device_id=?")) {
+                query.setObject(1, tenantId);
+                query.setObject(2, deviceId);
+                try (var rows = query.executeQuery()) {
+                    assertTrue(rows.next());
+                    assertEquals(0, rows.getInt(1));
+                }
+            }
+        }
+    }
+
     /**
      * Verifica o encerramento ao receber outra identidade na mesma conexão.
      *

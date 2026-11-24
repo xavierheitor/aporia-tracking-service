@@ -65,11 +65,13 @@ public final class SuntechAdapter implements ProtocolAdapter {
         byte[] payload = frame.payload();
         new SuntechDecoder().decodePacket(payload, frame.deviceIdentity());
         String[] fields = new String(payload, 0, payload.length - 1, StandardCharsets.US_ASCII).split(";", -1);
+        // RES pode envolver uma mensagem STT/ASTT e deslocar seus campos uma posição.
         boolean embedded = "RES".equals(fields[0]) && fields.length > 2
                 && ("STT".equals(fields[1]) || "ASTT".equals(fields[1]));
         String model = null;
         if (embedded || "STT".equals(fields[0]) || "ASTT".equals(fields[0])) {
             int mapIndex = embedded ? 3 : 2;
+            // O bit 1 (máscara 2) anuncia o modelo logo depois do mapa de presença.
             if ((Integer.parseInt(fields[mapIndex], 16) & 2) != 0 && fields[mapIndex + 1].matches("[0-9]{1,10}")) {
                 model = fields[mapIndex + 1];
             }
@@ -117,6 +119,7 @@ public final class SuntechAdapter implements ProtocolAdapter {
                 String messageType
                         = message.substring(0, separator);
 
+                // false mantém a política atual: estes quadros Suntech não pedem ACK.
                 frames.add(new ProtocolFrame(
                         identity,
                         payload,

@@ -5,6 +5,9 @@ import java.util.Objects;
 /**
  * Indica quais partes da mensagem devem gerar telemetria, resposta de comando ou processamento de heartbeat.
  *
+ * <p>As decisões são independentes: uma resposta com posição pode ativar
+ * telemetria e resposta de comando simultaneamente.</p>
+ *
  * @param processTelemetry indica que a mensagem contém telemetria
  * @param processCommandResponse indica que há uma resposta a registrar
  * @param processHeartbeat indica que há uma mensagem de presença

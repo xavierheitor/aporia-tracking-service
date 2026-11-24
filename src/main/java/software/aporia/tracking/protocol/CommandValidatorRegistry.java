@@ -50,15 +50,7 @@ public final class CommandValidatorRegistry {
      * @param payload bytes do conteúdo da mensagem
      */
     public void validate(String protocol, byte[] payload) {
-        CommandValidator validator = validators.get(protocol);
-
-        if (validator == null) {
-            throw new IllegalArgumentException(
-                    "UNSUPPORTED_COMMAND_PROTOCOL: " + protocol
-            );
-        }
-
-        validator.validate(payload);
+        validatorFor(protocol).validate(payload);
     }
 
     /**
@@ -73,15 +65,22 @@ public final class CommandValidatorRegistry {
             byte[] payload,
             String expectedIdentity
     ) {
+        validatorFor(protocol).validate(payload, expectedIdentity);
+    }
+
+    /**
+     * Resolve o mesmo validador para as duas formas de validação pública.
+     *
+     * @param protocol protocolo solicitado pelo chamador
+     * @return validador registrado
+     * @throws IllegalArgumentException se o protocolo não tiver validador
+     */
+    private CommandValidator validatorFor(String protocol) {
         CommandValidator validator = validators.get(protocol);
-
         if (validator == null) {
-            throw new IllegalArgumentException(
-                    "UNSUPPORTED_COMMAND_PROTOCOL: " + protocol
-            );
+            throw new IllegalArgumentException("UNSUPPORTED_COMMAND_PROTOCOL: " + protocol);
         }
-
-        validator.validate(payload, expectedIdentity);
+        return validator;
     }
 
 }

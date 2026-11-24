@@ -1,6 +1,9 @@
 package software.aporia.tracking.protocol;
 
-/** Define a validação de um payload de comando segundo o protocolo do dispositivo. */
+/**
+ * Define a validação sintática dos bytes de comando segundo o protocolo do dispositivo.
+ * Um formato válido ainda depende das permissões e da política de execução do chamador.
+ */
 public interface CommandValidator {
 
     /**
@@ -29,6 +32,8 @@ public interface CommandValidator {
             byte[] payload,
             String expectedIdentity
     ) {
+        // A implementação padrão só confere a sintaxe. Protocolos com destinatário
+        // no payload precisam sobrescrever esta versão para conferir a identidade.
         validate(payload);
     }
 }

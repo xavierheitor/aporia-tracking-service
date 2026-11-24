@@ -13,6 +13,10 @@ import java.util.List;
 /**
  * Conduz o login por IMEI e o enquadramento AVL em TCP. Cada conexão mantém um buffer próprio
  * para leituras fragmentadas.
+ *
+ * <p>O adaptador cria a sessão e descreve o codec para a descoberta. A sessão
+ * remonta os bytes e delega a validação do lote a {@link TeltonikaAvl}, também
+ * usado pelo worker para extrair as leituras dos bytes persistidos.</p>
  */
 public final class TeltonikaAdapter implements ProtocolAdapter {
     /** Valida o lote AVL completo antes de a sessão emitir o quadro. */
@@ -68,6 +72,8 @@ public final class TeltonikaAdapter implements ProtocolAdapter {
         /** Identidade obtida no login desta conexão. */
         private String imei;
         /** Quantidade de bytes esperada para concluir a etapa atual do enquadramento. */
+        // Etapas: 2 bytes de comprimento, 17 de login completo, 8 de cabeçalho
+        // AVL e, por último, o tamanho total do lote informado pelo cabeçalho.
         private int target = 2;
 
         /**
@@ -92,6 +98,8 @@ public final class TeltonikaAdapter implements ProtocolAdapter {
                 buffer.put(incoming, offset, amount);
                 offset += amount;
                 if (buffer.position() != target) continue;
+                // ByteBuffer usa big-endian: os bytes mais significativos vêm primeiro.
+                // Leituras por índice (getShort(0), getInt(4)) não mudam sua posição.
                 if (imei == null && target == 2) {
                     if (buffer.getShort(0) != 15) throw new IllegalArgumentException("INVALID_IMEI_LENGTH");
                     target = 17;
@@ -99,6 +107,7 @@ public final class TeltonikaAdapter implements ProtocolAdapter {
                     imei = new String(buffer.array(), 2, 15, StandardCharsets.US_ASCII);
                     if (!imei.matches("[0-9]{15}")) throw new IllegalArgumentException("INVALID_IMEI");
                     frames.add(new ProtocolFrame(imei, new byte[0], "LOGIN", true));
+                    // clear reinicia os índices para o próximo lote; não apaga o array.
                     buffer.clear();
                     target = 8;
                 } else if (target == 8) {
@@ -110,6 +119,7 @@ public final class TeltonikaAdapter implements ProtocolAdapter {
                     target = length + 12;
                 } else {
                     byte[] packet = java.util.Arrays.copyOf(buffer.array(), target);
+                    // Só publica o quadro se estrutura e CRC passarem pela validação.
                     DECODER.decodePacket(packet, imei);
                     frames.add(new ProtocolFrame(imei, packet, "AVL", true));
                     buffer.clear();
@@ -127,6 +137,8 @@ public final class TeltonikaAdapter implements ProtocolAdapter {
          * @return bytes de resposta previstos pelo protocolo
          */
         @Override public byte[] acknowledge(ProtocolFrame frame) {
+            // No lote: oito bytes de cabeçalho, um de codec, depois a contagem.
+            // toUnsignedInt converte o byte Java (-128..127) para a faixa 0..255.
             return frame.isLogin() ? new byte[]{1}
                     : ByteBuffer.allocate(4).putInt(Byte.toUnsignedInt(frame.payload()[9])).array();
         }

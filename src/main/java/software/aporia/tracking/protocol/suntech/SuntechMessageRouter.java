@@ -21,6 +21,7 @@ public final class SuntechMessageRouter {
         MessageProcessingPlan plan
                 = MessageProcessingPlan.from(capabilities);
 
+        // Não escolhe um único destino: o mesmo quadro pode exigir mais de um processamento.
         if (!plan.hasWork()) {
             throw new IllegalArgumentException(
                     "UNSUPPORTED_MESSAGE_CAPABILITIES"

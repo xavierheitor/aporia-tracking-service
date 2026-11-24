@@ -169,4 +169,12 @@ class CommandValidatorRegistryTest {
         );
         assertEquals("DUPLICATE_COMMAND_VALIDATOR: suntech", error.getMessage());
     }
+    /** As duas sobrecargas devem rejeitar protocolos sem validador da mesma forma. */
+    @Test
+    void shouldRejectUnknownProtocolWhenIdentityIsProvided() {
+        var error = assertThrows(IllegalArgumentException.class,
+                () -> registry.validate("teltonika", ascii("CMD;1234567890;03;04;1"), "1234567890"));
+        assertEquals("UNSUPPORTED_COMMAND_PROTOCOL: teltonika", error.getMessage());
+    }
+
 }

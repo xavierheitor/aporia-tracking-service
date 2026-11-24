@@ -9,6 +9,10 @@ import java.util.Set;
 /**
  * Reconstitui quadros ASCII delimitados por retorno de carro e localiza a identidade declarada em
  * cada cabeçalho suportado.
+ *
+ * <p>{@link #receive(byte[])} cuida dos limites das mensagens; {@link #identify(byte[])}
+ * valida o envelope textual e a identidade. Os valores de telemetria são
+ * interpretados separadamente por {@link SuntechDecoder}.</p>
  */
 public class SuntechProtocol {
 
@@ -38,6 +42,8 @@ public class SuntechProtocol {
         }
 
         List<byte[]> frames = new ArrayList<>();
+        // start marca o começo do trecho ainda não consumido desta leitura.
+        // buffer contém somente o fragmento guardado da leitura anterior.
         int start = 0;
 
         for (int i = 0; i < incoming.length; i++) {
@@ -52,6 +58,7 @@ public class SuntechProtocol {
                     );
                 }
 
+                // Junta o fragmento anterior ao trecho atual, incluindo o CR final.
                 byte[] frame = Arrays.copyOf(
                         buffer,
                         frameSize
@@ -72,6 +79,7 @@ public class SuntechProtocol {
 
             } else if (buffer.length + i - start + 1
                     >= MAX_FRAME_SIZE) {
+                // Sem CR, é preciso reservar um byte para o terminador dentro do limite.
 
                 throw new IllegalArgumentException(
                         "FRAME_TOO_LARGE"
@@ -131,6 +139,7 @@ public class SuntechProtocol {
                 StandardCharsets.US_ASCII
         );
 
+        // -1 preserva campos vazios finais; descartá-los esconderia campos ausentes.
         String[] parts = message.split(";", -1);
 
         if (parts.length < 2 || !HEADERS.contains(parts[0])) {
@@ -139,6 +148,7 @@ public class SuntechProtocol {
             );
         }
 
+        // Normal: RES;IDENTIDADE;...  Com posição embutida: RES;STT;IDENTIDADE;...
         int identityIndex = 1;
 
         if ("RES".equals(parts[0])

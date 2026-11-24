@@ -10,9 +10,14 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.IntFunction;
+
+import javax.sql.DataSource;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,234 +34,309 @@ import software.aporia.tracking.storage.device.JdbcDeviceLookup;
 import software.aporia.tracking.storage.packet.JdbcPacketIngestion;
 
 /**
- * Inicia o servidor TCP, distribui conexões entre tarefas e, quando
- * configurado, executa o dispatcher junto às sessões.
+ * Mantém o listener TCP do gateway e atende cada conexão em uma thread virtual.
+ * O {@link TcpClientHandler} registra as sessões identificadas. Quando o envio
+ * de comandos está habilitado, o dispatcher consulta esse mesmo registro.
+ *
+ * <p>
+ * O {@link #main(String[])} orquestra o fluxo nesta ordem:
+ * </p>
+ * <ol>
+ * <li>Abre o pool JDBC, o listener com {@code openListener()}, o executor de
+ * threads virtuais, o proprietário com {@code openDispatchOwner()} e o executor
+ * de polling. O proprietário lê ou cria um UUID em arquivo persistente e mantém
+ * seu bloqueio exclusivo para identificar e recuperar tentativas deste
+ * emissor.</li>
+ * <li>Cria o {@link SessionRegistry} compartilhado e chama
+ * {@code createClientHandler()}. Este usa {@code protocolSelector()} para
+ * escolher
+ * entre detecção pelo primeiro byte e protocolo fixo configurado.</li>
+ * <li>Se houver {@code TRACKING_DISPATCH_OWNER_FILE}, chama
+ * {@code startCommandPolling()}. Cada rodada de {@code poll()} recupera estados
+ * pendentes e tenta enviar comandos às sessões locais identificadas. A primeira
+ * rodada é imediata; as seguintes começam um segundo após a anterior terminar.
+ * Sem essa variável, o atendimento TCP funciona sem o polling de comandos.</li>
+ * <li>Registra o hook de encerramento e entra em {@code acceptClients()}.
+ * Cada socket aceito passa por {@code submitClient()}, que o acompanha no
+ * conjunto
+ * de clientes ativos e executa {@code TcpClientHandler.handle()} em uma thread
+ * virtual. O handler trata o protocolo e publica as sessões identificadas no
+ * registro também consultado pelo dispatcher.</li>
+ * <li>No encerramento, {@code shutdown()} sinaliza a parada e fecha o listener
+ * para desbloquear a aceitação. Ao sair desse laço, o {@code main} chama
+ * {@code closeActiveClients()} e fecha os recursos em ordem inversa: polling,
+ * proprietário, executor TCP, listener e pool JDBC. Assim, o bloqueio do
+ * emissor
+ * permanece até o polling terminar e o banco fica disponível enquanto as
+ * tarefas
+ * TCP encerram. Por fim, libera {@code gatewayFinished}; se a espera do hook
+ * exceder o prazo, ele também tenta fechar os clientes ativos.</li>
+ * </ol>
  */
 public class TcpGateway {
 
-    //Logger para registrar eventos e falhas associados a esta classe.
-    private static final Logger log
-            = LoggerFactory.getLogger(TcpGateway.class);
-
-    //Porta configurada para o listener TCP.
+    private static final Logger log = LoggerFactory.getLogger(TcpGateway.class);
     private static final int PORT = Integer.parseInt(
-            System.getenv().getOrDefault("TRACKING_TCP_PORT", "5500")
-    );
-
-    //Tempo máximo de espera usado durante o encerramento do gateway.
+            System.getenv().getOrDefault("TRACKING_TCP_PORT", "5500"));
+    /**
+     * Tempo que o hook aguarda antes de tentar fechar os sockets ainda ativos.
+     */
     private static final int SHUTDOWN_TIMEOUT_SECONDS = 10;
 
     /**
-     * Abre o listener, instala a rotina de encerramento e inicia o envio
-     * periódico se houver proprietário configurado.
+     * Abre os recursos do gateway e aceita conexões até o encerramento. A
+     * variável {@code TRACKING_PROTOCOL} define a seleção de protocolo e
+     * {@code TRACKING_DISPATCH_OWNER_FILE} habilita o envio periódico de
+     * comandos.
      *
      * @param args argumentos da linha de comando, atualmente ignorados
-     * @throws IOException se a operação de entrada ou saída falhar
+     * @throws IOException se falhar a abertura do listener, o acesso ao arquivo
+     *                     do emissor ou uma operação de socket no laço de aceitação
      */
     public static void main(String[] args) throws IOException {
-
-        //Indicador compartilhado de execução do serviço.
         AtomicBoolean running = new AtomicBoolean(true);
-        //Sinal de conclusão do laço do gateway.
         CountDownLatch gatewayFinished = new CountDownLatch(1);
+        Set<Socket> activeClients = ConcurrentHashMap.newKeySet();
 
-        //Conjunto de sockets ativos.
-        Set<Socket> activeClients
-                = ConcurrentHashMap.newKeySet();
-
-        //Caminho do arquivo de proprietário.
-        String ownerPath = System.getenv("TRACKING_DISPATCH_OWNER_FILE");
-        //Cria o DataSource para a conexão com o banco de dados.
-        try (
-                var dataSource = Database.createDataSource(); //Cria o ServerSocket para o listener TCP.
-                 ServerSocket server = new ServerSocket(
-                        PORT,
-                        50,
-                        InetAddress.getByName(System.getenv().getOrDefault("TRACKING_TCP_BIND", "0.0.0.0"))
-                ); //Cria o executor para as tarefas virtuais.
-                 var executor = Executors.newVirtualThreadPerTaskExecutor(); //Abre o arquivo de proprietário.
-                 var owner = ownerPath == null ? null : DispatchOwner.open(Path.of(ownerPath)); //Cria o executor para as tarefas agendadas.
-                 var polling = Executors.newSingleThreadScheduledExecutor()) {
-             
-            //se o datasource for criado, segue com a inicialização do gateway.
-
-            //Cria o JdbcPacketIngestion para o ingestão de pacotes.(salvamento)
-            JdbcPacketIngestion ingestion
-                    = new JdbcPacketIngestion(dataSource);
-
-            //Cria o JdbcDeviceLookup para a busca de dispositivos. (disositivos registrados no banco)
-            JdbcDeviceLookup deviceLookup
-                    = new JdbcDeviceLookup(dataSource);
-
-            //Cria o SessionRegistry para o registro de sessões. (acompanha as sessoes ativas)
-            SessionRegistry sessionRegistry
-                    = new SessionRegistry();
-
-            //Cria o ProtocolRegistry para o registro de protocolos. (aqui vc instancia os disponiveis, Suntech, Teltonika, etc)
-            ProtocolRegistry registry = new ProtocolRegistry(
-                    List.of(new SuntechAdapter(), new TeltonikaAdapter())
-            );
-
-            //Obtém o identificador do protocolo configurado.
-            String protocolId = System.getenv()
-                    .getOrDefault("TRACKING_PROTOCOL", "auto");
-
-            //Cria a função para selecionar o protocolo.
-            java.util.function.IntFunction<ProtocolAdapter> select = registry::detect;
-            //Se o identificador do protocolo não for "auto", seleciona o protocolo fixo.
-            if (!"auto".equals(protocolId)) {
-                var fixed = registry.get(protocolId);
-                select = first -> fixed;
-            }
-
-            //Cria o TcpClientHandler para o tratamento de clientes.
-            //responsável por tratar a conexão do cliente e o protocolo do dispositivo.
-            TcpClientHandler clientHandler = new TcpClientHandler(
-                    ingestion,
-                    deviceLookup,
-                    sessionRegistry,
-                    select,
-                    running
-            );
-
-            log.info("TCP listener configured for {}", protocolId);
-            //Se o proprietário não for nulo, cria o CommandDispatcher para o envio de comandos.
+        // Os recursos fecham em ordem inversa. O emissor mantém o bloqueio até o
+        // polling terminar e o pool JDBC continua disponível enquanto as tarefas TCP
+        // encerram suas sessões.
+        try (var dataSource = Database.createDataSource();
+                var server = openListener();
+                var executor = Executors.newVirtualThreadPerTaskExecutor();
+                var owner = openDispatchOwner();
+                var polling = Executors.newSingleThreadScheduledExecutor()) {
+            var sessions = new SessionRegistry();
+            var handler = createClientHandler(dataSource, sessions, running);
             if (owner != null) {
-                //Cria o CommandDispatcher para o envio de comandos.
-                var dispatcher = new CommandDispatcher(
-                        dataSource, new DeviceCommandDispatchRepository(),
-                        new SessionCommandTransport(sessionRegistry), owner);
-                // O intervalo começa após cada rodada; uma rodada lenta não sobrepõe outra no mesmo emissor.
-                polling.scheduleWithFixedDelay(() -> poll(dispatcher, sessionRegistry, running),
-                        0, 1, TimeUnit.SECONDS);
+                startCommandPolling(polling, dataSource, sessions, owner, running);
             }
-            //Cria o Thread para o encerramento do gateway.
-            Thread shutdownHook = new Thread(
+
+            Runtime.getRuntime().addShutdownHook(new Thread(
                     () -> shutdown(server, running, gatewayFinished, activeClients),
-                    "tracking-gateway-shutdown");
+                    "tracking-gateway-shutdown"));
 
-            //Adiciona o Thread para o encerramento do gateway.
-            Runtime.getRuntime().addShutdownHook(shutdownHook);
-
+            // aceita os clientes
             try {
-
-                log.info(
-                        "Tracking TCP Gateway listening on {}:{}",
-                        server.getInetAddress().getHostAddress(), server.getLocalPort()
-                );
-
-                //Loop principal do gateway.
-                while (running.get()) {
-
-                    try {
-                        //Aceita uma nova conexão.
-                        Socket client = server.accept();
-
-                        //Se o serviço não estiver em execução, fecha o socket e sai do loop.
-                        if (!running.get()) {
-                            client.close();
-                            break;
-                        }
-
-                        //Adiciona o socket à lista de sockets ativos.
-                        activeClients.add(client);
-
-                        try {
-                            //Envia a conexão para o TcpClientHandler para tratamento.
-                            executor.submit(() -> {
-                                try {
-                                    //Trata a conexão.
-                                    clientHandler.handle(client);
-                                } finally {
-                                    //Remove o socket da lista de sockets ativos.
-                                    activeClients.remove(client);
-                                }
-                            });
-
-                        } catch (RuntimeException e) {
-                            //Remove o socket da lista de sockets ativos.
-                            activeClients.remove(client);
-                            //Fecha o socket.
-                            client.close();
-                            throw e;
-                        }
-
-                    } catch (SocketException e) {
-                        //Se o serviço não estiver em execução, sai do loop.
-                        if (!running.get()) {
-                            break;
-                        }
-                        throw e;
-                    }
-                }
-
+                acceptClients(server, executor, handler, running, activeClients);
             } finally {
-
                 log.info("TCP Gateway stopping");
-
-                // Desbloqueia as leituras TCP das sessões ativas.
-                for (Socket client : activeClients) {
-                    try {
-                        client.close();
-                    } catch (IOException e) {
-                        log.debug(
-                                "Error closing client socket",
-                                e
-                        );
-                    }
-                }
+                closeActiveClients(activeClients);
             }
-            // O try-with-resources aguarda as virtual threads
-            // antes de fechar o DataSource.
         } finally {
+            // Libera o hook após a tentativa de fechamento de todos os recursos.
             gatewayFinished.countDown();
             log.info("TCP Gateway stopped");
         }
     }
 
     /**
-     * Interrompe a aceitação de conexões, fecha sockets ativos e coordena a
-     * saída das tarefas do gateway.
+     * Abre o listener no endereço e na porta configurados para este processo.
      *
-     * @param server socket de escuta do gateway
-     * @param running indicador compartilhado de execução do serviço
-     * @param gatewayFinished sinal de conclusão do laço do gateway
-     * @param activeClients conexões aceitas e ainda acompanhadas pelo gateway
+     * @return socket de escuta que o gateway deve fechar ao encerrar
+     * @throws IOException se falhar a resolução do endereço ou a abertura da
+     *                     porta
+     */
+    private static ServerSocket openListener() throws IOException {
+        String bindAddress = System.getenv().getOrDefault("TRACKING_TCP_BIND", "0.0.0.0");
+        return new ServerSocket(PORT, 50, InetAddress.getByName(bindAddress));
+    }
+
+    /**
+     * Obtém o bloqueio exclusivo do arquivo que identifica o emissor de
+     * comandos. O UUID persistido identifica as tentativas deste emissor; o
+     * bloqueio impede que outro processo assuma o mesmo arquivo simultaneamente.
+     * A escolha da sessão que recebe o comando é coordenada pelo banco e pelo
+     * registro de sessões, não pelo proprietário.
+     *
+     * @return proprietário com bloqueio adquirido, ou {@code null} quando a
+     *         variável {@code TRACKING_DISPATCH_OWNER_FILE} está ausente
+     * @throws IOException se o arquivo estiver indisponível, inválido ou em uso
+     */
+    private static DispatchOwner openDispatchOwner() throws IOException {
+        String ownerPath = System.getenv("TRACKING_DISPATCH_OWNER_FILE");
+        return ownerPath == null ? null : DispatchOwner.open(Path.of(ownerPath));
+    }
+
+    /**
+     * Prepara o atendimento das conexões com a seleção de protocolo configurada
+     * no ambiente.
+     *
+     * @param dataSource pool usado na consulta de dispositivos e na ingestão de
+     *                   pacotes
+     * @param sessions   registro em que o handler publica as sessões
+     *                   identificadas
+     * @param running    sinal de execução observado pelas tarefas TCP
+     * @return handler compartilhado pelas conexões deste listener
+     */
+    private static TcpClientHandler createClientHandler(DataSource dataSource, SessionRegistry sessions,
+            AtomicBoolean running) {
+        // obtem o protocolo
+        String protocolId = System.getenv().getOrDefault("TRACKING_PROTOCOL", "auto");
+        // cria e repassa o handler
+        var handler = new TcpClientHandler(new JdbcPacketIngestion(dataSource), new JdbcDeviceLookup(dataSource),
+                sessions, protocolSelector(protocolId), running);
+        log.info("TCP listener configured for {}", protocolId);
+        return handler;
+    }
+
+    /**
+     * Define como escolher o adaptador no início de cada conexão. Em modo
+     * automático, a escolha depende do primeiro byte recebido. Um protocolo
+     * fixo é resolvido na inicialização para que erros de configuração apareçam
+     * antes da primeira conexão.
+     *
+     * @param protocolId identificador de um protocolo registrado ou
+     *                   {@code auto}
+     * @return função que recebe o primeiro byte da conexão como inteiro sem
+     *         sinal
+     * @throws IllegalArgumentException se o identificador fixo for desconhecido
+     */
+    private static IntFunction<ProtocolAdapter> protocolSelector(String protocolId) {
+        var registry = new ProtocolRegistry(List.of(new SuntechAdapter(), new TeltonikaAdapter()));
+        if ("auto".equals(protocolId)) {
+            return registry::detect;
+        }
+        var fixedAdapter = registry.get(protocolId);
+        return firstByte -> fixedAdapter;
+    }
+
+    /**
+     * Agenda a primeira consulta à fila imediatamente e as seguintes um segundo
+     * após a conclusão da rodada anterior.
+     *
+     * @param polling    executor de uma thread dedicado às rodadas do dispatcher
+     * @param dataSource pool usado pelo dispatcher para consultar e atualizar a
+     *                   fila
+     * @param sessions   registro usado para localizar as sessões deste gateway
+     * @param owner      proprietário que mantém o bloqueio do emissor durante as
+     *                   rodadas
+     * @param running    sinal consultado antes de iniciar uma rodada ou atender
+     *                   outra sessão
+     */
+    private static void startCommandPolling(ScheduledExecutorService polling, DataSource dataSource,
+            SessionRegistry sessions, DispatchOwner owner, AtomicBoolean running) {
+        var dispatcher = new CommandDispatcher(dataSource, new DeviceCommandDispatchRepository(),
+                new SessionCommandTransport(sessions), owner);
+        polling.scheduleWithFixedDelay(() -> poll(dispatcher, sessions, running), 0, 1, TimeUnit.SECONDS);
+    }
+
+    /**
+     * Aceita conexões e delega o atendimento ao executor. O fechamento do
+     * listener pelo hook acorda a thread bloqueada em
+     * {@link ServerSocket#accept()}.
+     *
+     * @param server        socket de escuta do gateway
+     * @param executor      executor das tarefas TCP
+     * @param handler       responsável pelo protocolo e pela sessão de cada conexão
+     * @param running       sinal que distingue o encerramento solicitado de uma
+     *                      falha
+     *                      de socket
+     * @param activeClients sockets acompanhados para fechamento durante o
+     *                      encerramento
+     * @throws IOException se ocorrer uma falha de E/S durante a aceitação ou o
+     *                     fechamento
+     */
+    private static void acceptClients(ServerSocket server, ExecutorService executor, TcpClientHandler handler,
+            AtomicBoolean running, Set<Socket> activeClients) throws IOException {
+        log.info("Tracking TCP Gateway listening on {}:{}",
+                server.getInetAddress().getHostAddress(), server.getLocalPort());
+        while (running.get()) {
+            try {
+                Socket client = server.accept();
+                // O encerramento pode ter começado enquanto accept() aguardava esta conexão.
+                if (!running.get()) {
+                    client.close();
+                    break;
+                }
+                submitClient(executor, handler, client, activeClients);
+            } catch (SocketException e) {
+                if (!running.get()) {
+                    break;
+                }
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Entrega o socket ao handler em uma tarefa própria. Se a submissão falhar,
+     * a thread que aceitou o socket assume o fechamento.
+     *
+     * @param executor      executor que recebe a tarefa da conexão
+     * @param handler       responsável por atender e fechar o socket dentro da
+     *                      tarefa
+     * @param client        socket recém-aceito
+     * @param activeClients conjunto compartilhado com a rotina de encerramento
+     * @throws IOException se o fechamento do socket falhar após uma falha de
+     *                     submissão
+     */
+    private static void submitClient(ExecutorService executor, TcpClientHandler handler, Socket client,
+            Set<Socket> activeClients) throws IOException {
+        // A tarefa pode terminar antes de submit() retornar. Registre o socket antes de
+        // entregá-lo.
+        activeClients.add(client);
+        try {
+            executor.submit(() -> {
+                try {
+                    handler.handle(client);
+                } finally {
+                    activeClients.remove(client);
+                }
+            });
+        } catch (RuntimeException e) {
+            try (client) {
+                activeClients.remove(client);
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Fecha os sockets para desbloquear as leituras das tarefas TCP. Uma falha
+     * individual é registrada e o fechamento prossegue para os demais clientes.
+     *
+     * @param activeClients sockets das tarefas que ainda podem estar em
+     *                      execução
+     */
+    private static void closeActiveClients(Set<Socket> activeClients) {
+        for (Socket client : activeClients) {
+            try {
+                client.close();
+            } catch (IOException e) {
+                log.debug("Error closing client socket", e);
+            }
+        }
+    }
+
+    /**
+     * Solicita a parada do gateway e aguarda a liberação dos recursos pelo
+     * {@code main}. Ao esgotar o prazo, tenta fechar os sockets ainda ativos.
+     *
+     * @param server          listener cujo fechamento interrompe a espera por
+     *                        conexões
+     * @param running         sinal compartilhado com o laço de aceitação, as
+     *                        sessões e
+     *                        o polling
+     * @param gatewayFinished sinal liberado ao término do bloco de recursos do
+     *                        gateway
+     * @param activeClients   sockets que podem precisar de fechamento ao esgotar
+     *                        o prazo
      */
     private static void shutdown(ServerSocket server, AtomicBoolean running,
             CountDownLatch gatewayFinished, Set<Socket> activeClients) {
         log.info("Shutdown requested for TCP Gateway");
-        //Define o indicador de execução do serviço como false.
         running.set(false);
-
         try {
-            //Fecha o socket de escuta do gateway.
             server.close();
         } catch (IOException e) {
             log.warn("Error closing TCP listener", e);
         }
 
-        //Tenta aguardar a conclusão das tarefas do gateway.
         try {
-            //Se o gateway não foi concluído dentro do tempo limite, avisa e fecha os sockets ativos.
-            if (!gatewayFinished.await(
-                    SHUTDOWN_TIMEOUT_SECONDS,
-                    TimeUnit.SECONDS
-            )) {
+            if (!gatewayFinished.await(SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 log.warn("Gateway shutdown timeout exceeded");
-
-                //Fecha os sockets ativos.
-                for (Socket client : activeClients) {
-                    try {
-                        //Fecha o socket.
-                        client.close();
-                    } catch (IOException e) {
-                        log.debug(
-                                "Error closing client socket",
-                                e
-                        );
-                    }
-                }
+                closeActiveClients(activeClients);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -268,26 +348,20 @@ public class TcpGateway {
      * com sessão registrada.
      *
      * @param dispatcher coordenador do envio de comandos
-     * @param sessions registro de sessões ativas do gateway
-     * @param running indicador compartilhado de execução do serviço
+     * @param sessions   registro de sessões ativas do gateway
+     * @param running    indicador compartilhado de execução do serviço
      */
     private static void poll(CommandDispatcher dispatcher,
             SessionRegistry sessions, AtomicBoolean running) {
-        //Se o serviço não estiver em execução, sai da função.
         if (!running.get()) {
             return;
         }
-        //Tenta recuperar e enviar os comandos.
         try {
-            //Recupera e envia os comandos.
             dispatcher.recover();
-            //Percorre as sessões online.
             for (DeviceSession session : sessions.onlineSessions()) {
-                //Se o serviço não estiver em execução, sai do loop.
                 if (!running.get()) {
                     break;
                 }
-                //Envia o próximo comando.
                 dispatcher.dispatchNext(session.tenantId(), session.deviceId());
             }
         } catch (java.sql.SQLException error) {

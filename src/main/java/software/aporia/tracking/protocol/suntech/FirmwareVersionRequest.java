@@ -34,6 +34,8 @@ public final class FirmwareVersionRequest {
      * @return verdadeiro se os bytes correspondem à consulta permitida para a identidade
      */
     public static boolean permits(String protocol, String identity, byte[] payload) {
+        // Comparar todos os bytes restringe a operação, além da sintaxe do comando:
+        // outra operação CMD válida não ganha permissão de envio por esse motivo.
         return "suntech".equals(protocol) && identity.matches("[0-9]{10}")
                 && Arrays.equals(encode(identity), payload);
     }

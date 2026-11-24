@@ -9,7 +9,14 @@ import java.time.Instant;
 import java.util.ArrayList;
 import software.aporia.tracking.core.Telemetry;
 
-/** Valida lotes AVL Codec 8 e 8E e extrai suas leituras GPS na ordem dos registros. */
+/**
+ * Valida lotes AVL Codec 8 e 8E e extrai suas leituras GPS na ordem dos registros.
+ *
+ * <p>{@link #decodePacket(byte[], String)} confere o envelope, o CRC e a contagem.
+ * Cada chamada a {@code readRecord()} avança o mesmo buffer pelos campos GPS e
+ * pelas entradas e saídas (I/O). Os codecs diferem na largura de identificadores
+ * e contagens; o Codec 8E também admite valores de tamanho variável.</p>
+ */
 public final class TeltonikaAvl implements TelemetryDecoder {
     /** Limite do pacote AVL em bytes, incluindo cabeçalho e CRC. */
     static final int MAX_PACKET = 1280;
@@ -43,16 +50,11 @@ public final class TeltonikaAvl implements TelemetryDecoder {
             if (packet.length > MAX_PACKET || data.getInt() != 0 || data.getInt() != packet.length - 12) {
                 throw invalid();
             }
+            // O pacote tem oito bytes de cabeçalho e quatro bytes finais de CRC.
             int end = packet.length - 4;
-            // O CRC-16/IBM cobre do identificador do codec até a repetição final da quantidade de registros.
-            int crc = 0;
-            for (int i = 8; i < end; i++) {
-                crc ^= Byte.toUnsignedInt(packet[i]);
-                for (int bit = 0; bit < 8; bit++) {
-                    crc = (crc & 1) == 0 ? crc >>> 1 : (crc >>> 1) ^ 0xA001;
-                }
-            }
-            if (data.getInt(end) != crc) throw invalid();
+            // O CRC verifica a integridade do corpo antes de interpretar seus campos.
+            if (data.getInt(end) != crc16(packet, 8, end)) throw invalid();
+            // Esconde o CRC das leituras seguintes: o parser só pode consumir o corpo.
             data.limit(end);
             int codec = Byte.toUnsignedInt(data.get());
             if (codec != 8 && codec != 0x8e) throw invalid();
@@ -61,11 +63,33 @@ public final class TeltonikaAvl implements TelemetryDecoder {
             if (count == 0) throw invalid();
             var readings = new ArrayList<Telemetry>(count);
             for (int i = 0; i < count; i++) readings.add(readRecord(data, extended, identity));
+            // A quantidade se repete no fim. Divergência ou sobra de bytes invalida o lote.
             if (Byte.toUnsignedInt(data.get()) != count || data.hasRemaining()) throw invalid();
             return new DecodedPacket(identity, readings, null);
         } catch (BufferUnderflowException | IndexOutOfBoundsException error) {
             throw invalid();
         }
+    }
+
+    /**
+     * Calcula o CRC-16/IBM do corpo, sem incluir cabeçalho nem os quatro bytes
+     * finais que armazenam o CRC recebido.
+     *
+     * @param packet bytes originais do lote
+     * @param start primeiro índice incluído no cálculo
+     * @param end índice final exclusivo
+     * @return valor de integridade calculado
+     */
+    private static int crc16(byte[] packet, int start, int end) {
+        int crc = 0;
+        for (int i = start; i < end; i++) {
+            crc ^= Byte.toUnsignedInt(packet[i]);
+            for (int bit = 0; bit < 8; bit++) {
+                // Processa um bit por vez; 0xA001 é o polinômio desta variante do CRC.
+                crc = (crc & 1) == 0 ? crc >>> 1 : (crc >>> 1) ^ 0xA001;
+            }
+        }
+        return crc;
     }
 
     /**
@@ -80,6 +104,7 @@ public final class TeltonikaAvl implements TelemetryDecoder {
     private static Telemetry readRecord(ByteBuffer data, boolean extended, String identity) {
         long millis = data.getLong();
         if (millis < 0 || millis > 253402300799999L || Byte.toUnsignedInt(data.get()) > 2) throw invalid();
+        // Coordenadas são inteiros com sete casas decimais implícitas.
         double lon = data.getInt() / 1e7;
         double lat = data.getInt() / 1e7;
         data.getShort(); // altitude
@@ -97,6 +122,8 @@ public final class TeltonikaAvl implements TelemetryDecoder {
             if (remaining < 0) throw invalid();
             for (int i = 0; i < count; i++) {
                 int id = field(data, extended);
+                // Somente o I/O 239 de um byte é interpretado como ignição aqui.
+                // Os demais valores continuam preservados no pacote bruto.
                 if (id == 239 && width == 1) {
                     int value = Byte.toUnsignedInt(data.get());
                     if (value <= 1) ignition = value == 1;
@@ -106,6 +133,7 @@ public final class TeltonikaAvl implements TelemetryDecoder {
             }
         }
         if (extended) {
+            // No grupo variável do Codec 8E, cada item informa seu próprio comprimento.
             int count = field(data, true);
             if (remaining != count) throw invalid();
             for (int i = 0; i < count; i++) {
@@ -125,6 +153,7 @@ public final class TeltonikaAvl implements TelemetryDecoder {
      * @return valor inteiro sem sinal consumido do buffer
      */
     private static int field(ByteBuffer data, boolean extended) {
+        // O Codec 8 usa um byte; o 8E usa dois. Ambos representam valores sem sinal.
         return extended ? Short.toUnsignedInt(data.getShort()) : Byte.toUnsignedInt(data.get());
     }
 

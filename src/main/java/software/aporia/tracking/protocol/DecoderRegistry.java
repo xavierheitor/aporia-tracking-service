@@ -45,6 +45,8 @@ public final class DecoderRegistry {
                 );
             }
         }
+        // O índice fica imutável para que a versão de um pacote sempre resolva
+        // para a mesma implementação durante a vida desta instância.
         this.decoders = Map.copyOf(registry);
 
     }

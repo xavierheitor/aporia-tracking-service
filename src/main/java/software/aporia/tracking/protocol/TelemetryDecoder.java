@@ -3,6 +3,10 @@ package software.aporia.tracking.protocol;
 /**
  * Define como transformar os bytes persistidos pelo gateway em leituras e respostas
  * interpretáveis pelo worker.
+ *
+ * <p>Recebe um pacote já enquadrado, não fragmentos TCP. A versão identifica a
+ * interpretação dos bytes persistidos e permite ao worker selecionar o decoder
+ * correto mesmo quando o processamento acontece depois da recepção.</p>
  */
 public interface TelemetryDecoder {
 

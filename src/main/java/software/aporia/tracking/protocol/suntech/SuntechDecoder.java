@@ -15,6 +15,10 @@ import software.aporia.tracking.core.Telemetry;
 /**
  * Interpreta mensagens Suntech, incluindo posições com mapa de campos, heartbeats e respostas com
  * telemetria embutida.
+ *
+ * <p>{@link #decodePacket(byte[], String)} determina os conteúdos presentes e
+ * monta o resultado do worker. {@link #decode(byte[])} interpreta uma leitura;
+ * {@code decodePosition()} usa o mapa para localizar apenas os campos transmitidos.</p>
  */
 public class SuntechDecoder implements TelemetryDecoder {
 
@@ -63,8 +67,12 @@ public class SuntechDecoder implements TelemetryDecoder {
      */
     @Override
     public DecodedPacket decodePacket(byte[] frame, String registeredIdentity) {
+        // Suntech traz a identidade no próprio quadro; o worker compara o resultado
+        // com o cadastro. Teltonika obtém essa identidade do contexto de login.
         String identity = protocol.identify(frame);
         var plan = new SuntechMessageRouter().route(frame);
+        // Heartbeat gera uma leitura sem posição; uma resposta simples gera lista vazia.
+        // Uma resposta com posição pode produzir telemetria e responseType ao mesmo tempo.
         var readings = plan.processTelemetry() || plan.processHeartbeat()
                 ? java.util.List.of(decode(frame)) : java.util.List.<Telemetry>of();
         String response = plan.processCommandResponse() ? new String(frame, 0, 3, StandardCharsets.US_ASCII) : null;
@@ -120,6 +128,7 @@ public class SuntechDecoder implements TelemetryDecoder {
                         && ("STT".equals(parts[1])
                         || "ASTT".equals(parts[1]))) {
 
+                    // Retira apenas RES para reutilizar a interpretação de STT/ASTT.
                     String[] embedded
                             = java.util.Arrays.copyOfRange(
                                     parts,
@@ -159,6 +168,8 @@ public class SuntechDecoder implements TelemetryDecoder {
 
         int map = Integer.parseInt(parts[2], 16);
 
+        // & testa bits: o bit 0 exige o próprio mapa; ~ inverte a máscara para
+        // detectar bits fora do conjunto que esta implementação aceita.
         if ((map & 1) == 0 || (map & ~0xBFFFFF) != 0) {
             throw invalid("UNSUPPORTED_MAP");
         }
@@ -168,6 +179,7 @@ public class SuntechDecoder implements TelemetryDecoder {
 
         // Cada bit presente consome um campo. Um bit ausente não ocupa posição no texto recebido.
         for (int bit = 0; bit < FIELDS.length; bit++) {
+            // 1 << bit cria a máscara de uma posição: 1, 2, 4, 8, ...
             if ((map & (1 << bit)) != 0) {
                 if (index >= parts.length) {
                     throw invalid("INVALID_FIELD_COUNT");
@@ -176,6 +188,8 @@ public class SuntechDecoder implements TelemetryDecoder {
             }
         }
 
+        // O bit 23 anuncia outro mapa. Cada bit ligado nele ocupa mais um campo;
+        // esses valores são contados, mas ainda não viram propriedades de Telemetry.
         if ((map & 0x800000) != 0) {
             if (index >= parts.length || !parts[index].matches("[0-9a-fA-F]{8}")) throw invalid("INVALID_EXTENSION_MAP");
             int fields = Long.bitCount(Long.parseLong(parts[index++], 16));
@@ -202,6 +216,7 @@ public class SuntechDecoder implements TelemetryDecoder {
             }
 
             try {
+                // Monta um instante UTC; o sufixo Z evita depender do fuso da JVM.
                 String iso = date.substring(0, 4) + "-"
                         + date.substring(4, 6) + "-"
                         + date.substring(6, 8) + "T"
@@ -244,9 +259,11 @@ public class SuntechDecoder implements TelemetryDecoder {
             if (!inputs.matches("[01]{8}")) {
                 throw invalid("INVALID_INPUTS");
             }
+            // O bit menos significativo das entradas digitais representa a ignição.
             ignition = (Integer.parseInt(inputs, 2) & 1) == 1;
         }
 
+        // null significa ausência de coordenadas; false indica posição sem fix válido.
         Boolean validFix = latitude == null
                 ? null
                 : fix != null && fix == 1;

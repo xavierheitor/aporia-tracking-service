@@ -3,6 +3,10 @@ package software.aporia.tracking.protocol;
 /**
  * Define a detecção e a abertura de sessões de um protocolo e a descrição de equipamentos a
  * partir de quadros reconhecidos.
+ *
+ * <p>O adaptador pode ser compartilhado entre conexões. O estado que muda a cada
+ * leitura deve ficar na sessão criada por {@link #newSession()}, exclusiva do socket.
+ * A detecção pelo primeiro byte seleciona um candidato; não valida a mensagem inteira.</p>
  */
 public interface ProtocolAdapter {
 

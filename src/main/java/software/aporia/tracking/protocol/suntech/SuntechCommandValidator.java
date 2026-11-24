@@ -10,6 +10,9 @@ import java.util.regex.Pattern;
 /**
  * Valida a sintaxe de comandos Suntech e confere o destinatário quando o chamador informa a
  * identidade esperada.
+ *
+ * <p>Validar CMD/PRG não autoriza executar qualquer operação dessa gramática.
+ * O dispatcher aplica uma política mais restrita antes da escrita TCP.</p>
  */
 public final class SuntechCommandValidator
         implements CommandValidator {
@@ -93,6 +96,7 @@ public final class SuntechCommandValidator
                 StandardCharsets.US_ASCII
         );
 
+        // Mantém os campos vazios para rejeitar um parâmetro omitido no final.
         String[] parts = command.split(";", -1);
 
         if (parts.length < 4) {

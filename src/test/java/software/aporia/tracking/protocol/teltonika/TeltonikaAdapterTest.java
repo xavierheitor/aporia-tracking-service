@@ -41,4 +41,20 @@ class TeltonikaAdapterTest {
         var error = assertThrows(IllegalArgumentException.class, () -> session.receive(corrupt));
         assertEquals("INVALID_TELTONIKA_AVL", error.getMessage());
     }
+    /** Login e dois lotes na mesma leitura devem preservar a ordem e os bytes de cada quadro. */
+    @org.junit.jupiter.api.Test
+    void shouldReceiveLoginAndConsecutiveBatchesInOneRead() {
+        var hex = HexFormat.of();
+        String wire = "000000000000003608010000016B40D8EA30010000000000000000000000000000000105021503010101425E0F01F10000601A014E0000000000000000010000C7CF";
+        var session = new TeltonikaAdapter().newSession();
+        var frames = session.receive(hex.parseHex("000F333536333037303432343431303133" + wire + wire));
+        assertEquals(3, frames.size());
+        assertTrue(frames.getFirst().isLogin());
+        for (var frame : frames.subList(1, frames.size())) {
+            assertEquals("356307042441013", frame.deviceIdentity());
+            assertArrayEquals(hex.parseHex(wire), frame.payload());
+            assertArrayEquals(new byte[]{0, 0, 0, 1}, session.acknowledge(frame));
+        }
+    }
+
 }
