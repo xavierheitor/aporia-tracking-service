@@ -1,7 +1,10 @@
 
 package software.aporia.tracking.command;
 
-/** Define os estados persistidos do comando e as transições aceitas pelo domínio. */
+/**
+ * Define os estados persistidos do comando e as transições aceitas pelo
+ * domínio.
+ */
 public enum DeviceCommandStatus {
 
     /** A solicitação está disponível na fila até o prazo de expiração. */
@@ -60,21 +63,21 @@ public enum DeviceCommandStatus {
 
             case QUEUED ->
                 next == SENDING
-                || next == TIMEOUT
-                || next == CANCELLED;
+                        || next == TIMEOUT
+                        || next == CANCELLED;
 
             case SENDING ->
                 next == TRANSMITTING
-                || next == DELIVERY_FAILED
-                || next == DELIVERY_UNKNOWN;
+                        || next == DELIVERY_FAILED
+                        || next == DELIVERY_UNKNOWN;
 
             case TRANSMITTING ->
                 next == SENT
-                || next == DELIVERY_UNKNOWN;
+                        || next == DELIVERY_UNKNOWN;
 
             case SENT ->
                 next == RESPONDED
-                || next == TIMEOUT;
+                        || next == TIMEOUT;
 
             case TIMEOUT, DELIVERY_UNKNOWN ->
                 next == RESPONDED;
@@ -91,8 +94,7 @@ public enum DeviceCommandStatus {
      * @return estado correspondente ao valor persistido
      */
     public static DeviceCommandStatus fromDatabase(
-            String value
-    ) {
+            String value) {
 
         for (DeviceCommandStatus status : values()) {
 
@@ -102,7 +104,6 @@ public enum DeviceCommandStatus {
         }
 
         throw new IllegalArgumentException(
-                "UNKNOWN_COMMAND_STATUS: " + value
-        );
+                "UNKNOWN_COMMAND_STATUS: " + value);
     }
 }

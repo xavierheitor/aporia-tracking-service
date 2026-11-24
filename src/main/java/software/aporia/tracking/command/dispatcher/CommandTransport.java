@@ -1,17 +1,19 @@
 package software.aporia.tracking.command.dispatcher;
 
-import java.util.Optional;
 import java.io.IOException;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Localiza o canal de saída de um equipamento dentro do tenant para que o dispatcher possa
+ * Localiza o canal de saída de um equipamento dentro do tenant para que o
+ * dispatcher possa
  * escrever na sessão escolhida.
  */
 public interface CommandTransport {
 
     /**
-     * Sessão selecionada para uma tentativa. Sua identidade e protocolo permitem conferir o
+     * Sessão selecionada para uma tentativa. Sua identidade e protocolo permitem
+     * conferir o
      * destino antes da escrita.
      */
     interface Endpoint {
@@ -24,14 +26,17 @@ public interface CommandTransport {
          * @return identificador do protocolo desta implementação
          */
         String protocol();
+
         /**
          * Informa a identidade do rastreador associado à conexão.
          *
          * @return identidade do equipamento no protocolo
          */
         String identity();
+
         /**
-         * Escreve os bytes do comando no canal. Uma falha de E/S pode ocorrer após uma escrita
+         * Escreve os bytes do comando no canal. Uma falha de E/S pode ocorrer após uma
+         * escrita
          * parcial.
          *
          * @param payload bytes do conteúdo da mensagem
@@ -41,7 +46,8 @@ public interface CommandTransport {
     }
 
     /**
-     * Busca o canal disponível para o par tenant e dispositivo. Um resultado vazio indica
+     * Busca o canal disponível para o par tenant e dispositivo. Um resultado vazio
+     * indica
      * equipamento offline.
      *
      * @param tenantId identificador do tenant que delimita a operação
@@ -59,24 +65,23 @@ public interface CommandTransport {
      */
     default boolean isConnected(
             UUID tenantId,
-            UUID deviceId
-    ) {
+            UUID deviceId) {
         return connect(tenantId, deviceId).isPresent();
     }
 
     /**
-     * Escreve os bytes do comando no canal. Uma falha de E/S pode ocorrer após uma escrita parcial.
+     * Escreve os bytes do comando no canal. Uma falha de E/S pode ocorrer após uma
+     * escrita parcial.
      *
      * @param tenantId identificador do tenant que delimita a operação
      * @param deviceId identificador do equipamento cadastrado
-     * @param payload bytes do conteúdo da mensagem
+     * @param payload  bytes do conteúdo da mensagem
      * @throws IOException se a operação de entrada ou saída falhar
      */
     default void send(
             UUID tenantId,
             UUID deviceId,
-            byte[] payload
-    ) throws IOException {
+            byte[] payload) throws IOException {
         connect(tenantId, deviceId).orElseThrow(() -> new IOException("DEVICE_SESSION_NOT_AVAILABLE"))
                 .send(payload);
     }

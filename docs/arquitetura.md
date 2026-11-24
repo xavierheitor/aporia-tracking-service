@@ -42,6 +42,8 @@ Ao encerrar, o gateway interrompe o aceite e fecha sockets para liberar as leitu
 
 Cada worker considera apenas as versões presentes no seu registro de decodificadores. Um pacote incompatível permanece pendente, com seus bytes e tentativas preservados, até que uma instância compatível o processe. O worker seleciona uma linha `pending` com `available_at` vencido. O PostgreSQL usa `FOR UPDATE OF rp SKIP LOCKED` para que consumidores concorrentes possam avançar sobre linhas diferentes. O worker verifica o SHA-256, localiza a versão do decodificador gravada na ingestão e compara a identidade interpretada com o cadastro.
 
+O `TrackingWorker` decide validação, decodificação e política de retentativa. O `PacketProcessingRepository`, em `storage.packet`, reserva o pacote, mantém a conexão e coordena os repositórios existentes na mesma transação; SQL, savepoint, commit e rollback ficam nessa camada. O resultado só retorna ao worker após o commit, antes de qualquer log de conclusão.
+
 Uma transação cobre a mensagem processada, as posições, a atualização de última posição, os eventos de outbox, as respostas aplicáveis e o estado do pacote. Para cada leitura com horário, coordenadas e fix válido, `assignments` resolve o ativo pela vigência **no horário da leitura**. Uma posição atrasada entra no histórico e só avança `last_positions` se for mais recente. O PostGIS recebe longitude e latitude nessa ordem, em SRID 4326.
 
 | Situação | Efeito observável no banco |
