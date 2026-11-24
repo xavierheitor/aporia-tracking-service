@@ -14,30 +14,6 @@ import java.util.UUID;
 public final class DeviceCommandRepository {
 
     /**
-     * Insere uma solicitação legada sem auditoria de solicitante. O dispatcher exige a entrada
-     * auditada para transmitir.
-     *
-     * @param connection conexão JDBC usada pelo chamador
-     * @param tenantId identificador do tenant que delimita a operação
-     * @param deviceId identificador do equipamento cadastrado
-     * @param protocol identificador do protocolo do equipamento
-     * @param payload bytes do conteúdo da mensagem
-     * @param expiresAt instante limite da solicitação
-     * @return UUID do comando inserido
-     * @throws SQLException se a operação JDBC falhar
-     */
-    public UUID enqueue(
-            Connection connection,
-            UUID tenantId,
-            UUID deviceId,
-            String protocol,
-            byte[] payload,
-            Instant expiresAt
-    ) throws SQLException {
-        return enqueue(connection, tenantId, deviceId, protocol, payload, expiresAt, null, null);
-    }
-
-    /**
      * Sob o bloqueio do dispositivo, reaproveita a requisição idempotente ou cria a consulta de
      * firmware auditada na transação aberta.
      *
@@ -53,6 +29,9 @@ public final class DeviceCommandRepository {
      */
     public Optional<UUID> enqueueFirmwareVersion(Connection connection, UUID tenantId, UUID deviceId,
                                                  UUID principalId, UUID requestKey) throws SQLException {
+        Objects.requireNonNull(connection);
+        Objects.requireNonNull(tenantId);
+        Objects.requireNonNull(deviceId);
         Objects.requireNonNull(principalId);
         Objects.requireNonNull(requestKey);
         if (connection.getAutoCommit()) throw new IllegalStateException("ENQUEUE_REQUIRES_TRANSACTION");
@@ -184,51 +163,6 @@ public final class DeviceCommandRepository {
         }
 
         return commandId;
-    }
-
-    /**
-     * Consulta o estado do comando apenas no tenant informado.
-     *
-     * @param connection conexão JDBC usada pelo chamador
-     * @param tenantId identificador do tenant que delimita a operação
-     * @param commandId identificador do comando na fila
-     * @return estado persistido, se o comando existir no tenant
-     * @throws SQLException se a operação JDBC falhar
-     */
-    public Optional<String> findStatus(
-            Connection connection,
-            UUID tenantId,
-            UUID commandId
-    ) throws SQLException {
-
-        Objects.requireNonNull(connection);
-        Objects.requireNonNull(tenantId);
-        Objects.requireNonNull(commandId);
-
-        String sql = """
-        SELECT status
-        FROM device_commands
-        WHERE tenant_id = ?
-          AND id = ?
-        """;
-
-        try (PreparedStatement statement
-                = connection.prepareStatement(sql)) {
-
-            statement.setObject(1, tenantId);
-            statement.setObject(2, commandId);
-
-            try (ResultSet result = statement.executeQuery()) {
-
-                if (!result.next()) {
-                    return Optional.empty();
-                }
-
-                return Optional.of(
-                        result.getString("status")
-                );
-            }
-        }
     }
 
 }

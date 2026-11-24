@@ -3,8 +3,11 @@ package software.aporia.tracking.storage;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
-/** Configura o pool JDBC usado pelos processos a partir das variáveis de ambiente do serviço. */
-public final class Database{
+/**
+ * Configura o pool JDBC usado pelos processos a partir das variáveis de
+ * ambiente do serviço.
+ */
+public final class Database {
 
     /**
      * Concentra a criação do pool JDBC no método de fábrica.
@@ -17,11 +20,10 @@ public final class Database{
      *
      * @return pool de conexões configurado
      */
-    public static HikariDataSource createDataSource(){
-       String url = System.getenv().getOrDefault(
-            "TRACKING_DB_URL",
-            "jdbc:postgresql://localhost:55432/aporia_tracking_v2"
-        );
+    public static HikariDataSource createDataSource() {
+        String url = System.getenv().getOrDefault(
+                "TRACKING_DB_URL",
+                "jdbc:postgresql://localhost:55432/aporia_tracking_v2");
 
         String username = System.getenv("TRACKING_DB_USER");
         if (username == null || username.isBlank()) {
@@ -32,8 +34,7 @@ public final class Database{
 
         if (password == null || password.isBlank()) {
             throw new IllegalStateException(
-                "TRACKING_DB_PASSWORD is required"
-            );
+                    "TRACKING_DB_PASSWORD is required");
         }
 
         HikariConfig config = new HikariConfig();

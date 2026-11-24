@@ -28,19 +28,7 @@ public class JdbcPacketIngestion {
     }
 
     /**
-     * Persiste o quadro e retorna seu UUID após o commit. Quando fornecidos, tenant e dispositivo
-     * restringem a revalidação do cadastro.
-     *
-     * @param frame quadro recebido para interpretação ou ingestão
-     * @return UUID da nova recepção
-     */
-    public UUID accept(ReceivedFrame frame) {
-        return accept(frame, null, null);
-    }
-
-    /**
-     * Persiste o quadro e retorna seu UUID após o commit. Quando fornecidos, tenant e dispositivo
-     * restringem a revalidação do cadastro.
+     * Persiste o quadro no tenant e dispositivo da sessão e retorna seu UUID após o commit.
      *
      * @param frame quadro recebido para interpretação ou ingestão
      * @param expectedTenant identificador esperado pela sessão para restringir a consulta
@@ -48,7 +36,8 @@ public class JdbcPacketIngestion {
      * @return UUID da nova recepção
      */
     public UUID accept(ReceivedFrame frame, UUID expectedTenant, UUID expectedDevice) {
-        if ((expectedTenant == null) != (expectedDevice == null)) throw new IllegalArgumentException("INVALID_SCOPE");
+        java.util.Objects.requireNonNull(expectedTenant, "expectedTenant");
+        java.util.Objects.requireNonNull(expectedDevice, "expectedDevice");
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
 
@@ -78,8 +67,8 @@ public class JdbcPacketIngestion {
      * Revalida o cadastro e insere o quadro bruto sob o mesmo bloqueio compartilhado.
      * @param connection conexão com transação aberta pelo chamador
      * @param frame quadro completo recebido pelo gateway
-     * @param expectedTenant tenant da sessão, ou nulo na ingestão sem sessão vinculada
-     * @param expectedDevice dispositivo da sessão, ou nulo junto com o tenant
+     * @param expectedTenant tenant obrigatório da sessão
+     * @param expectedDevice dispositivo obrigatório da sessão
      * @return identificador da recepção, confirmado pelo chamador ao concluir a transação
      * @throws SQLException se a consulta ou a gravação falhar
      */
@@ -94,7 +83,7 @@ public class JdbcPacketIngestion {
             WHERE protocol = ?
               AND identity = ?
               AND enabled = true
-              AND (CAST(? AS uuid) IS NULL OR (tenant_id=? AND id=?))
+              AND tenant_id=? AND id=?
             FOR SHARE
             """;
 
@@ -107,8 +96,7 @@ public class JdbcPacketIngestion {
             statement.setString(1, frame.protocol());
             statement.setString(2, frame.identity());
             statement.setObject(3, expectedTenant);
-            statement.setObject(4, expectedTenant);
-            statement.setObject(5, expectedDevice);
+            statement.setObject(4, expectedDevice);
 
             try (ResultSet result = statement.executeQuery()) {
                 if (!result.next()) {

@@ -22,6 +22,7 @@ import software.aporia.tracking.storage.device.JdbcDeviceLookup;
 import software.aporia.tracking.storage.device.RegisteredDevice;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
+import software.aporia.tracking.support.CommandTestFixtures;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static software.aporia.tracking.command.dispatcher.CommandDispatcher.DispatchResult.*;
@@ -110,7 +111,7 @@ class CommandDispatcherIT {
      */
     private UUID enqueue(DataSource db, TestFixtures device, byte[] payload) throws Exception {
         try (var c = db.getConnection()) {
-            return new DeviceCommandRepository().enqueue(c, device.tenantId(), device.deviceId(),
+            return CommandTestFixtures.enqueue(c, device.tenantId(), device.deviceId(),
                     "suntech", payload, Instant.now().plusSeconds(300));
         }
     }
@@ -144,7 +145,7 @@ class CommandDispatcherIT {
      */
     private String status(DataSource db, TestFixtures device, UUID id) throws Exception {
         try (var c = db.getConnection()) {
-            return new DeviceCommandRepository().findStatus(c, device.tenantId(), id).orElseThrow();
+            return CommandTestFixtures.findStatus(c, device.tenantId(), id).orElseThrow();
         }
     }
 

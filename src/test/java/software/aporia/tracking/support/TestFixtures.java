@@ -20,6 +20,12 @@ public final class TestFixtures implements AutoCloseable {
     /** Ativo associado ao equipamento da fixture. */
     private final UUID assetId = UUID.randomUUID();
 
+    /** Token de sessão do cadastro, disponível aos testes da reserva com identidade completa. */
+    private final UUID sessionToken = UUID.randomUUID();
+
+    /** @return token publicado no cadastro do equipamento de teste */
+    public UUID sessionToken() { return sessionToken; }
+
     /** Identidade que acompanha os quadros do equipamento. */
     private final String deviceIdentity;
 
@@ -76,14 +82,15 @@ public final class TestFixtures implements AutoCloseable {
                         connection,
                         """
                     INSERT INTO devices (
-                        id, tenant_id, protocol, identity
+                        id, tenant_id, protocol, identity, command_session_token
                     )
-                    VALUES (?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
                         deviceId,
                         tenantId,
                         "suntech",
-                        deviceIdentity
+                        deviceIdentity,
+                        sessionToken
                 );
 
                 execute(

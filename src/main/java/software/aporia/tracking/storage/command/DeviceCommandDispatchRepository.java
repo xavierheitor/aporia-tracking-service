@@ -9,20 +9,21 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Reserva comandos e condiciona autorização e conclusão ao token da tentativa, para impedir
- * atualizações por um emissor obsoleto.
+ * Reserva comandos e condiciona autorização e conclusão ao token da tentativa,
+ * para impedir atualizações por um emissor obsoleto.
  */
 public final class DeviceCommandDispatchRepository {
 
     /**
-     * Reserva identificada pelo token exigido nas transições seguintes. Os bytes são copiados
-     * para preservar a tentativa.
-     * @param id UUID do comando reservado
-     * @param tenantId tenant da reserva
-     * @param deviceId equipamento de destino
-     * @param protocol protocolo de saída
-     * @param payload bytes reservados para a escrita
-     * @param attempts número da tentativa
+     * Reserva identificada pelo token exigido nas transições seguintes. Os bytes
+     * são copiados para preservar a tentativa.
+     *
+     * @param id         UUID do comando reservado
+     * @param tenantId   tenant da reserva
+     * @param deviceId   equipamento de destino
+     * @param protocol   protocolo de saída
+     * @param payload    bytes reservados para a escrita
+     * @param attempts   número da tentativa
      * @param claimToken token exigido nas transições condicionais
      */
     public record ClaimedCommand(
@@ -32,18 +33,18 @@ public final class DeviceCommandDispatchRepository {
             String protocol,
             byte[] payload,
             int attempts,
-            UUID claimToken
-            ) {
+            UUID claimToken) {
 
         /**
-         * Protege os bytes reservados contra alterações entre a reserva e a autorização.
+         * Protege os bytes reservados contra alterações entre a reserva e a
+         * autorização.
          *
-         * @param id identificador do registro consultado
-         * @param tenantId identificador do tenant que delimita a operação
-         * @param deviceId identificador do equipamento cadastrado
-         * @param protocol identificador do protocolo do equipamento
-         * @param payload bytes do conteúdo da mensagem
-         * @param attempts número de tentativas associado à operação
+         * @param id         identificador do registro consultado
+         * @param tenantId   identificador do tenant que delimita a operação
+         * @param deviceId   identificador do equipamento cadastrado
+         * @param protocol   identificador do protocolo do equipamento
+         * @param payload    bytes do conteúdo da mensagem
+         * @param attempts   número de tentativas associado à operação
          * @param claimToken token que identifica a reserva vigente
          */
         public ClaimedCommand {
@@ -68,8 +69,8 @@ public final class DeviceCommandDispatchRepository {
         }
 
         /**
-         * Resume a reserva para diagnóstico, expondo o tamanho do payload e omitindo seu conteúdo
-         * e o token.
+         * Resume a reserva para diagnóstico, expondo o tamanho do payload e omitindo
+         * seu conteúdo e o token.
          *
          * @return resumo da reserva sem expor os bytes nem o token
          */
@@ -86,26 +87,12 @@ public final class DeviceCommandDispatchRepository {
     }
 
     /**
-     * Reserva um comando elegível na transação do chamador.
+     * Registra a escrita local concluída se a tentativa ainda detiver o token e
+     * estiver em transmissão.
      *
      * @param connection conexão JDBC usada pelo chamador
-     * @return comando reservado com seu token, ou vazio se nenhum for elegível
-     * @throws SQLException se a operação JDBC falhar
-     */
-    public Optional<ClaimedCommand> claimNext(
-            Connection connection
-    ) throws SQLException {
-
-        return claim(connection, null, null, null);
-    }
-
-    /**
-     * Registra a escrita local concluída se a tentativa ainda detiver o token e estiver em
-     * transmissão.
-     *
-     * @param connection conexão JDBC usada pelo chamador
-     * @param tenantId identificador do tenant que delimita a operação
-     * @param commandId identificador do comando na fila
+     * @param tenantId   identificador do tenant que delimita a operação
+     * @param commandId  identificador do comando na fila
      * @param claimToken token que identifica a reserva vigente
      * @return verdadeiro se a transição condicional alterou a linha da tentativa
      * @throws SQLException se a operação JDBC falhar
@@ -114,8 +101,7 @@ public final class DeviceCommandDispatchRepository {
             Connection connection,
             UUID tenantId,
             UUID commandId,
-            UUID claimToken
-    ) throws SQLException {
+            UUID claimToken) throws SQLException {
 
         Objects.requireNonNull(connection);
         Objects.requireNonNull(tenantId);
@@ -123,17 +109,16 @@ public final class DeviceCommandDispatchRepository {
         Objects.requireNonNull(claimToken);
 
         String sql = """
-        UPDATE device_commands
-        SET status = 'sent',
-            sent_at = NOW(), claim_token = NULL
-        WHERE tenant_id = ?
-          AND id = ?
-          AND claim_token = ?
-          AND status = 'transmitting'
-        """;
+                UPDATE device_commands
+                SET status = 'sent',
+                    sent_at = NOW(), claim_token = NULL
+                WHERE tenant_id = ?
+                  AND id = ?
+                  AND claim_token = ?
+                  AND status = 'transmitting'
+                """;
 
-        try (PreparedStatement statement
-                = connection.prepareStatement(sql)) {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
 
             statement.setObject(1, tenantId);
             statement.setObject(2, commandId);
@@ -144,107 +129,84 @@ public final class DeviceCommandDispatchRepository {
     }
 
     /**
-     * Condiciona o início da transmissão ao estado da reserva e ao token da tentativa.
+     * Condiciona o início da transmissão ao estado da reserva e ao token da
+     * tentativa, com proprietário, identidade da sessão e auditoria obrigatórios.
+     * O chamador deve confirmar a transação antes de escrever no socket.
      *
-     * @param connection conexão JDBC usada pelo chamador
-     * @param tenantId identificador do tenant que delimita a operação
-     * @param commandId identificador do comando na fila
-     * @param claimToken token que identifica a reserva vigente
-     * @return verdadeiro se a transição condicional alterou a linha da tentativa
-     * @throws SQLException se a operação JDBC falhar
-     */
-    public boolean authorizeTransmission(
-            Connection connection,
-            UUID tenantId,
-            UUID commandId,
-            UUID claimToken
-    ) throws SQLException {
-
-        return authorizeTransmission(connection, tenantId, commandId, claimToken, null, null);
-    }
-
-    /**
-     * Condiciona o início da transmissão ao estado da reserva e ao token da tentativa.
-     *
-     * @param connection conexão JDBC usada pelo chamador
-     * @param tenantId identificador do tenant que delimita a operação
-     * @param commandId identificador do comando na fila
-     * @param claimToken token que identifica a reserva vigente
-     * @param owner UUID do proprietário da tentativa, ou nulo na autorização legada
+     * @param connection      conexão JDBC usada pelo chamador
+     * @param tenantId        identificador do tenant que delimita a operação
+     * @param commandId       identificador do comando na fila
+     * @param claimToken      token que identifica a reserva vigente
+     * @param owner           UUID do proprietário da tentativa
      * @param sessionIdentity identidade de referência do equipamento
      * @return verdadeiro se a transição condicional alterou a linha da tentativa
-     * @throws SQLException se a operação JDBC falhar
+     * @throws NullPointerException se qualquer argumento obrigatório for nulo
+     * @throws SQLException         se a operação JDBC falhar
      */
     public boolean authorizeTransmission(Connection connection, UUID tenantId, UUID commandId,
-                                         UUID claimToken, UUID owner, String sessionIdentity) throws SQLException {
+            UUID claimToken, UUID owner, String sessionIdentity) throws SQLException {
         Objects.requireNonNull(connection);
         Objects.requireNonNull(tenantId);
         Objects.requireNonNull(commandId);
         Objects.requireNonNull(claimToken);
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(sessionIdentity, "sessionIdentity");
 
         String sql = """
-        UPDATE device_commands
-        SET status = 'transmitting',
-            transmission_started_at = NOW(), dispatch_owner = ?
-        WHERE tenant_id = ?
-          AND id = ?
-          AND claim_token = ?
-          AND status = 'sending'
-          AND expires_at > clock_timestamp()
-          AND (CAST(? AS uuid) IS NULL OR (requested_by IS NOT NULL AND request_key IS NOT NULL))
-          AND EXISTS (SELECT 1 FROM devices d WHERE d.id = device_commands.device_id
-                      AND d.tenant_id = device_commands.tenant_id AND d.enabled
-                      AND d.protocol = device_commands.protocol
-                      AND (CAST(? AS varchar) IS NULL OR d.identity=?))
-        """;
+                UPDATE device_commands
+                SET status = 'transmitting',
+                    transmission_started_at = NOW(), dispatch_owner = ?
+                WHERE tenant_id = ?
+                  AND id = ?
+                  AND claim_token = ?
+                  AND status = 'sending'
+                  AND expires_at > clock_timestamp()
+                  AND requested_by IS NOT NULL AND request_key IS NOT NULL
+                  AND EXISTS (SELECT 1 FROM devices d WHERE d.id = device_commands.device_id
+                              AND d.tenant_id = device_commands.tenant_id AND d.enabled
+                              AND d.protocol = device_commands.protocol
+                              AND d.identity=?)
+                """;
 
-        try (PreparedStatement statement
-                = connection.prepareStatement(sql)) {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
 
             statement.setObject(1, owner);
             statement.setObject(2, tenantId);
             statement.setObject(3, commandId);
             statement.setObject(4, claimToken);
-            statement.setObject(5, owner);
-            statement.setString(6, sessionIdentity);
-            statement.setString(7, sessionIdentity);
+            statement.setString(5, sessionIdentity);
 
             return statement.executeUpdate() == 1;
         }
     }
 
     /**
-     * Restringe a reserva ao tenant e dispositivo cuja sessão o dispatcher localizou.
+     * Reserva para a conexão reconhecida pelo banco e mantém o cadastro bloqueado
+     * até o commit. Tenant, dispositivo e token são obrigatórios.
      *
-     * @param connection conexão JDBC usada pelo chamador
-     * @param tenantId identificador do tenant que delimita a operação
-     * @param deviceId identificador do equipamento cadastrado
-     * @return comando reservado com seu token, ou vazio se nenhum for elegível
+     * @param connection conexão da transação que manterá a reserva
+     * @param tenantId tenant proprietário do dispositivo
+     * @param deviceId dispositivo cuja sessão pode receber o comando
+     * @param sessionToken token da conexão admitida no cadastro
+     * @return reserva elegível, ou vazio se não houver comando para essa sessão
      * @throws SQLException se a operação JDBC falhar
+     * @throws IllegalStateException se a conexão estiver em autocommit
+     * @throws NullPointerException se um identificador obrigatório for nulo
      */
-    public Optional<ClaimedCommand> claimNextForDevice(
-            Connection connection,
-            UUID tenantId,
-            UUID deviceId
-    ) throws SQLException {
-
-        return claim(connection, Objects.requireNonNull(tenantId), Objects.requireNonNull(deviceId), null);
-    }
-
-    /** Reserva para a conexão reconhecida pelo banco e mantém o cadastro bloqueado até o commit. */
     public Optional<ClaimedCommand> claimForSession(Connection connection, UUID tenantId, UUID deviceId,
-                                                   UUID sessionToken) throws SQLException {
+            UUID sessionToken) throws SQLException {
         return claim(connection, Objects.requireNonNull(tenantId), Objects.requireNonNull(deviceId),
                 Objects.requireNonNull(sessionToken));
     }
 
     /**
-     * Bloqueia o dispositivo elegível e verifica novamente a fila antes de atribuir o token de
+     * Bloqueia o dispositivo elegível e verifica novamente a fila antes de atribuir
+     * o token de
      * reserva.
      *
      * @param connection conexão JDBC usada pelo chamador
-     * @param tenantId identificador do tenant que delimita a operação
-     * @param deviceId identificador do equipamento cadastrado
+     * @param tenantId   identificador do tenant que delimita a operação
+     * @param deviceId   identificador do equipamento cadastrado
      * @return comando reservado com seu token, ou vazio se nenhum for elegível
      * @throws SQLException se a operação JDBC falhar
      */
@@ -252,51 +214,50 @@ public final class DeviceCommandDispatchRepository {
             throws SQLException {
         if (connection.getAutoCommit()) {
             throw new IllegalStateException(
-                    "CLAIM_REQUIRES_TRANSACTION"
-            );
+                    "CLAIM_REQUIRES_TRANSACTION");
         }
 
         String select = """
-            SELECT c.id
-            FROM device_commands c
-            JOIN devices d
-              ON d.tenant_id = c.tenant_id
-             AND d.id = c.device_id
-            WHERE %s %s c.status = 'queued'
-              AND c.available_at <= NOW()
-              AND c.expires_at > NOW()
-              AND d.enabled = true
-              AND d.protocol = c.protocol
-              AND NOT EXISTS (SELECT 1 FROM device_commands active
-                              WHERE active.tenant_id = c.tenant_id AND active.device_id = c.device_id
-                                AND active.status IN ('sending', 'transmitting', 'sent'))
-            ORDER BY
-                c.available_at,
-                c.created_at,
-                c.id
-            FOR UPDATE OF c, d SKIP LOCKED
-            LIMIT 1
-        """.formatted(deviceId == null ? "" : "c.tenant_id = ? AND c.device_id = ? AND",
-                sessionToken == null ? "" : "d.command_session_token = ? AND");
+                    SELECT c.id
+                    FROM device_commands c
+                    JOIN devices d
+                      ON d.tenant_id = c.tenant_id
+                     AND d.id = c.device_id
+                    WHERE c.tenant_id = ? AND c.device_id = ? AND d.command_session_token = ?
+                      AND c.status = 'queued'
+                      AND c.available_at <= NOW()
+                      AND c.expires_at > NOW()
+                      AND d.enabled = true
+                      AND d.protocol = c.protocol
+                      AND NOT EXISTS (SELECT 1 FROM device_commands active
+                                      WHERE active.tenant_id = c.tenant_id AND active.device_id = c.device_id
+                                        AND active.status IN ('sending', 'transmitting', 'sent'))
+                    ORDER BY
+                        c.available_at,
+                        c.created_at,
+                        c.id
+                    FOR UPDATE OF c, d SKIP LOCKED
+                    LIMIT 1
+                """;
 
         UUID candidate;
         try (var statement = connection.prepareStatement(select)) {
-            if (deviceId != null) {
-                statement.setObject(1, tenantId);
-                statement.setObject(2, deviceId);
-                if (sessionToken != null) statement.setObject(3, sessionToken);
-            }
+            statement.setObject(1, tenantId);
+            statement.setObject(2, deviceId);
+            statement.setObject(3, sessionToken);
             try (var rows = statement.executeQuery()) {
-                if (!rows.next()) return Optional.empty();
+                if (!rows.next())
+                    return Optional.empty();
                 candidate = rows.getObject(1, UUID.class);
             }
         }
 
-        // Após obter o bloqueio, a próxima consulta em READ COMMITTED enxerga reservas recém-confirmadas.
+        // Após obter o bloqueio, a próxima consulta em READ COMMITTED enxerga reservas
+        // recém-confirmadas.
         String update = """
                 UPDATE device_commands c SET status='sending', attempts=c.attempts+1,
                     claimed_at=now(), claim_token=?
-                WHERE c.id=? AND c.status='queued' AND c.expires_at > clock_timestamp()
+                WHERE c.id=? AND c.tenant_id=? AND c.device_id=? AND c.status='queued' AND c.expires_at > clock_timestamp()
                 AND NOT EXISTS (SELECT 1 FROM device_commands active
                                 WHERE active.tenant_id=c.tenant_id AND active.device_id=c.device_id
                                   AND active.status IN ('sending','transmitting','sent'))
@@ -305,6 +266,8 @@ public final class DeviceCommandDispatchRepository {
         try (var statement = connection.prepareStatement(update)) {
             statement.setObject(1, UUID.randomUUID());
             statement.setObject(2, candidate);
+            statement.setObject(3, tenantId);
+            statement.setObject(4, deviceId);
             try (ResultSet result = statement.executeQuery()) {
 
                 if (!result.next()) {
@@ -318,13 +281,11 @@ public final class DeviceCommandDispatchRepository {
                         result.getString("protocol"),
                         result.getBytes("payload"),
                         result.getInt("attempts"),
-                        result.getObject("claim_token", UUID.class)
-                );
+                        result.getObject("claim_token", UUID.class));
 
                 if (result.next()) {
                     throw new SQLException(
-                            "MULTIPLE_COMMANDS_CLAIMED"
-                    );
+                            "MULTIPLE_COMMANDS_CLAIMED");
                 }
 
                 return Optional.of(command);
@@ -333,7 +294,8 @@ public final class DeviceCommandDispatchRepository {
     }
 
     /**
-     * Motivo usado para distinguir recusa antes do envio de falha potencialmente posterior à
+     * Motivo usado para distinguir recusa antes do envio de falha potencialmente
+     * posterior à
      * escrita.
      */
     public enum Failure {
@@ -346,12 +308,13 @@ public final class DeviceCommandDispatchRepository {
     }
 
     /**
-     * Registra o desfecho compatível com a etapa da falha e indica se a tentativa ainda podia
+     * Registra o desfecho compatível com a etapa da falha e indica se a tentativa
+     * ainda podia
      * alterar o comando.
      *
      * @param connection conexão JDBC usada pelo chamador
-     * @param command comando da tentativa em curso
-     * @param reason motivo do encerramento da tentativa
+     * @param command    comando da tentativa em curso
+     * @param reason     motivo do encerramento da tentativa
      * @return verdadeiro se a transição condicional alterou a linha da tentativa
      * @throws SQLException se a operação JDBC falhar
      */

@@ -1,5 +1,6 @@
 package software.aporia.tracking.gateway;
 
+import software.aporia.tracking.support.CommandTestFixtures;
 import com.zaxxer.hikari.HikariDataSource;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -237,7 +238,7 @@ class GatewayCommandCycleIT {
             UUID interrupted = enqueue(db, device, tenant, UUID.randomUUID(), UUID.randomUUID());
             var dispatch = new software.aporia.tracking.storage.command.DeviceCommandDispatchRepository();
             c.setAutoCommit(false);
-            var claim = dispatch.claimNextForDevice(c, tenant, device.deviceId()).orElseThrow();
+            var claim = dispatch.claimForSession(c, tenant, device.deviceId(), device.sessionToken()).orElseThrow();
             assertEquals(interrupted, claim.id());
             assertTrue(dispatch.authorizeTransmission(c, tenant, interrupted, claim.claimToken(),
                     UUID.randomUUID(), device.deviceIdentity()));
@@ -254,8 +255,8 @@ class GatewayCommandCycleIT {
                 socket.setSoTimeout(1500);
                 assertThrows(java.net.SocketTimeoutException.class, () -> socket.getInputStream().read());
                 var commands = new DeviceCommandRepository();
-                assertEquals("transmitting", commands.findStatus(c, tenant, interrupted).orElseThrow());
-                assertEquals("queued", commands.findStatus(c, tenant, next).orElseThrow());
+                assertEquals("transmitting", CommandTestFixtures.findStatus(c, tenant, interrupted).orElseThrow());
+                assertEquals("queued", CommandTestFixtures.findStatus(c, tenant, next).orElseThrow());
             }
         }
     }
@@ -287,7 +288,7 @@ class GatewayCommandCycleIT {
             assertEquals(first, enqueue(db, fixture, tenant, principal, key));
             UUID second = enqueue(db, fixture, tenant, principal, UUID.randomUUID());
             assertNotEquals(first, second);
-            assertEquals("queued", repository.findStatus(c, tenant, first).orElseThrow());
+            assertEquals("queued", CommandTestFixtures.findStatus(c, tenant, first).orElseThrow());
 
             String identity = fixture.deviceIdentity();
             byte[] alive = ("ALV;" + identity + "\r").getBytes(StandardCharsets.US_ASCII);
@@ -296,8 +297,8 @@ class GatewayCommandCycleIT {
                 tracker.setSoTimeout(8000);
                 tracker.getOutputStream().write(alive);
                 assertArrayEquals(expected, tracker.getInputStream().readNBytes(expected.length));
-                await("First write was not committed", () -> repository.findStatus(c, tenant, first).orElseThrow().equals("sent"));
-                assertEquals("queued", repository.findStatus(c, tenant, second).orElseThrow());
+                await("First write was not committed", () -> CommandTestFixtures.findStatus(c, tenant, first).orElseThrow().equals("sent"));
+                assertEquals("queued", CommandTestFixtures.findStatus(c, tenant, second).orElseThrow());
             }
             // Antecipa o vencimento para simular a espera pela resposta durante a desconexão.
             try (var s = c.prepareStatement("""
@@ -308,7 +309,7 @@ class GatewayCommandCycleIT {
                 s.setObject(2, first);
                 assertEquals(1, s.executeUpdate());
             }
-            await("First command did not time out", () -> repository.findStatus(c, tenant, first).orElseThrow().equals("timeout"));
+            await("First command did not time out", () -> CommandTestFixtures.findStatus(c, tenant, first).orElseThrow().equals("timeout"));
             try (var tracker = new Socket("127.0.0.1", port)) {
                 tracker.setSoTimeout(8000);
                 tracker.getOutputStream().write(alive);
@@ -323,8 +324,8 @@ class GatewayCommandCycleIT {
                 return count(c, "device_command_responses", tenant) == 4;
             });
             assertEquals(1, count(c, "positions", tenant));
-            assertEquals("sent", repository.findStatus(c, tenant, second).orElseThrow());
-            assertEquals("timeout", repository.findStatus(c, tenant, first).orElseThrow());
+            assertEquals("sent", CommandTestFixtures.findStatus(c, tenant, second).orElseThrow());
+            assertEquals("timeout", CommandTestFixtures.findStatus(c, tenant, first).orElseThrow());
             try (var s = c.prepareStatement("""
                     SELECT count(*) FROM device_command_responses
                     WHERE tenant_id=? AND device_id=? AND command_id IS NULL AND result='unknown'

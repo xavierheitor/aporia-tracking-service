@@ -78,6 +78,8 @@ mvn -Plint clean test-compile
 mvn clean test
 ```
 
+A preparação de comandos legados, payloads inválidos e estados históricos fica em `src/test`, especialmente em `CommandTestFixtures`. Os testes de operações normais usam os contratos de produção: ingestão com tenant/dispositivo, solicitação auditada de firmware e reserva vinculada ao token de sessão. A persistência de produção não oferece versões menos restritivas para montar cenários de teste.
+
 Para incluir as integrações JDBC e TCP, configure `TRACKING_TEST_DB_URL`, `TRACKING_TEST_DB_USER` e `TRACKING_TEST_DB_PASSWORD` para o banco `aporia_tracking_test`. A suíte cria e remove um schema isolado por execução. Os testes que iniciam as JVMs também criam e removem dois logins exclusivos para validar as permissões reais dos serviços. Use uma credencial de teste com permissão para criar roles.
 
 ```sh

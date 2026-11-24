@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
+import software.aporia.tracking.support.CommandTestFixtures;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -46,7 +47,7 @@ class DeviceCommandRecoveryRepositoryIT {
             TestFixtures fixtures
     ) throws Exception {
 
-        return commands.enqueue(
+        return CommandTestFixtures.enqueue(
                 connection,
                 fixtures.tenantId(),
                 fixtures.deviceId(),
@@ -56,6 +57,24 @@ class DeviceCommandRecoveryRepositoryIT {
                 ),
                 Instant.now().plusSeconds(300)
         );
+    }
+
+    /**
+     * Monta um registro histórico sem proprietário para testar a recuperação legada.
+     * A autorização atual exige proprietário; dados antigos são preparados explicitamente.
+     */
+    private void simulateLegacyTransmission(Connection connection, TestFixtures fixtures,
+                                            UUID commandId, UUID claimToken) throws SQLException {
+        try (var update = connection.prepareStatement("""
+                UPDATE device_commands SET status='transmitting', transmission_started_at=now(), dispatch_owner=NULL
+                WHERE tenant_id=? AND device_id=? AND id=? AND claim_token=? AND status='sending'
+                """)) {
+            update.setObject(1, fixtures.tenantId());
+            update.setObject(2, fixtures.deviceId());
+            update.setObject(3, commandId);
+            update.setObject(4, claimToken);
+            assertEquals(1, update.executeUpdate());
+        }
     }
 
     /**
@@ -164,7 +183,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
             assertEquals(
                     "timeout",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             id
@@ -193,7 +212,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
             assertEquals(
                     "queued",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             id
@@ -223,9 +242,7 @@ class DeviceCommandRecoveryRepositoryIT {
             try {
                 assertEquals(
                         id,
-                        dispatcher.claimNext(
-                                connection
-                        ).orElseThrow().id()
+                        CommandTestFixtures.claim(dispatcher, connection, fixtures).orElseThrow().id()
                 );
 
                 connection.commit();
@@ -266,7 +283,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
             assertEquals(
                     "delivery_unknown",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             id
@@ -294,7 +311,7 @@ class DeviceCommandRecoveryRepositoryIT {
             connection.setAutoCommit(false);
 
             try {
-                dispatcher.claimNext(connection).orElseThrow();
+                CommandTestFixtures.claim(dispatcher, connection, fixtures).orElseThrow();
                 connection.commit();
 
             } catch (SQLException | RuntimeException e) {
@@ -321,7 +338,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
             assertEquals(
                     "sending",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             id
@@ -397,7 +414,7 @@ class DeviceCommandRecoveryRepositoryIT {
             DeviceCommandDispatchRepository.ClaimedCommand claimed;
 
             try {
-                claimed = dispatcher.claimNext(connection)
+                claimed = CommandTestFixtures.claim(dispatcher, connection, fixtures)
                         .orElseThrow();
 
                 connection.commit();
@@ -411,14 +428,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
             assertEquals(commandId, claimed.id());
 
-            assertTrue(
-                    dispatcher.authorizeTransmission(
-                            connection,
-                            fixtures.tenantId(),
-                            commandId,
-                            claimed.claimToken()
-                    )
-            );
+            simulateLegacyTransmission(connection, fixtures, commandId, claimed.claimToken());
 
             // Simula uma transmissão iniciada há 10 minutos.
             try (PreparedStatement statement
@@ -465,7 +475,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
             assertEquals(
                     "delivery_unknown",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             commandId
@@ -505,7 +515,7 @@ class DeviceCommandRecoveryRepositoryIT {
             DeviceCommandDispatchRepository.ClaimedCommand claimed;
 
             try {
-                claimed = dispatcher.claimNext(connection)
+                claimed = CommandTestFixtures.claim(dispatcher, connection, fixtures)
                         .orElseThrow();
 
                 connection.commit();
@@ -517,14 +527,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
             connection.setAutoCommit(true);
 
-            assertTrue(
-                    dispatcher.authorizeTransmission(
-                            connection,
-                            fixtures.tenantId(),
-                            commandId,
-                            claimed.claimToken()
-                    )
-            );
+            simulateLegacyTransmission(connection, fixtures, commandId, claimed.claimToken());
 
             connection.setAutoCommit(false);
 
@@ -545,7 +548,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
             assertEquals(
                     "transmitting",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             commandId
@@ -575,7 +578,7 @@ class DeviceCommandRecoveryRepositoryIT {
             DeviceCommandDispatchRepository.ClaimedCommand claimed;
 
             try {
-                claimed = dispatcher.claimNext(connection)
+                claimed = CommandTestFixtures.claim(dispatcher, connection, fixtures)
                         .orElseThrow();
                 connection.commit();
 
@@ -586,14 +589,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
             connection.setAutoCommit(true);
 
-            assertTrue(
-                    dispatcher.authorizeTransmission(
-                            connection,
-                            fixtures.tenantId(),
-                            commandId,
-                            claimed.claimToken()
-                    )
-            );
+            simulateLegacyTransmission(connection, fixtures, commandId, claimed.claimToken());
 
             try (PreparedStatement statement
                     = connection.prepareStatement("""

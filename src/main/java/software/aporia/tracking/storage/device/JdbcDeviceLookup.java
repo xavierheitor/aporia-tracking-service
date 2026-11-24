@@ -37,17 +37,6 @@ public final class JdbcDeviceLookup {
     public record Registration(RegisteredDevice device, boolean enabled) {}
 
     /**
-     * Retorna o dispositivo somente quando o cadastro está habilitado.
-     *
-     * @param protocol identificador do protocolo do equipamento
-     * @param identity identidade declarada pelo rastreador no protocolo
-     * @return cadastro habilitado, quando encontrado
-     */
-    public Optional<RegisteredDevice> findEnabled(String protocol, String identity) {
-        return find(protocol, identity).filter(Registration::enabled).map(Registration::device);
-    }
-
-    /**
      * Distingue cadastro desabilitado de identidade desconhecida antes da descoberta.
      *
      * @param protocol identificador do protocolo do equipamento

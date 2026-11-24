@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
+import software.aporia.tracking.support.CommandTestFixtures;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -31,6 +32,22 @@ class DeviceCommandDispatchRepositoryIT {
     private final DeviceCommandDispatchRepository dispatcher
             = new DeviceCommandDispatchRepository();
 
+    /** Cria uma consulta auditada pelo mesmo contrato usado para comandos operacionais. */
+    private UUID enqueueFirmware(Connection connection, TestFixtures fixtures) throws SQLException {
+        connection.setAutoCommit(false);
+        try {
+            UUID id = commands.enqueueFirmwareVersion(connection, fixtures.tenantId(), fixtures.deviceId(),
+                    UUID.randomUUID(), UUID.randomUUID()).orElseThrow();
+            connection.commit();
+            return id;
+        } catch (SQLException | RuntimeException error) {
+            connection.rollback();
+            throw error;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
     /**
      * Verifica que a mesma solicitação só pode ser reservada uma vez.
      *
@@ -44,7 +61,7 @@ class DeviceCommandDispatchRepositoryIT {
                 dataSource, "9876500010"
         ); Connection connection = dataSource.getConnection()) {
 
-            UUID commandId = commands.enqueue(
+            UUID commandId = CommandTestFixtures.enqueue(
                     connection,
                     fixtures.tenantId(),
                     fixtures.deviceId(),
@@ -58,9 +75,7 @@ class DeviceCommandDispatchRepositoryIT {
             connection.setAutoCommit(false);
 
             try {
-                var claimed = dispatcher.claimNext(
-                        connection
-                ).orElseThrow();
+                var claimed = CommandTestFixtures.claim(dispatcher, connection, fixtures).orElseThrow();
 
                 assertEquals(commandId, claimed.id());
                 assertEquals(fixtures.tenantId(), claimed.tenantId());
@@ -79,7 +94,7 @@ class DeviceCommandDispatchRepositoryIT {
 
             assertEquals(
                     "sending",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             commandId
@@ -90,7 +105,7 @@ class DeviceCommandDispatchRepositoryIT {
 
             try {
                 assertTrue(
-                        dispatcher.claimNext(connection).isEmpty()
+                        CommandTestFixtures.claim(dispatcher, connection, fixtures).isEmpty()
                 );
                 connection.commit();
 
@@ -110,12 +125,12 @@ class DeviceCommandDispatchRepositoryIT {
     void shouldRequireExplicitTransaction() throws Exception {
 
         try (
-                var dataSource = TestDatabase.createDataSource(); Connection connection = dataSource.getConnection()) {
+                var dataSource = TestDatabase.createDataSource(); var fixtures = new TestFixtures(dataSource); Connection connection = dataSource.getConnection()) {
             assertTrue(connection.getAutoCommit());
 
             var error = assertThrows(
                     IllegalStateException.class,
-                    () -> dispatcher.claimNext(connection)
+                    () -> CommandTestFixtures.claim(dispatcher, connection, fixtures)
             );
             assertEquals("CLAIM_REQUIRES_TRANSACTION", error.getMessage());
         }
@@ -135,7 +150,7 @@ class DeviceCommandDispatchRepositoryIT {
                 dataSource, "9876500011"
         ); Connection setup = dataSource.getConnection(); Connection first = dataSource.getConnection(); Connection second = dataSource.getConnection()) {
 
-            UUID commandId = commands.enqueue(
+            UUID commandId = CommandTestFixtures.enqueue(
                     setup,
                     fixtures.tenantId(),
                     fixtures.deviceId(),
@@ -150,7 +165,7 @@ class DeviceCommandDispatchRepositoryIT {
             second.setAutoCommit(false);
 
             try {
-                var firstClaim = dispatcher.claimNext(first)
+                var firstClaim = CommandTestFixtures.claim(dispatcher, first, fixtures)
                         .orElseThrow();
 
                 assertEquals(commandId, firstClaim.id());
@@ -158,7 +173,7 @@ class DeviceCommandDispatchRepositoryIT {
                 // A primeira transação ainda mantém o lock.
                 // A segunda deve ignorar esse registro.
                 assertTrue(
-                        dispatcher.claimNext(second).isEmpty()
+                        CommandTestFixtures.claim(dispatcher, second, fixtures).isEmpty()
                 );
 
                 first.commit();
@@ -172,7 +187,7 @@ class DeviceCommandDispatchRepositoryIT {
 
             assertEquals(
                     "sending",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             setup,
                             fixtures.tenantId(),
                             commandId
@@ -195,7 +210,7 @@ class DeviceCommandDispatchRepositoryIT {
                 dataSource, "9876500012"
         ); Connection setup = dataSource.getConnection(); Connection first = dataSource.getConnection(); Connection second = dataSource.getConnection()) {
 
-            UUID commandId = commands.enqueue(
+            UUID commandId = CommandTestFixtures.enqueue(
                     setup,
                     fixtures.tenantId(),
                     fixtures.deviceId(),
@@ -210,21 +225,21 @@ class DeviceCommandDispatchRepositoryIT {
             second.setAutoCommit(false);
 
             try {
-                var firstClaim = dispatcher.claimNext(first)
+                var firstClaim = CommandTestFixtures.claim(dispatcher, first, fixtures)
                         .orElseThrow();
 
                 assertEquals(commandId, firstClaim.id());
 
                 // A reserva ainda não foi confirmada.
                 assertTrue(
-                        dispatcher.claimNext(second).isEmpty()
+                        CommandTestFixtures.claim(dispatcher, second, fixtures).isEmpty()
                 );
 
                 // Simula falha do dispatcher antes do commit.
                 first.rollback();
 
                 // O comando deve voltar a ser elegível.
-                var secondClaim = dispatcher.claimNext(second)
+                var secondClaim = CommandTestFixtures.claim(dispatcher, second, fixtures)
                         .orElseThrow();
 
                 assertEquals(commandId, secondClaim.id());
@@ -253,7 +268,7 @@ class DeviceCommandDispatchRepositoryIT {
                 dataSource, "9876500030"
         ); Connection connection = dataSource.getConnection()) {
 
-            UUID commandId = commands.enqueue(
+            UUID commandId = CommandTestFixtures.enqueue(
                     connection,
                     fixtures.tenantId(),
                     fixtures.deviceId(),
@@ -269,7 +284,7 @@ class DeviceCommandDispatchRepositoryIT {
             DeviceCommandDispatchRepository.ClaimedCommand claimed;
 
             try {
-                claimed = dispatcher.claimNext(connection)
+                claimed = CommandTestFixtures.claim(dispatcher, connection, fixtures)
                         .orElseThrow();
 
                 connection.commit();
@@ -293,7 +308,7 @@ class DeviceCommandDispatchRepositoryIT {
 
             assertEquals(
                     "sending",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             commandId
@@ -315,23 +330,14 @@ class DeviceCommandDispatchRepositoryIT {
                 dataSource, "9876500031"
         ); Connection connection = dataSource.getConnection()) {
 
-            UUID commandId = commands.enqueue(
-                    connection,
-                    fixtures.tenantId(),
-                    fixtures.deviceId(),
-                    "suntech",
-                    "TEST_COMMAND\r".getBytes(
-                            StandardCharsets.US_ASCII
-                    ),
-                    Instant.now().plusSeconds(300)
-            );
+            UUID commandId = enqueueFirmware(connection, fixtures);
 
             connection.setAutoCommit(false);
 
             DeviceCommandDispatchRepository.ClaimedCommand claimed;
 
             try {
-                claimed = dispatcher.claimNext(connection)
+                claimed = CommandTestFixtures.claim(dispatcher, connection, fixtures)
                         .orElseThrow();
 
                 connection.commit();
@@ -348,7 +354,7 @@ class DeviceCommandDispatchRepositoryIT {
                             connection,
                             fixtures.tenantId(),
                             commandId,
-                            claimed.claimToken()
+                            claimed.claimToken(), UUID.randomUUID(), fixtures.deviceIdentity()
                     )
             );
 
@@ -363,7 +369,7 @@ class DeviceCommandDispatchRepositoryIT {
 
             assertEquals(
                     "sent",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             commandId
@@ -396,7 +402,7 @@ class DeviceCommandDispatchRepositoryIT {
                 dataSource, "9876500032"
         ); Connection connection = dataSource.getConnection()) {
 
-            UUID commandId = commands.enqueue(
+            UUID commandId = CommandTestFixtures.enqueue(
                     connection,
                     fixtures.tenantId(),
                     fixtures.deviceId(),
@@ -413,7 +419,7 @@ class DeviceCommandDispatchRepositoryIT {
             DeviceCommandDispatchRepository.ClaimedCommand claimed;
 
             try {
-                claimed = dispatcher.claimNext(connection)
+                claimed = CommandTestFixtures.claim(dispatcher, connection, fixtures)
                         .orElseThrow();
 
                 assertEquals(commandId, claimed.id());
@@ -480,7 +486,7 @@ class DeviceCommandDispatchRepositoryIT {
             // 4. Confirma que o comando mudou de estado.
             assertEquals(
                     "delivery_unknown",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             commandId
@@ -501,7 +507,7 @@ class DeviceCommandDispatchRepositoryIT {
             // O estado recuperado deve permanecer intacto.
             assertEquals(
                     "delivery_unknown",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             commandId
@@ -549,23 +555,14 @@ class DeviceCommandDispatchRepositoryIT {
                 dataSource, "9876500040"
         ); Connection connection = dataSource.getConnection()) {
 
-            UUID commandId = commands.enqueue(
-                    connection,
-                    fixtures.tenantId(),
-                    fixtures.deviceId(),
-                    "suntech",
-                    "TEST_COMMAND\r".getBytes(
-                            StandardCharsets.US_ASCII
-                    ),
-                    Instant.now().plusSeconds(300)
-            );
+            UUID commandId = enqueueFirmware(connection, fixtures);
 
             connection.setAutoCommit(false);
 
             DeviceCommandDispatchRepository.ClaimedCommand claimed;
 
             try {
-                claimed = dispatcher.claimNext(connection)
+                claimed = CommandTestFixtures.claim(dispatcher, connection, fixtures)
                         .orElseThrow();
 
                 connection.commit();
@@ -579,18 +576,27 @@ class DeviceCommandDispatchRepositoryIT {
 
             assertEquals(commandId, claimed.id());
 
+            assertThrows(NullPointerException.class, () -> dispatcher.authorizeTransmission(
+                    connection, fixtures.tenantId(), commandId, claimed.claimToken(), null, fixtures.deviceIdentity()));
+            assertThrows(NullPointerException.class, () -> dispatcher.authorizeTransmission(
+                    connection, fixtures.tenantId(), commandId, claimed.claimToken(), UUID.randomUUID(), null));
+            assertFalse(dispatcher.authorizeTransmission(connection, fixtures.tenantId(), commandId,
+                    claimed.claimToken(), UUID.randomUUID(), "0000000000"));
+            assertFalse(dispatcher.authorizeTransmission(connection, UUID.randomUUID(), commandId,
+                    claimed.claimToken(), UUID.randomUUID(), fixtures.deviceIdentity()));
+
             assertTrue(
                     dispatcher.authorizeTransmission(
                             connection,
                             fixtures.tenantId(),
                             commandId,
-                            claimed.claimToken()
+                            claimed.claimToken(), UUID.randomUUID(), fixtures.deviceIdentity()
                     )
             );
 
             assertEquals(
                     "transmitting",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             commandId
@@ -603,7 +609,7 @@ class DeviceCommandDispatchRepositoryIT {
                             connection,
                             fixtures.tenantId(),
                             commandId,
-                            claimed.claimToken()
+                            claimed.claimToken(), UUID.randomUUID(), fixtures.deviceIdentity()
                     )
             );
         }
@@ -623,21 +629,12 @@ class DeviceCommandDispatchRepositoryIT {
                 dataSource, "9876500041"
         ); Connection connection = dataSource.getConnection()) {
 
-            UUID commandId = commands.enqueue(
-                    connection,
-                    fixtures.tenantId(),
-                    fixtures.deviceId(),
-                    "suntech",
-                    "TEST_COMMAND\r".getBytes(
-                            StandardCharsets.US_ASCII
-                    ),
-                    Instant.now().plusSeconds(300)
-            );
+            UUID commandId = enqueueFirmware(connection, fixtures);
 
             connection.setAutoCommit(false);
 
             try {
-                dispatcher.claimNext(connection)
+                CommandTestFixtures.claim(dispatcher, connection, fixtures)
                         .orElseThrow();
 
                 connection.commit();
@@ -654,13 +651,13 @@ class DeviceCommandDispatchRepositoryIT {
                             connection,
                             fixtures.tenantId(),
                             commandId,
-                            UUID.randomUUID()
+                            UUID.randomUUID(), UUID.randomUUID(), fixtures.deviceIdentity()
                     )
             );
 
             assertEquals(
                     "sending",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             commandId
@@ -683,7 +680,7 @@ class DeviceCommandDispatchRepositoryIT {
                 dataSource, "9876500060"
         ); Connection connection = dataSource.getConnection()) {
 
-            UUID commandId = commands.enqueue(
+            UUID commandId = CommandTestFixtures.enqueue(
                     connection,
                     fixtures.tenantId(),
                     fixtures.deviceId(),
@@ -697,11 +694,7 @@ class DeviceCommandDispatchRepositoryIT {
             connection.setAutoCommit(false);
 
             try {
-                var claimed = dispatcher.claimNextForDevice(
-                        connection,
-                        fixtures.tenantId(),
-                        fixtures.deviceId()
-                ).orElseThrow();
+                var claimed = CommandTestFixtures.claim(dispatcher, connection, fixtures).orElseThrow();
 
                 assertEquals(commandId, claimed.id());
                 assertEquals(fixtures.tenantId(), claimed.tenantId());
@@ -720,12 +713,54 @@ class DeviceCommandDispatchRepositoryIT {
 
             assertEquals(
                     "sending",
-                    commands.findStatus(
+                    CommandTestFixtures.findStatus(
                             connection,
                             fixtures.tenantId(),
                             commandId
                     ).orElseThrow()
             );
+        }
+    }
+
+    /** Um comando sem auditoria não pode iniciar uma transmissão, mesmo com reserva válida. */
+    @Test
+    void shouldRejectTransmissionWithoutAudit() throws Exception {
+        try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
+             var connection = db.getConnection()) {
+            UUID id = CommandTestFixtures.enqueue(connection, fixture.tenantId(), fixture.deviceId(), "suntech",
+                    software.aporia.tracking.protocol.suntech.FirmwareVersionRequest.encode(fixture.deviceIdentity()),
+                    Instant.now().plusSeconds(300));
+            connection.setAutoCommit(false);
+            try {
+                var claim = CommandTestFixtures.claim(dispatcher, connection, fixture).orElseThrow();
+                assertFalse(dispatcher.authorizeTransmission(connection, fixture.tenantId(), id,
+                        claim.claimToken(), UUID.randomUUID(), fixture.deviceIdentity()));
+                connection.commit();
+            } catch (SQLException | RuntimeException error) {
+                connection.rollback();
+                throw error;
+            }
+            assertEquals("sending", CommandTestFixtures.findStatus(connection, fixture.tenantId(), id).orElseThrow());
+        }
+    }
+
+    /** A reserva exige o tenant, o dispositivo e a última sessão admitida no cadastro. */
+    @Test
+    void shouldRejectClaimFromWrongTenantDeviceOrSession() throws Exception {
+        try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
+             var connection = db.getConnection()) {
+            UUID command = enqueueFirmware(connection, fixture);
+            connection.setAutoCommit(false);
+            try {
+                assertTrue(dispatcher.claimForSession(connection, UUID.randomUUID(), fixture.deviceId(), fixture.sessionToken()).isEmpty());
+                assertTrue(dispatcher.claimForSession(connection, fixture.tenantId(), UUID.randomUUID(), fixture.sessionToken()).isEmpty());
+                assertTrue(dispatcher.claimForSession(connection, fixture.tenantId(), fixture.deviceId(), UUID.randomUUID()).isEmpty());
+                assertEquals(command, CommandTestFixtures.claim(dispatcher, connection, fixture).orElseThrow().id());
+                connection.commit();
+            } catch (SQLException | RuntimeException error) {
+                connection.rollback();
+                throw error;
+            }
         }
     }
 

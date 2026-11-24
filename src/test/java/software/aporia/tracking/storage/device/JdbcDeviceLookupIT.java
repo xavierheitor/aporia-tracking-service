@@ -150,7 +150,7 @@ class JdbcDeviceLookupIT {
             var b = executor.submit(() -> approve(db, identity, second.tenantId(), barrier));
             boolean firstApproved = a.get(10, TimeUnit.SECONDS);
             assertEquals(!firstApproved, b.get(10, TimeUnit.SECONDS));
-            var registered = lookup.findEnabled("teltonika", identity).orElseThrow();
+            var registered = lookup.find("teltonika", identity).filter(JdbcDeviceLookup.Registration::enabled).map(JdbcDeviceLookup.Registration::device).orElseThrow();
             assertEquals(firstApproved ? first.tenantId() : second.tenantId(), registered.tenantId());
         }
     }
@@ -212,10 +212,8 @@ class JdbcDeviceLookupIT {
                         = new JdbcDeviceLookup(dataSource);
 
                 RegisteredDevice device
-                        = lookup.findEnabled(
-                                "suntech",
-                                identity
-                        ).orElseThrow();
+                        = lookup.find("suntech", identity
+                        ).filter(JdbcDeviceLookup.Registration::enabled).map(JdbcDeviceLookup.Registration::device).orElseThrow();
 
                 assertEquals(tenantId, device.tenantId());
                 assertEquals(deviceId, device.deviceId());
@@ -257,10 +255,8 @@ class JdbcDeviceLookupIT {
                         = new JdbcDeviceLookup(dataSource);
 
                 assertTrue(
-                        lookup.findEnabled(
-                                "suntech",
-                                identity
-                        ).isEmpty()
+                        lookup.find("suntech", identity
+                        ).filter(JdbcDeviceLookup.Registration::enabled).map(JdbcDeviceLookup.Registration::device).isEmpty()
                 );
 
             } finally {
@@ -281,10 +277,8 @@ class JdbcDeviceLookupIT {
                     = new JdbcDeviceLookup(dataSource);
 
             assertTrue(
-                    lookup.findEnabled(
-                            "suntech",
-                            "0000000000"
-                    ).isEmpty()
+                    lookup.find("suntech", "0000000000"
+                    ).filter(JdbcDeviceLookup.Registration::enabled).map(JdbcDeviceLookup.Registration::device).isEmpty()
             );
         }
     }
@@ -318,10 +312,8 @@ class JdbcDeviceLookupIT {
                         = new JdbcDeviceLookup(dataSource);
 
                 assertTrue(
-                        lookup.findEnabled(
-                                "teltonika",
-                                identity
-                        ).isEmpty()
+                        lookup.find("teltonika", identity
+                        ).filter(JdbcDeviceLookup.Registration::enabled).map(JdbcDeviceLookup.Registration::device).isEmpty()
                 );
 
             } finally {
