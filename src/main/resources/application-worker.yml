@@ -22,3 +22,7 @@ management:
   metrics:
     tags:
       component: worker
+
+tracking:
+  worker:
+    heartbeat-timeout-seconds: ${TRACKING_WORKER_HEARTBEAT_TIMEOUT_SECONDS:60}

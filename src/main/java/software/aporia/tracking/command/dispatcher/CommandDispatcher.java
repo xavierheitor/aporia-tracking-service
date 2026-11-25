@@ -12,21 +12,20 @@ import javax.sql.DataSource;
 
 import org.slf4j.LoggerFactory;
 
+import software.aporia.tracking.observability.metrics.CommandMetrics;
 import software.aporia.tracking.protocol.suntech.FirmwareVersionRequest;
 import software.aporia.tracking.storage.command.DeviceCommandDispatchRepository;
 import software.aporia.tracking.storage.command.DeviceCommandDispatchRepository.Failure;
 import software.aporia.tracking.storage.command.DeviceCommandRecoveryRepository;
 
 /**
- * Coordena a reserva no PostgreSQL e a escrita na sessão TCP. A confirmação de
- * escrita e o
- * resultado incerto são persistidos separadamente.
+ * Coordena a reserva no PostgreSQL e a escrita na sessão TCP. A confirmação de escrita e o resultado incerto são
+ * persistidos separadamente.
  */
 public final class CommandDispatcher {
 
     /**
-     * Resultado observado pelo dispatcher. SENT indica que a escrita local
-     * terminou.
+     * Resultado observado pelo dispatcher. SENT indica que a escrita local terminou.
      */
     public enum DispatchResult {
         /** Nenhuma sessão disponível para iniciar o envio. */
@@ -52,38 +51,44 @@ public final class CommandDispatcher {
     /** Proprietário cujo bloqueio delimita as tentativas deste emissor. */
     private final DispatchOwner owner;
 
+    private final CommandMetrics metrics;
+
     /**
-     * Vincula a fila e o transporte ao proprietário responsável pelas tentativas
-     * deste emissor.
+     * Vincula a fila e o transporte ao proprietário responsável pelas tentativas deste emissor.
      *
      * @param dataSource fonte de conexões JDBC para a operação
      * @param repository repositório que controla a reserva e suas transições
      * @param transport  canal usado para alcançar a sessão do dispositivo
      * @param owner      proprietário do envio ou seu identificador persistido
      */
-    public CommandDispatcher(DataSource dataSource, DeviceCommandDispatchRepository repository,
-            CommandTransport transport, DispatchOwner owner) {
+    public CommandDispatcher(
+            DataSource dataSource,
+            DeviceCommandDispatchRepository repository,
+            CommandTransport transport,
+            DispatchOwner owner,
+            CommandMetrics metrics) {
         this.dataSource = Objects.requireNonNull(dataSource);
         this.repository = Objects.requireNonNull(repository);
         this.transport = Objects.requireNonNull(transport);
         this.owner = Objects.requireNonNull(owner);
+        this.metrics = Objects.requireNonNull(metrics);
+
     }
 
     /**
-     * Tenta enviar um comando do dispositivo. Quando ele está offline, a fila
-     * permanece disponível para a próxima conexão.
+     * Tenta enviar um comando do dispositivo. Quando ele está offline, a fila permanece disponível para a próxima
+     * conexão.
      *
      * @param tenantId identificador do tenant que delimita a operação
      * @param deviceId identificador do equipamento cadastrado
      * @return desfecho da tentativa observado pelo dispatcher
      * @throws SQLException se a operação JDBC falhar
      */
-    public DispatchResult dispatchNext(UUID tenantId, UUID deviceId) throws SQLException {
+    private DispatchResult dispatchNextInternal(UUID tenantId, UUID deviceId) throws SQLException {
         synchronized (owner) {
             UUID ownerId = owner.id();
             var endpoint = transport.connect(tenantId, deviceId);
-            // O teste de disponibilidade precede a reserva para manter comandos offline na
-            // fila.
+            // O teste de disponibilidade precede a reserva para manter comandos offline na fila.
             if (endpoint.isEmpty())
                 return DispatchResult.DEVICE_OFFLINE;
 
@@ -111,45 +116,85 @@ public final class CommandDispatcher {
             DispatchResult result = rejection.isPresent() ? rejection.get() : transmit(command, session);
             LoggerFactory.getLogger(CommandDispatcher.class).info(
                     "Command dispatch tenant={} device={} command={} attempt={} result={}",
-                    tenantId, deviceId, command.id(), command.attempts(), result);
+                    tenantId,
+                    deviceId,
+                    command.id(),
+                    command.attempts(),
+                    result);
             return result;
         }
     }
 
+    public DispatchResult dispatchNext(
+            UUID tenantId,
+            UUID deviceId) throws SQLException {
+
+        long startedAt = System.nanoTime();
+
+        DispatchResult result;
+
+        try {
+            result = dispatchNextInternal(
+                    tenantId,
+                    deviceId);
+
+        } catch (SQLException | RuntimeException error) {
+
+            metrics.dispatchFailed();
+
+            throw error;
+        }
+
+        metrics.dispatchCompleted(
+                result,
+                System.nanoTime() - startedAt);
+
+        return result;
+    }
+
     /**
-     * Avalia o comando enquanto o bloqueio do cadastro impede uma troca concorrente
-     * de sessão.
+     * Avalia o comando enquanto o bloqueio do cadastro impede uma troca concorrente de sessão.
      */
-    private Optional<DispatchResult> authorize(Connection c, DeviceCommandDispatchRepository.ClaimedCommand command,
-            CommandTransport.Endpoint session, UUID ownerId) throws SQLException {
+    private Optional<DispatchResult> authorize(
+            Connection c,
+            DeviceCommandDispatchRepository.ClaimedCommand command,
+            CommandTransport.Endpoint session,
+            UUID ownerId) throws SQLException {
         if (!session.protocol().equals(command.protocol())
                 || !FirmwareVersionRequest.permits(command.protocol(), session.identity(), command.payload())) {
-            return Optional.of(repository.finishFailure(c, command, Failure.COMMAND_POLICY_DENIED)
-                    ? DispatchResult.DELIVERY_FAILED
-                    : DispatchResult.CLAIM_LOST);
+            return Optional.of(
+                    repository.finishFailure(c, command, Failure.COMMAND_POLICY_DENIED)
+                            ? DispatchResult.DELIVERY_FAILED
+                            : DispatchResult.CLAIM_LOST);
         }
-        if (!repository.authorizeTransmission(c, command.tenantId(), command.id(), command.claimToken(), ownerId,
+        if (!repository.authorizeTransmission(
+                c,
+                command.tenantId(),
+                command.id(),
+                command.claimToken(),
+                ownerId,
                 session.identity())) {
-            return Optional.of(repository.finishFailure(c, command, Failure.AUTHORIZATION_REJECTED)
-                    ? DispatchResult.DELIVERY_FAILED
-                    : DispatchResult.CLAIM_LOST);
+            return Optional.of(
+                    repository.finishFailure(c, command, Failure.AUTHORIZATION_REJECTED)
+                            ? DispatchResult.DELIVERY_FAILED
+                            : DispatchResult.CLAIM_LOST);
         }
         return Optional.empty();
     }
 
     /**
-     * Escreve somente após o commit da autorização e registra o resultado
-     * observado.
+     * Escreve somente após o commit da autorização e registra o resultado observado.
      */
-    private DispatchResult transmit(DeviceCommandDispatchRepository.ClaimedCommand command,
+    private DispatchResult transmit(
+            DeviceCommandDispatchRepository.ClaimedCommand command,
             CommandTransport.Endpoint session) throws SQLException {
         UUID tenantId = command.tenantId();
         byte[] payload = command.payload();
 
         try {
-            // A autorização já foi confirmada e a conexão JDBC liberada. Uma falha aqui
-            // pode ocorrer após uma escrita parcial.
-            session.send(payload);
+            // A autorização já foi confirmada e a conexão JDBC liberada. Uma falha aqui pode ocorrer após uma escrita
+            // parcial.
+            writeCommand(session, payload);
         } catch (IOException error) {
             try (Connection c = dataSource.getConnection()) {
                 c.setAutoCommit(true);
@@ -171,12 +216,11 @@ public final class CommandDispatcher {
     }
 
     /**
-     * Reconcilia tentativas interrompidas e prazos expirados sob a mesma exclusão
-     * usada no envio.
+     * Reconcilia tentativas interrompidas e prazos expirados sob a mesma exclusão usada no envio.
      *
      * @throws SQLException se a operação JDBC falhar
      */
-    public void recover() throws SQLException {
+    private void recoverInternal() throws SQLException {
         synchronized (owner) {
             var recovery = new DeviceCommandRecoveryRepository();
             try (Connection c = dataSource.getConnection()) {
@@ -193,6 +237,50 @@ public final class CommandDispatcher {
                     throw error;
                 }
             }
+        }
+    }
+
+    public void recover() throws SQLException {
+
+        long startedAt = System.nanoTime();
+
+        try {
+            recoverInternal();
+
+        } catch (SQLException | RuntimeException error) {
+
+            metrics.recoveryFailed();
+
+            throw error;
+
+        } finally {
+
+            metrics.recordRecoveryDuration(
+                    System.nanoTime() - startedAt);
+        }
+
+        metrics.recoveryCompleted();
+    }
+
+    private void writeCommand(
+            CommandTransport.Endpoint session,
+            byte[] payload) throws IOException {
+
+        long startedAt = System.nanoTime();
+
+        try {
+            session.send(payload);
+
+        } catch (IOException | RuntimeException error) {
+
+            metrics.tcpWriteFailed();
+
+            throw error;
+
+        } finally {
+
+            metrics.recordTcpWriteDuration(
+                    System.nanoTime() - startedAt);
         }
     }
 }

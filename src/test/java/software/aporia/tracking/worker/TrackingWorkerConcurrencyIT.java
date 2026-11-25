@@ -6,21 +6,47 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import org.junit.jupiter.api.Test;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
+import software.aporia.tracking.observability.metrics.WorkerMetrics;
+import software.aporia.tracking.protocol.DecoderRegistry;
+import software.aporia.tracking.protocol.suntech.SuntechDecoder;
+import software.aporia.tracking.protocol.teltonika.TeltonikaAvl;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
 /** Executa consumidores concorrentes e verifica que cada pacote produz os efeitos esperados uma única vez. */
 class TrackingWorkerConcurrencyIT {
+
+    private SimpleMeterRegistry meterRegistry;
+    private WorkerMetrics metrics;
+    private DecoderRegistry decoderRegistry;
+
+    @BeforeEach
+    void setUpWorkerDependencies() {
+        meterRegistry = new SimpleMeterRegistry();
+        metrics = new WorkerMetrics(meterRegistry);
+        decoderRegistry = new DecoderRegistry(List.of(
+                new SuntechDecoder(), new TeltonikaAvl()));
+    }
+
+    @AfterEach
+    void closeMeterRegistry() {
+        meterRegistry.close();
+    }
 
     /**
      * Executa dois consumidores e verifica que cada pacote produz seus efeitos uma única vez.
@@ -51,12 +77,10 @@ class TrackingWorkerConcurrencyIT {
             );
 
             TrackingWorker worker1 = new TrackingWorker(
-                    dataSource, fixtures.tenantId()
-            );
+                    dataSource, fixtures.tenantId(), decoderRegistry, metrics);
 
             TrackingWorker worker2 = new TrackingWorker(
-                    dataSource, fixtures.tenantId()
-            );
+                    dataSource, fixtures.tenantId(), decoderRegistry, metrics);
 
             CountDownLatch start = new CountDownLatch(1);
             CountDownLatch finished = new CountDownLatch(2);

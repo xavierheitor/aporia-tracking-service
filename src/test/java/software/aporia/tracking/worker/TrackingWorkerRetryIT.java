@@ -8,18 +8,44 @@ import java.sql.ResultSet;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import org.junit.jupiter.api.Test;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
+import software.aporia.tracking.observability.metrics.WorkerMetrics;
+import software.aporia.tracking.protocol.DecoderRegistry;
+import software.aporia.tracking.protocol.suntech.SuntechDecoder;
+import software.aporia.tracking.protocol.teltonika.TeltonikaAvl;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
 /** Acompanha um pacote pelas tentativas de processamento até sua rejeição definitiva. */
 class TrackingWorkerRetryIT {
+
+    private SimpleMeterRegistry meterRegistry;
+    private WorkerMetrics metrics;
+    private DecoderRegistry decoderRegistry;
+
+    @BeforeEach
+    void setUpWorkerDependencies() {
+        meterRegistry = new SimpleMeterRegistry();
+        metrics = new WorkerMetrics(meterRegistry);
+        decoderRegistry = new DecoderRegistry(List.of(
+                new SuntechDecoder(), new TeltonikaAvl()));
+    }
+
+    @AfterEach
+    void closeMeterRegistry() {
+        meterRegistry.close();
+    }
 
     /**
      * Antecipa o próximo processamento em cada ciclo até atingir a quinta tentativa e a rejeição.
@@ -64,8 +90,7 @@ class TrackingWorkerRetryIT {
 
             TrackingWorker worker = new TrackingWorker(
                     dataSource,
-                    fixtures.tenantId()
-            );
+                    fixtures.tenantId(), decoderRegistry, metrics);
 
             long[] expectedDelays = {10, 30, 60, 120};
 
@@ -163,6 +188,11 @@ class TrackingWorkerRetryIT {
             // Depois da rejeição, o pacote não deve
             // ser selecionado novamente.
             assertFalse(worker.processOne());
+            assertEquals(4.0, meterRegistry.get("tracking.packets.retry.scheduled").counter().count());
+            assertEquals(1.0, meterRegistry.get("tracking.packets.rejected").counter().count());
+            assertEquals(1.0, meterRegistry.get("tracking.worker.cycles.empty").counter().count());
+            assertEquals(0.0, meterRegistry.get("tracking.worker.cycles.failed").counter().count());
+            assertEquals(5L, meterRegistry.get("tracking.packet.processing").timer().count());
         }
     }
 }

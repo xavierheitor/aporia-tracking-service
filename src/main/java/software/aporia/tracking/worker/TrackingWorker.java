@@ -3,7 +3,6 @@ package software.aporia.tracking.worker;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -12,10 +11,9 @@ import javax.sql.DataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import software.aporia.tracking.observability.metrics.WorkerMetrics;
 import software.aporia.tracking.protocol.DecodedPacket;
 import software.aporia.tracking.protocol.DecoderRegistry;
-import software.aporia.tracking.protocol.suntech.SuntechDecoder;
-import software.aporia.tracking.protocol.teltonika.TeltonikaAvl;
 import software.aporia.tracking.storage.packet.PacketProcessingRepository;
 import software.aporia.tracking.storage.packet.PacketProcessingRepository.Packet;
 import software.aporia.tracking.storage.packet.PacketProcessingRepository.Processing;
@@ -25,21 +23,17 @@ import software.aporia.tracking.storage.packet.PacketProcessingRepository.Proces
  *
  * <ol>
  * <li>{@link #processOne()} solicita ao repositório uma recepção elegível.</li>
- * <li>{@code decode()} confere hash, protocolo e identidade antes de aceitar o
- * conteúdo.</li>
- * <li>{@code processPacket()} solicita a persistência de resposta e telemetria.
- * Se faltar associação ao ativo, aplica a política de retentativa.</li>
- * <li>O repositório confirma a transação antes de devolver o resultado. Somente
- * então o worker registra o desfecho nos logs e informa que tratou um
- * pacote.</li>
+ * <li>{@code decode()} confere hash, protocolo e identidade antes de aceitar o conteúdo.</li>
+ * <li>{@code processPacket()} solicita a persistência de resposta e telemetria. Se faltar associação ao ativo, aplica a
+ * política de retentativa.</li>
+ * <li>O repositório confirma a transação antes de devolver o resultado. Somente então o worker registra o desfecho nos
+ * logs e informa que tratou um pacote.</li>
  * </ol>
  *
  * <p>
- * SQL, conexão, bloqueios e rollback pertencem a
- * {@link PacketProcessingRepository}.
- * A resposta de comando é preservada no rollback parcial da telemetria; uma
- * falha
- * de persistência, por sua vez, desfaz a transação inteira e chega ao chamador.
+ * SQL, conexão, bloqueios e rollback pertencem a {@link PacketProcessingRepository}. A resposta de comando é preservada
+ * no rollback parcial da telemetria; uma falha de persistência, por sua vez, desfaz a transação inteira e chega ao
+ * chamador.
  * </p>
  */
 public class TrackingWorker {
@@ -51,85 +45,77 @@ public class TrackingWorker {
     private final PacketProcessingRepository processingRepository;
     /** Restringe a seleção a um tenant; nulo habilita o consumidor global. */
     private final UUID tenantFilter;
+    private final WorkerMetrics metrics;
 
-    /**
-     * Cria um consumidor global com os decodificadores padrão.
-     * O pool é repassado ao repositório; o worker não abre conexões diretamente.
-     *
-     * @param dataSource pool usado pelo repositório de processamento
-     * @throws NullPointerException se o pool for nulo
-     */
-    public TrackingWorker(DataSource dataSource) {
-        this(dataSource, null);
-    }
+    public TrackingWorker(
+            DataSource dataSource,
+            UUID tenantFilter,
+            DecoderRegistry decoderRegistry,
+            WorkerMetrics metrics) {
 
-    /**
-     * Cria um consumidor com os decodificadores padrão e filtro opcional de tenant.
-     *
-     * @param dataSource   pool usado pelo repositório de processamento
-     * @param tenantFilter tenant a processar, ou nulo para o consumidor global
-     * @throws NullPointerException se o pool for nulo
-     */
-    public TrackingWorker(DataSource dataSource, UUID tenantFilter) {
-        this(dataSource, tenantFilter, defaultDecoderRegistry());
-    }
-
-    /**
-     * Configura o consumidor e as versões de pacote que ele pode processar.
-     * Pacotes de versões ausentes no registro permanecem na fila para outro
-     * consumidor.
-     *
-     * @param dataSource      pool usado pelo repositório de processamento
-     * @param tenantFilter    tenant a processar, ou nulo para o consumidor global
-     * @param decoderRegistry versões de decodificação disponíveis ao worker
-     * @throws NullPointerException se o pool ou o registro de decodificadores for
-     *                              nulo
-     */
-    public TrackingWorker(DataSource dataSource, UUID tenantFilter, DecoderRegistry decoderRegistry) {
         this.processingRepository = new PacketProcessingRepository(dataSource);
+
         this.tenantFilter = tenantFilter;
+
         this.decoderRegistry = Objects.requireNonNull(decoderRegistry);
+
+        this.metrics = Objects.requireNonNull(metrics);
     }
 
     /**
-     * Reúne as implementações Suntech e Teltonika usadas na configuração padrão.
-     * Cada versão permite interpretar os bytes gravados na ingestão.
-     *
-     * @return registro das versões de decodificação padrão
-     */
-    private static DecoderRegistry defaultDecoderRegistry() {
-        return new DecoderRegistry(List.of(new SuntechDecoder(), new TeltonikaAvl()));
-    }
-
-    /**
-     * Solicita o processamento de no máximo um pacote elegível e publica o desfecho
-     * somente depois que o repositório confirmar a transação.
+     * Solicita o processamento de no máximo um pacote elegível e publica o desfecho somente depois que o repositório
+     * confirmar a transação.
      *
      * <p>
-     * Uma rejeição ou retentativa persistida também conta como pacote tratado.
-     * Uma falha de banco é propagada, sem produzir log de conclusão.
+     * Uma rejeição ou retentativa persistida também conta como pacote tratado. Uma falha de banco é propagada, sem
+     * produzir log de conclusão.
      * </p>
      *
-     * @return verdadeiro se um pacote foi processado, rejeitado ou reagendado;
-     *         falso quando não houver pacote elegível
+     * @return verdadeiro se um pacote foi processado, rejeitado ou reagendado; falso quando não houver pacote elegível
      * @throws IllegalStateException se a transação de persistência falhar
      */
     public boolean processOne() {
-        ProcessingResult result = processingRepository.processNext(
-                tenantFilter, decoderRegistry.versions(), this::processPacket)
-                .orElseGet(ProcessingResult::empty);
+
+        long startedAt = System.nanoTime();
+
+        ProcessingResult result;
+
+        try {
+            result = processingRepository.processNext(
+                    tenantFilter,
+                    decoderRegistry.versions(),
+                    this::processPacket)
+                    .orElseGet(ProcessingResult::empty);
+
+        } catch (RuntimeException error) {
+            metrics.cycleFailed();
+            throw error;
+        }
+
+        switch (result.status()) {
+            case EMPTY -> metrics.cycleEmpty();
+            case PROCESSED -> metrics.packetProcessed();
+            case REJECTED -> metrics.packetRejected();
+            case RETRY_SCHEDULED -> metrics.retryScheduled();
+        }
+
+        if (result.status() != ProcessingResult.Status.EMPTY) {
+            metrics.recordProcessingDuration(
+                    System.nanoTime() - startedAt);
+        }
+
         logResult(result);
+
         return result.status() != ProcessingResult.Status.EMPTY;
     }
 
     /**
-     * Valida o pacote reservado, solicita a gravação da resposta e da telemetria
-     * e decide entre conclusão, rejeição ou nova tentativa.
+     * Valida o pacote reservado, solicita a gravação da resposta e da telemetria e decide entre conclusão, rejeição ou
+     * nova tentativa.
      *
      * <p>
-     * O repositório mantém a transação aberta durante esta chamada. O resultado
-     * descreve as alterações solicitadas, que só ficam confirmadas após o retorno
-     * ao repositório e o commit.
+     * O repositório mantém a transação aberta durante esta chamada. O resultado descreve as alterações solicitadas, que
+     * só ficam confirmadas após o retorno ao repositório e o commit.
      * </p>
      *
      * @param processing contexto de persistência restrito ao pacote reservado
@@ -158,17 +144,13 @@ public class TrackingWorker {
     }
 
     /**
-     * Escolhe o decoder pela versão persistida e valida hash, protocolo e
-     * identidade.
-     * Uma falha de formato reconhecida pelo decoder vira rejeição permanente;
-     * outras falhas inesperadas continuam até o chamador para provocar rollback.
+     * Escolhe o decoder pela versão persistida e valida hash, protocolo e identidade. Uma falha de formato reconhecida
+     * pelo decoder vira rejeição permanente; outras falhas inesperadas continuam até o chamador para provocar rollback.
      *
      * @param packet dados da recepção e do cadastro obtidos na reserva
      * @return conteúdo interpretado, incluindo leituras e eventual tipo de resposta
-     * @throws InvalidPacketException   se o hash, o protocolo, o formato ou a
-     *                                  identidade
-     *                                  forem incompatíveis com o pacote e o
-     *                                  cadastro
+     * @throws InvalidPacketException   se o hash, o protocolo, o formato ou a identidade forem incompatíveis com o
+     *                                  pacote e o cadastro
      * @throws IllegalArgumentException se a versão não tiver decoder registrado
      * @throws IllegalStateException    se SHA-256 não estiver disponível na JVM
      */
@@ -192,12 +174,10 @@ public class TrackingWorker {
     }
 
     /**
-     * Aplica a política de retentativa usando a quantidade de tentativas da
-     * reserva.
-     * Antes do limite, solicita novo prazo; ao atingir o limite, solicita rejeição.
+     * Aplica a política de retentativa usando a quantidade de tentativas da reserva. Antes do limite, solicita novo
+     * prazo; ao atingir o limite, solicita rejeição.
      *
-     * @param processing contexto do pacote cujos efeitos de telemetria foram
-     *                   desfeitos
+     * @param processing contexto do pacote cujos efeitos de telemetria foram desfeitos
      * @param errorCode  motivo que deve acompanhar a nova tentativa ou rejeição
      * @return desfecho com a quantidade de tentativas e o atraso, quando aplicável
      * @throws IllegalStateException se a gravação do desfecho falhar
@@ -215,13 +195,11 @@ public class TrackingWorker {
     }
 
     /**
-     * Verifica se o conteúdo corresponde ao hash SHA-256 armazenado na
-     * ingestão.
+     * Verifica se o conteúdo corresponde ao hash SHA-256 armazenado na ingestão.
      *
      * @param payload    bytes do conteúdo da mensagem
      * @param storedHash resumo SHA-256 hexadecimal salvo na ingestão
-     * @throws InvalidPacketException se os bytes não corresponderem ao hash
-     *                                armazenado
+     * @throws InvalidPacketException se os bytes não corresponderem ao hash armazenado
      * @throws IllegalStateException  se SHA-256 não estiver disponível na JVM
      */
     private void validateHash(
@@ -236,7 +214,8 @@ public class TrackingWorker {
 
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(
-                    "SHA-256 unavailable", e);
+                    "SHA-256 unavailable",
+                    e);
         }
 
         String calculatedHex = HexFormat.of()
@@ -249,9 +228,8 @@ public class TrackingWorker {
     }
 
     /**
-     * Registra o desfecho já confirmado no banco, sem expor os bytes do pacote.
-     * Conclusões usam INFO; rejeições e retentativas usam WARN. Uma fila sem pacote
-     * elegível não gera log a cada consulta.
+     * Registra o desfecho já confirmado no banco, sem expor os bytes do pacote. Conclusões usam INFO; rejeições e
+     * retentativas usam WARN. Uma fila sem pacote elegível não gera log a cada consulta.
      *
      * @param result resultado devolvido pelo repositório após o commit
      */

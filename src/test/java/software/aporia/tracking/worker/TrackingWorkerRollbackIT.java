@@ -6,18 +6,44 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import org.junit.jupiter.api.Test;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
+import software.aporia.tracking.observability.metrics.WorkerMetrics;
+import software.aporia.tracking.protocol.DecoderRegistry;
+import software.aporia.tracking.protocol.suntech.SuntechDecoder;
+import software.aporia.tracking.protocol.teltonika.TeltonikaAvl;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
 /** Verifica que a ausência de associação ao ativo desfaz a mensagem parcial antes do reagendamento. */
 class TrackingWorkerRollbackIT {
+
+    private SimpleMeterRegistry meterRegistry;
+    private WorkerMetrics metrics;
+    private DecoderRegistry decoderRegistry;
+
+    @BeforeEach
+    void setUpWorkerDependencies() {
+        meterRegistry = new SimpleMeterRegistry();
+        metrics = new WorkerMetrics(meterRegistry);
+        decoderRegistry = new DecoderRegistry(List.of(
+                new SuntechDecoder(), new TeltonikaAvl()));
+    }
+
+    @AfterEach
+    void closeMeterRegistry() {
+        meterRegistry.close();
+    }
 
     /**
      * Usa uma leitura fora da vigência da associação e verifica o rollback antes da nova
@@ -83,8 +109,7 @@ class TrackingWorkerRollbackIT {
 
             TrackingWorker worker = new TrackingWorker(
                     dataSource,
-                    fixtures.tenantId()
-            );
+                    fixtures.tenantId(), decoderRegistry, metrics);
 
             // O worker desfaz a mensagem e agenda uma nova tentativa.
             assertTrue(worker.processOne());

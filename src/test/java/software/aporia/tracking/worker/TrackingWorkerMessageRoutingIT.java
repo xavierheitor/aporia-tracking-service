@@ -6,20 +6,46 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import org.junit.jupiter.api.Test;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
+import software.aporia.tracking.observability.metrics.WorkerMetrics;
+import software.aporia.tracking.protocol.DecoderRegistry;
+import software.aporia.tracking.protocol.suntech.SuntechDecoder;
+import software.aporia.tracking.protocol.teltonika.TeltonikaAvl;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
 /** Verifica a persistência de respostas Suntech e o tratamento de telemetria presente na mesma mensagem. */
 class TrackingWorkerMessageRoutingIT {
+
+    private SimpleMeterRegistry meterRegistry;
+    private WorkerMetrics metrics;
+    private DecoderRegistry decoderRegistry;
+
+    @BeforeEach
+    void setUpWorkerDependencies() {
+        meterRegistry = new SimpleMeterRegistry();
+        metrics = new WorkerMetrics(meterRegistry);
+        decoderRegistry = new DecoderRegistry(List.of(
+                new SuntechDecoder(), new TeltonikaAvl()));
+    }
+
+    @AfterEach
+    void closeMeterRegistry() {
+        meterRegistry.close();
+    }
 
     /** Identidade do equipamento usada no cenário. */
     private static final String IDENTITY = "1234567890";
@@ -234,8 +260,7 @@ class TrackingWorkerMessageRoutingIT {
             }
 
             TrackingWorker worker = new TrackingWorker(
-                    dataSource, fixtures.tenantId()
-            );
+                    dataSource, fixtures.tenantId(), decoderRegistry, metrics);
 
             assertTrue(worker.processOne());
 
@@ -288,8 +313,7 @@ class TrackingWorkerMessageRoutingIT {
             }
 
             TrackingWorker worker = new TrackingWorker(
-                    dataSource, fixtures.tenantId()
-            );
+                    dataSource, fixtures.tenantId(), decoderRegistry, metrics);
 
             assertTrue(worker.processOne());
 
@@ -318,7 +342,7 @@ class TrackingWorkerMessageRoutingIT {
     void skipsUnknownVersionAndKeepsPacketPending() throws Exception {
         try (var db = TestDatabase.createDataSource(); var device = new TestFixtures(db, IDENTITY);
              var c = db.getConnection()) {
-            var worker = new TrackingWorker(db, device.tenantId());
+            var worker = new TrackingWorker(db, device.tenantId(), decoderRegistry, metrics);
             var alive = bytes("ALV;" + IDENTITY + "\r");
             UUID older = insertPacket(c, device, alive);
             try (var update = c.prepareStatement("UPDATE raw_packets SET decoder_version='future', "
@@ -352,7 +376,7 @@ class TrackingWorkerMessageRoutingIT {
                 remove.setObject(1, device.tenantId());
                 remove.executeUpdate();
             }
-            var worker = new TrackingWorker(db, device.tenantId());
+            var worker = new TrackingWorker(db, device.tenantId(), decoderRegistry, metrics);
             try (var due = c.prepareStatement("UPDATE raw_packets SET available_at=now() WHERE id=?")) {
                 due.setObject(1, id);
                 for (int attempt = 0; attempt < RetryPolicy.MAX_ATTEMPTS; attempt++) {
@@ -403,8 +427,7 @@ class TrackingWorkerMessageRoutingIT {
             }
 
             TrackingWorker worker = new TrackingWorker(
-                    dataSource, fixtures.tenantId()
-            );
+                    dataSource, fixtures.tenantId(), decoderRegistry, metrics);
 
             assertTrue(worker.processOne());
 

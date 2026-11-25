@@ -37,6 +37,8 @@ public final class WorkerLifecycle implements SmartLifecycle {
     // O latch libera as pausas antecipadamente quando a parada é solicitada.
     private volatile CountDownLatch stopSignal = new CountDownLatch(0);
 
+    private volatile long lastHeartbeatNanos = System.nanoTime();
+
     /**
      * Guarda o orquestrador usado em cada consulta à fila.
      *
@@ -66,6 +68,8 @@ public final class WorkerLifecycle implements SmartLifecycle {
                 .name("tracking-worker")
                 .unstarted(this::runProcessingLoop);
 
+        lastHeartbeatNanos = System.nanoTime();
+
         processingThread.start();
 
         log.info("Tracking worker started");
@@ -77,20 +81,27 @@ public final class WorkerLifecycle implements SmartLifecycle {
      * terminar com falha inesperada.
      */
     private void runProcessingLoop() {
+
         try {
             while (running.get()) {
+
+                lastHeartbeatNanos = System.nanoTime();
+
                 try {
-                    // Rejeições e retentativas persistidas também contam como trabalho tratado.
                     if (!worker.processOne()) {
                         awaitNextCycle(IDLE_DELAY_MS);
                     }
+
                 } catch (RuntimeException error) {
                     log.error("Worker processing failed", error);
+
                     awaitNextCycle(FAILURE_DELAY_MS);
                 }
             }
+
         } finally {
             running.set(false);
+
             log.info("Tracking worker stopped");
         }
     }
@@ -209,5 +220,11 @@ public final class WorkerLifecycle implements SmartLifecycle {
     @Override
     public int getPhase() {
         return 100;
+    }
+
+    public double getHeartbeatAgeSeconds() {
+
+        return (System.nanoTime() - lastHeartbeatNanos)
+                / 1_000_000_000.0;
     }
 }

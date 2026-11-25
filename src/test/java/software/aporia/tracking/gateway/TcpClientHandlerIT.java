@@ -24,6 +24,9 @@ import org.junit.jupiter.api.Test;
 
 import com.zaxxer.hikari.HikariDataSource;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
+import software.aporia.tracking.observability.metrics.GatewayMetrics;
 import software.aporia.tracking.protocol.suntech.SuntechAdapter;
 import software.aporia.tracking.storage.device.JdbcDeviceLookup;
 import software.aporia.tracking.storage.packet.JdbcPacketIngestion;
@@ -37,6 +40,8 @@ class TcpClientHandlerIT {
 
     /** Fonte de conexões JDBC usadas pela instância. */
     private HikariDataSource dataSource;
+    /** Registry de métricas exclusivo do cenário. */
+    private SimpleMeterRegistry meterRegistry;
     /** Registro que associa tenant e dispositivo à sessão atual. */
     private SessionRegistry sessionRegistry;
     /** Manipulador de conexão usado pelo teste com sockets locais. */
@@ -60,6 +65,8 @@ class TcpClientHandlerIT {
     @BeforeEach
     void setUp() throws Exception {
 
+        meterRegistry = new SimpleMeterRegistry();
+        var metrics = new GatewayMetrics(meterRegistry);
         dataSource = TestDatabase.createDataSource();
 
         tenantId = UUID.randomUUID();
@@ -94,8 +101,9 @@ class TcpClientHandlerIT {
                 new JdbcPacketIngestion(dataSource),
                 new JdbcDeviceLookup(dataSource),
                 sessionRegistry,
-                new SuntechAdapter(),
-                running);
+                first -> new SuntechAdapter(),
+                running,
+                metrics);
     }
 
     /**
@@ -106,8 +114,21 @@ class TcpClientHandlerIT {
     @AfterEach
     void tearDown() throws Exception {
 
-        running.set(false);
+        if (running != null) {
+            running.set(false);
+        }
 
+        try {
+            cleanUpDatabase();
+        } finally {
+            if (meterRegistry != null) {
+                meterRegistry.close();
+            }
+        }
+    }
+
+    /** Remove os dados e fecha o pool JDBC do cenário. */
+    private void cleanUpDatabase() throws Exception {
         if (dataSource != null) {
 
             try (Connection connection = dataSource.getConnection()) {

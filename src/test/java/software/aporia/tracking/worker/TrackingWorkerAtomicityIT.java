@@ -7,21 +7,46 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
-
 import javax.sql.DataSource;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import org.junit.jupiter.api.Test;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
+import software.aporia.tracking.observability.metrics.WorkerMetrics;
+import software.aporia.tracking.protocol.DecoderRegistry;
+import software.aporia.tracking.protocol.suntech.SuntechDecoder;
+import software.aporia.tracking.protocol.teltonika.TeltonikaAvl;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
 /** Provoca falha na outbox e verifica o rollback das gravações anteriores na mesma transação. */
 class TrackingWorkerAtomicityIT {
+
+    private SimpleMeterRegistry meterRegistry;
+    private WorkerMetrics metrics;
+    private DecoderRegistry decoderRegistry;
+
+    @BeforeEach
+    void setUpWorkerDependencies() {
+        meterRegistry = new SimpleMeterRegistry();
+        metrics = new WorkerMetrics(meterRegistry);
+        decoderRegistry = new DecoderRegistry(List.of(
+                new SuntechDecoder(), new TeltonikaAvl()));
+    }
+
+    @AfterEach
+    void closeMeterRegistry() {
+        meterRegistry.close();
+    }
 
     /**
      * Provoca uma falha ao gravar o evento e confere o rollback dos efeitos anteriores.
@@ -94,8 +119,7 @@ class TrackingWorkerAtomicityIT {
                 // 3. Executar o worker.
                 TrackingWorker worker = new TrackingWorker(
                         dataSource,
-                        fixtures.tenantId()
-                );
+                        fixtures.tenantId(), decoderRegistry, metrics);
 
                 IllegalStateException exception = assertThrows(
                         IllegalStateException.class,

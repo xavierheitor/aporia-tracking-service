@@ -23,6 +23,8 @@ import org.slf4j.LoggerFactory;
 
 import software.aporia.tracking.command.dispatcher.CommandDispatcher;
 import software.aporia.tracking.command.dispatcher.DispatchOwner;
+import software.aporia.tracking.observability.metrics.CommandMetrics;
+import software.aporia.tracking.observability.metrics.GatewayMetrics;
 import software.aporia.tracking.protocol.ProtocolAdapter;
 import software.aporia.tracking.protocol.ProtocolRegistry;
 import software.aporia.tracking.protocol.suntech.SuntechAdapter;
@@ -55,6 +57,11 @@ public class TcpGateway {
     private volatile Thread gatewayThread;
     private volatile Throwable failure;
 
+    // Metricas e monitoramento
+    private final GatewayMetrics metrics;
+    private volatile SessionRegistry sessionRegistry;
+    private final CommandMetrics commandMetrics;
+
     /**
      * Guarda os recursos e a configuração; não abre sockets nem inicia threads.
      *
@@ -64,6 +71,7 @@ public class TcpGateway {
      * @param protocolId        protocolo registrado ou {@code auto} para detectar pelo primeiro byte
      * @param dispatchOwnerFile caminho do arquivo persistente do emissor; nulo ou em branco desabilita o polling de
      *                          comandos
+     * @param commandMetrics    métricas de despacho e recuperação de comandos
      * @throws NullPointerException se pool, endereço ou protocolo forem nulos
      */
     public TcpGateway(
@@ -71,12 +79,17 @@ public class TcpGateway {
             String bindAddress,
             int port,
             String protocolId,
-            String dispatchOwnerFile) {
+            String dispatchOwnerFile,
+            GatewayMetrics metrics,
+            CommandMetrics commandMetrics) {
+
         this.dataSource = java.util.Objects.requireNonNull(dataSource);
         this.bindAddress = java.util.Objects.requireNonNull(bindAddress);
         this.port = port;
         this.protocolId = java.util.Objects.requireNonNull(protocolId);
         this.dispatchOwnerFile = dispatchOwnerFile;
+        this.metrics = java.util.Objects.requireNonNull(metrics);
+        this.commandMetrics = java.util.Objects.requireNonNull(commandMetrics);
     }
 
     /**
@@ -100,12 +113,15 @@ public class TcpGateway {
 
         // Cada partida tem seu registro; sessões de uma execução anterior não são reaproveitadas.
         var sessions = new SessionRegistry();
+        this.sessionRegistry = sessions;
+
         var handler = new TcpClientHandler(
                 new JdbcPacketIngestion(dataSource),
                 new JdbcDeviceLookup(dataSource),
                 sessions,
                 protocolSelector(protocolId),
-                running);
+                running,
+                metrics);
 
         ServerSocket listener = new ServerSocket(port, 50, InetAddress.getByName(bindAddress));
         DispatchOwner owner = null;
@@ -298,7 +314,7 @@ public class TcpGateway {
      * @param owner      proprietário que mantém o bloqueio do emissor durante as rodadas
      * @param running    sinal consultado antes de iniciar uma rodada ou atender outra sessão
      */
-    private static void startCommandPolling(
+    private void startCommandPolling(
             ScheduledExecutorService polling,
             DataSource dataSource,
             SessionRegistry sessions,
@@ -308,7 +324,8 @@ public class TcpGateway {
                 dataSource,
                 new DeviceCommandDispatchRepository(),
                 new SessionCommandTransport(sessions),
-                owner);
+                owner,
+                commandMetrics);
         // O intervalo começa após o fim da rodada: rodadas lentas não acumulam novas execuções.
         polling.scheduleWithFixedDelay(() -> poll(dispatcher, sessions, running), 0, 1, TimeUnit.SECONDS);
     }
@@ -324,30 +341,48 @@ public class TcpGateway {
      * @param activeClients sockets acompanhados para fechamento durante o encerramento
      * @throws IOException se ocorrer uma falha de E/S durante a aceitação ou o fechamento
      */
-    private static void acceptClients(
+    private void acceptClients(
             ServerSocket server,
             ExecutorService executor,
             TcpClientHandler handler,
             AtomicBoolean running,
             Set<Socket> activeClients) throws IOException {
+
         log.info(
                 "Tracking TCP Gateway listening on {}:{}",
                 server.getInetAddress().getHostAddress(),
                 server.getLocalPort());
+
         while (running.get()) {
             try {
                 Socket client = server.accept();
-                // O encerramento pode ter começado enquanto accept() aguardava esta conexão.
+
+                metrics.connectionAccepted();
+
                 if (!running.get()) {
-                    client.close();
+                    metrics.connectionRejected();
+
+                    try {
+                        client.close();
+                    } finally {
+                        metrics.connectionClosed();
+                    }
+
                     break;
                 }
-                submitClient(executor, handler, client, activeClients);
+
+                submitClient(
+                        executor,
+                        handler,
+                        client,
+                        activeClients);
+
             } catch (SocketException e) {
-                // Fechar o listener na parada provoca SocketException; nesse caso a saída é esperada.
+
                 if (!running.get()) {
                     break;
                 }
+
                 throw e;
             }
         }
@@ -363,7 +398,7 @@ public class TcpGateway {
      * @param activeClients conjunto compartilhado com a rotina de encerramento
      * @throws IOException se o fechamento do socket falhar após uma falha de submissão
      */
-    private static void submitClient(
+    private void submitClient(
             ExecutorService executor,
             TcpClientHandler handler,
             Socket client,
@@ -376,12 +411,17 @@ public class TcpGateway {
                     handler.handle(client);
                 } finally {
                     activeClients.remove(client);
+                    metrics.connectionClosed();
+
                 }
             });
         } catch (RuntimeException e) {
             // Sem tarefa submetida, ninguém assumiu o socket: o chamador faz a limpeza.
+            metrics.connectionRejected();
             try (client) {
                 activeClients.remove(client);
+            } finally {
+                metrics.connectionClosed();
             }
             throw e;
         }
@@ -414,23 +454,44 @@ public class TcpGateway {
             CommandDispatcher dispatcher,
             SessionRegistry sessions,
             AtomicBoolean running) {
+
         if (!running.get()) {
             return;
         }
+
         try {
-            // Reconcilia tentativas interrompidas antes de procurar novos comandos elegíveis.
             dispatcher.recover();
+
             for (DeviceSession session : sessions.onlineSessions()) {
+
                 if (!running.get()) {
                     break;
                 }
-                dispatcher.dispatchNext(session.tenantId(), session.deviceId());
+
+                dispatcher.dispatchNext(
+                        session.tenantId(),
+                        session.deviceId());
             }
+
         } catch (java.sql.SQLException error) {
-            // A falha fica visível, mas não cancela as próximas rodadas do agendador.
-            log.error("Command polling failed, SQLState={}", error.getSQLState());
+
+            log.error(
+                    "Command polling failed, SQLState={}",
+                    error.getSQLState());
+
         } catch (RuntimeException error) {
+
             log.error("Command polling failed", error);
         }
+    }
+
+    public int getActiveConnectionCount() {
+        return activeClients.size();
+    }
+
+    public int getConnectedDeviceCount() {
+        SessionRegistry sessions = sessionRegistry;
+
+        return sessions == null ? 0 : sessions.size();
     }
 }

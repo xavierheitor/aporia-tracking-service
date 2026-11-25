@@ -6,17 +6,43 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import org.junit.jupiter.api.Test;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
+import software.aporia.tracking.observability.metrics.WorkerMetrics;
+import software.aporia.tracking.protocol.DecoderRegistry;
+import software.aporia.tracking.protocol.suntech.SuntechDecoder;
+import software.aporia.tracking.protocol.teltonika.TeltonikaAvl;
 import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
 /** Verifica a rejeição de um pacote cuja identidade diverge da identidade cadastrada. */
 class TrackingWorkerIT {
+
+    private SimpleMeterRegistry meterRegistry;
+    private WorkerMetrics metrics;
+    private DecoderRegistry decoderRegistry;
+
+    @BeforeEach
+    void setUpWorkerDependencies() {
+        meterRegistry = new SimpleMeterRegistry();
+        metrics = new WorkerMetrics(meterRegistry);
+        decoderRegistry = new DecoderRegistry(List.of(
+                new SuntechDecoder(), new TeltonikaAvl()));
+    }
+
+    @AfterEach
+    void closeMeterRegistry() {
+        meterRegistry.close();
+    }
 
     /**
      * Rejeita o pacote cuja identidade decodificada diverge da identidade cadastrada.
@@ -80,10 +106,12 @@ class TrackingWorkerIT {
             // Executar o worker.
             TrackingWorker worker = new TrackingWorker(
                     dataSource,
-                    fixtures.tenantId()
-            );
+                    fixtures.tenantId(), decoderRegistry, metrics);
 
             assertTrue(worker.processOne());
+            assertEquals(1.0, meterRegistry.get("tracking.packets.rejected").counter().count());
+            assertEquals(0.0, meterRegistry.get("tracking.packets.processed").counter().count());
+            assertEquals(1L, meterRegistry.get("tracking.packet.processing").timer().count());
 
             // Verificar a rejeição.
             try (Connection connection

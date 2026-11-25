@@ -24,6 +24,16 @@ Consulte o [README](README.md) para arquitetura e validação, o [guia do gatewa
 14. **Segurança do TCP:** validar sessão/identidade, considerar substituição concorrente, escrita parcial e fechamento do socket. `Socket.write()` não fornece confirmação da aplicação remota.
 15. **Testes precisam deixar o banco limpo.** `TestFixtures.close()` exclui dependências antes de pais, incluindo `device_command_responses` e `device_commands`, dentro de transação. Usar identidades de dispositivo únicas por teste ou estratégia determinística segura.
 
+## Código de produção e isolamento dos testes
+
+- Não introduzir construtores, sobrecargas, métodos, flags ou caminhos de execução exclusivamente para suportar testes. Sobrecargas continuam válidas quando possuem finalidade real em produção.
+- Dependências de produção devem ser explícitas e injetadas.
+- Os testes são responsáveis por configurar suas dependências, fixtures, mocks e infraestrutura.
+- Não introduzir dependências implícitas de fallback para preservar compatibilidade com testes existentes.
+- Quando um contrato de produção mudar, atualizar os testes correspondentes.
+- Infraestrutura específica de testes deve permanecer em `src/test`.
+- O comportamento de produção não deve depender de a aplicação estar executando em ambiente de teste.
+
 ## Alterações no dispatcher
 
 Preserve o contrato descrito no [fluxo do dispatcher](docs/arquitetura.md#do-comando-ao-rastreador). A transição confirmada para `transmitting` inicia a tentativa de envio. Uma reserva em `sending` pode expirar. A recuperação de uma transmissão com proprietário exige exclusividade sobre o arquivo do emissor. O tempo decorrido, sozinho, é insuficiente para revogar uma tentativa em curso.
