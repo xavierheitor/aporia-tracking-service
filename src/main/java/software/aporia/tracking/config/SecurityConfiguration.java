@@ -10,28 +10,28 @@ import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration(proxyBeanMethods = false)
 @EnableWebSecurity
-@Profile({ "gateway", "worker" })
+@Profile({ "gateway", "worker", "monitor" })
 public class SecurityConfiguration {
 
-    @Bean
-    public SecurityFilterChain securityFilterChain(
-            HttpSecurity http) throws Exception {
+        @Bean
+        public SecurityFilterChain securityFilterChain(
+                        HttpSecurity http) throws Exception {
 
-        return http
-                .authorizeHttpRequests(
-                        auth -> auth
-                                .requestMatchers(
-                                        "/actuator/health",
-                                        "/actuator/health/liveness",
-                                        "/actuator/health/readiness")
-                                .permitAll()
-                                .requestMatchers(
-                                        "/actuator/prometheus",
-                                        "/actuator/info")
-                                .hasRole("MONITORING")
-                                .anyRequest()
-                                .denyAll())
-                .httpBasic(Customizer.withDefaults())
-                .build();
-    }
+                return http
+                                .authorizeHttpRequests(
+                                                auth -> auth
+                                                                .requestMatchers(
+                                                                                "/actuator/health",
+                                                                                "/actuator/health/liveness",
+                                                                                "/actuator/health/readiness")
+                                                                .permitAll()
+                                                                .requestMatchers(
+                                                                                "/actuator/prometheus",
+                                                                                "/actuator/info")
+                                                                .hasRole("MONITORING")
+                                                                .anyRequest()
+                                                                .denyAll())
+                                .httpBasic(Customizer.withDefaults())
+                                .build();
+        }
 }

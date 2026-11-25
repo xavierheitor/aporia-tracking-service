@@ -1,0 +1,41 @@
+server:
+  port: -1
+
+spring:
+  datasource:
+    hikari:
+      pool-name: aporia-tracking-monitor-pool
+      maximum-pool-size: 2
+      minimum-idle: 1
+
+  task:
+    scheduling:
+      pool:
+        size: 1
+      shutdown:
+        await-termination: true
+        await-termination-period: 20s
+
+management:
+  server:
+    port: ${TRACKING_MANAGEMENT_PORT:9104}
+
+  metrics:
+    tags:
+      component: monitor
+
+  endpoint:
+    health:
+      group:
+        liveness:
+          include:
+            - livenessState
+        readiness:
+          include:
+            - readinessState
+            - db
+
+tracking:
+  monitor:
+    collection-interval-ms: ${TRACKING_QUEUE_COLLECTION_INTERVAL_MS:30000}
+    query-timeout-seconds: ${TRACKING_QUEUE_QUERY_TIMEOUT_SECONDS:3}
