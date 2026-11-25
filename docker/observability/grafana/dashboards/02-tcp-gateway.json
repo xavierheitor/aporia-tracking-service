@@ -1,0 +1,660 @@
+{
+  "uid": "tracking-gateway",
+  "title": "02 — TCP Gateway",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "15s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "tags": [
+    "aporia",
+    "tracking"
+  ],
+  "panels": [
+    {
+      "title": "Conexões TCP",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aporia-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(tracking_tcp_connections_active)",
+          "legendFormat": "{{component}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 1,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "title": "Sessões registradas",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aporia-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(tracking_devices_connected)",
+          "legendFormat": "{{component}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 2,
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "title": "Ingestão por segundo",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aporia-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(tracking_packets_ingested_total[$__rate_interval]))",
+          "legendFormat": "{{component}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pps",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 3,
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "title": "Latência P95",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aporia-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tracking_packet_ingestion_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{component}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "id": 4,
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "title": "Conexões",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aporia-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(tracking_tcp_connections_accepted_total[$__rate_interval]))",
+          "legendFormat": "accepted",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(tracking_tcp_connections_closed_total[$__rate_interval]))",
+          "legendFormat": "closed",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(tracking_tcp_connections_rejected_total[$__rate_interval]))",
+          "legendFormat": "rejected",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "id": 5,
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Tráfego recebido",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aporia-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(tracking_tcp_received_bytes_total[$__rate_interval]))",
+          "legendFormat": "{{component}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "id": 6,
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Frames por protocolo",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aporia-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (protocol)(rate(tracking_protocol_frames_received_total[$__rate_interval]))",
+          "legendFormat": "{{protocol}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pps",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "id": 7,
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Pacotes recebidos e ingeridos",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aporia-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (protocol)(rate(tracking_packets_received_total[$__rate_interval]))",
+          "legendFormat": "Recebidos {{protocol}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (protocol)(rate(tracking_packets_ingested_total[$__rate_interval]))",
+          "legendFormat": "Ingeridos {{protocol}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pps",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "id": 8,
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Falhas de ingestão",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aporia-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (protocol)(rate(tracking_packets_ingestion_failed_total[$__rate_interval]))",
+          "legendFormat": "{{protocol}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "id": 9,
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Erros de protocolo",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aporia-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(tracking_protocol_errors_total[$__rate_interval]))",
+          "legendFormat": "{{component}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "id": 10,
+      "gridPos": {
+        "x": 12,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Reconexões locais",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aporia-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (protocol)(rate(tracking_device_reconnections_total[$__rate_interval]))",
+          "legendFormat": "{{protocol}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "id": 11,
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "title": "Latência P95 por protocolo",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aporia-prometheus"
+      },
+      "description": "",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, protocol) (rate(tracking_packet_ingestion_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{protocol}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aporia-prometheus"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "id": 12,
+      "gridPos": {
+        "x": 12,
+        "y": 28,
+        "w": 12,
+        "h": 8
+      }
+    }
+  ]
+}

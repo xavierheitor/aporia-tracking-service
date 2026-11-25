@@ -96,6 +96,45 @@ services:
     mem_limit: 128m
     cpus: 0.5
 
+  loki:
+    <<: *observability
+
+    image: grafana/loki:3.5.1
+
+    command:
+      - -config.file=/etc/loki/loki.yml
+
+    volumes:
+      - ./docker/observability/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki-data:/loki
+
+    mem_limit: 768m
+    cpus: 1.0
+
+
+  alloy:
+    <<: *observability
+
+    image: grafana/alloy:v1.9.2
+
+    user: "0:0"
+
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+
+    ports:
+      - "127.0.0.1:12345:12345"
+
+    volumes:
+      - ./docker/observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy/data
+
+    mem_limit: 256m
+    cpus: 0.5
 
 networks:
 
@@ -109,6 +148,10 @@ volumes:
   grafana-data:
 
   alertmanager-data:
+
+  loki-data:
+
+  alloy-data:
 
 
 secrets:
