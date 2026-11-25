@@ -150,7 +150,7 @@ class JdbcDeviceLookupIT {
             var b = executor.submit(() -> approve(db, identity, second.tenantId(), barrier));
             boolean firstApproved = a.get(10, TimeUnit.SECONDS);
             assertEquals(!firstApproved, b.get(10, TimeUnit.SECONDS));
-            var registered = lookup.find("teltonika", identity).filter(JdbcDeviceLookup.Registration::enabled).map(JdbcDeviceLookup.Registration::device).orElseThrow();
+            var registered = lookup.find("teltonika", identity).filter(registration -> registration.enabled()).map(registration -> registration.device()).orElseThrow();
             assertEquals(firstApproved ? first.tenantId() : second.tenantId(), registered.tenantId());
         }
     }
@@ -213,7 +213,7 @@ class JdbcDeviceLookupIT {
 
                 RegisteredDevice device
                         = lookup.find("suntech", identity
-                        ).filter(JdbcDeviceLookup.Registration::enabled).map(JdbcDeviceLookup.Registration::device).orElseThrow();
+                        ).filter(registration -> registration.enabled()).map(registration -> registration.device()).orElseThrow();
 
                 assertEquals(tenantId, device.tenantId());
                 assertEquals(deviceId, device.deviceId());
@@ -256,7 +256,7 @@ class JdbcDeviceLookupIT {
 
                 assertTrue(
                         lookup.find("suntech", identity
-                        ).filter(JdbcDeviceLookup.Registration::enabled).map(JdbcDeviceLookup.Registration::device).isEmpty()
+                        ).filter(registration -> registration.enabled()).map(registration -> registration.device()).isEmpty()
                 );
 
             } finally {
@@ -278,7 +278,7 @@ class JdbcDeviceLookupIT {
 
             assertTrue(
                     lookup.find("suntech", "0000000000"
-                    ).filter(JdbcDeviceLookup.Registration::enabled).map(JdbcDeviceLookup.Registration::device).isEmpty()
+                    ).filter(registration -> registration.enabled()).map(registration -> registration.device()).isEmpty()
             );
         }
     }
@@ -313,7 +313,7 @@ class JdbcDeviceLookupIT {
 
                 assertTrue(
                         lookup.find("teltonika", identity
-                        ).filter(JdbcDeviceLookup.Registration::enabled).map(JdbcDeviceLookup.Registration::device).isEmpty()
+                        ).filter(registration -> registration.enabled()).map(registration -> registration.device()).isEmpty()
                 );
 
             } finally {

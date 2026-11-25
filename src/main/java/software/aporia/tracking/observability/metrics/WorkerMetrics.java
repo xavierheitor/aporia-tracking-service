@@ -2,6 +2,7 @@ package software.aporia.tracking.observability.metrics;
 
 import java.util.concurrent.TimeUnit;
 
+import org.jspecify.annotations.NullMarked;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -14,6 +15,7 @@ import io.micrometer.core.instrument.Timer;
  */
 @Component
 @Profile("worker")
+@NullMarked
 public final class WorkerMetrics {
 
     private final Counter processed;

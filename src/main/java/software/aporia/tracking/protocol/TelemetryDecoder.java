@@ -1,5 +1,7 @@
 package software.aporia.tracking.protocol;
 
+import org.jspecify.annotations.NonNull;
+
 /**
  * Define como transformar os bytes persistidos pelo gateway em leituras e respostas
  * interpretáveis pelo worker.
@@ -15,7 +17,7 @@ public interface TelemetryDecoder {
      *
      * @return identificador do protocolo desta implementação
      */
-    String protocolId();
+    @NonNull String protocolId();
 
     /**
      * Identifica a implementação usada para interpretar o formato persistido.

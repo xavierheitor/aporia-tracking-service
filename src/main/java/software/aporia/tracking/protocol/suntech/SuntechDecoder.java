@@ -1,8 +1,5 @@
 package software.aporia.tracking.protocol.suntech;
 
-import software.aporia.tracking.protocol.DecodedPacket;
-import software.aporia.tracking.protocol.TelemetryDecoder;
-
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -10,7 +7,11 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import org.jspecify.annotations.NonNull;
+
 import software.aporia.tracking.core.Telemetry;
+import software.aporia.tracking.protocol.DecodedPacket;
+import software.aporia.tracking.protocol.TelemetryDecoder;
 
 /**
  * Interpreta mensagens Suntech, incluindo posições com mapa de campos, heartbeats e respostas com
@@ -27,7 +28,7 @@ public class SuntechDecoder implements TelemetryDecoder {
      *
      * @return identificador do protocolo desta implementação
      */
-    @Override public String protocolId() { return "suntech"; }
+    @Override public @NonNull String protocolId() { return "suntech"; }
 
     /**
      * Identifica a versão do formato gravada com os pacotes Suntech.

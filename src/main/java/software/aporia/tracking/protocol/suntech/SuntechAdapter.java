@@ -1,13 +1,15 @@
 package software.aporia.tracking.protocol.suntech;
 
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.jspecify.annotations.NonNull;
+
 import software.aporia.tracking.protocol.DeviceDescription;
 import software.aporia.tracking.protocol.ProtocolAdapter;
 import software.aporia.tracking.protocol.ProtocolFrame;
 import software.aporia.tracking.protocol.ProtocolSession;
-
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Adapta os quadros ASCII Suntech ao contrato do gateway e extrai o modelo quando o mapa de
@@ -29,7 +31,7 @@ public final class SuntechAdapter implements ProtocolAdapter {
      * @return identificador do protocolo desta implementação
      */
     @Override
-    public String protocolId() {
+    public @NonNull String protocolId() {
         return "suntech";
     }
 

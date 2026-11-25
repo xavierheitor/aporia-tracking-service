@@ -1,5 +1,7 @@
 package software.aporia.tracking.protocol;
 
+import org.jspecify.annotations.NonNull;
+
 import software.aporia.tracking.protocol.suntech.SuntechDecoder;
 
 import java.nio.charset.StandardCharsets;
@@ -27,7 +29,7 @@ class DecoderRegistryAlternativeTest {
              *
              * @return identificador do protocolo desta implementação
              */
-            @Override public String protocolId() { return "example"; }
+            @Override public @NonNull String protocolId() { return "example"; }
 
             /**
              * Distingue a implementação alternativa no registro de versões.

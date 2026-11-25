@@ -3,8 +3,11 @@ package software.aporia.tracking.observability.metrics;
 import java.util.EnumMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullMarked;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -16,11 +19,12 @@ import software.aporia.tracking.command.dispatcher.CommandDispatcher.DispatchRes
 
 @Component
 @Profile("gateway")
+@NullMarked
 public final class CommandMetrics {
 
-    private final Map<DispatchResult, Counter> dispatchResults = new EnumMap<>(DispatchResult.class);
+    private final Map<@NonNull DispatchResult, Counter> dispatchResults = new EnumMap<>(DispatchResult.class);
 
-    private final Map<DispatchResult, Timer> dispatchDurations = new EnumMap<>(DispatchResult.class);
+    private final Map<@NonNull DispatchResult, Timer> dispatchDurations = new EnumMap<>(DispatchResult.class);
 
     private final Counter dispatchErrors;
     private final Counter writeErrors;
@@ -34,8 +38,8 @@ public final class CommandMetrics {
 
         for (DispatchResult result : DispatchResult.values()) {
 
-            String label = result.name()
-                    .toLowerCase(Locale.ROOT);
+            String label = Objects.requireNonNull(result.name()
+                    .toLowerCase(Locale.ROOT));
 
             dispatchResults.put(
                     result,

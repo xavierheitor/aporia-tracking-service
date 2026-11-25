@@ -5,6 +5,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.ToDoubleFunction;
 
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
+
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -12,6 +16,7 @@ import io.micrometer.core.instrument.Timer;
 
 import software.aporia.tracking.storage.monitoring.QueueSnapshot;
 
+@NullMarked
 public final class QueueMetrics {
 
     private record CollectedSnapshot(
@@ -19,7 +24,7 @@ public final class QueueMetrics {
             long collectedAtNanos) {
     }
 
-    private final AtomicReference<CollectedSnapshot> latest = new AtomicReference<>();
+    private final AtomicReference<@Nullable CollectedSnapshot> latest = new AtomicReference<>();
 
     private final Counter collectionErrors;
     private final Counter collectionCompleted;
@@ -76,7 +81,7 @@ public final class QueueMetrics {
                 QueueSnapshot::oldestOutboxAgeSeconds,
                 "seconds");
 
-        for (String status : new String[] {
+        for (String status : new @NonNull String[] {
                 "queued",
                 "sending",
                 "transmitting",
@@ -87,7 +92,7 @@ public final class QueueMetrics {
                 "delivery_unknown",
                 "cancelled"
         }) {
-            Gauge.builder(
+            Gauge.<@NonNull QueueMetrics>builder(
                     "tracking.queue.commands",
                     this,
                     metrics -> metrics.readSnapshot(
@@ -98,14 +103,14 @@ public final class QueueMetrics {
                     .register(registry);
         }
 
-        Gauge.builder(
+        Gauge.<@NonNull QueueMetrics>builder(
                 "tracking.queue.snapshot.age",
                 this,
                 QueueMetrics::snapshotAgeSeconds)
                 .baseUnit("seconds")
                 .register(registry);
 
-        Gauge.builder(
+        Gauge.<@NonNull QueueMetrics>builder(
                 "tracking.queue.snapshot.available",
                 this,
                 metrics -> metrics.latest.get() == null
@@ -117,10 +122,10 @@ public final class QueueMetrics {
     private void registerGauge(
             MeterRegistry registry,
             String name,
-            ToDoubleFunction<QueueSnapshot> reader,
-            String baseUnit) {
+            ToDoubleFunction<@NonNull QueueSnapshot> reader,
+            @Nullable String baseUnit) {
 
-        var builder = Gauge.builder(
+        var builder = Gauge.<@NonNull QueueMetrics>builder(
                 name,
                 this,
                 metrics -> metrics.readSnapshot(reader));
@@ -133,7 +138,7 @@ public final class QueueMetrics {
     }
 
     private double readSnapshot(
-            ToDoubleFunction<QueueSnapshot> reader) {
+            ToDoubleFunction<@NonNull QueueSnapshot> reader) {
 
         CollectedSnapshot current = latest.get();
 

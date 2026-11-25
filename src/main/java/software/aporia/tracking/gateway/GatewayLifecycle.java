@@ -3,6 +3,7 @@ package software.aporia.tracking.gateway;
 import java.io.IOException;
 import java.util.Objects;
 
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
@@ -75,7 +76,7 @@ public final class GatewayLifecycle implements SmartLifecycle {
      * @param callback confirmação exigida pelo Spring após a terminação do gateway
      */
     @Override
-    public void stop(Runnable callback) {
+    public void stop(@NonNull Runnable callback) {
         gateway.requestStop();
 
         // A thread auxiliar evita bloquear o coordenador de encerramento do contexto.

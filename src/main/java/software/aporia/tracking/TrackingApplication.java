@@ -1,5 +1,6 @@
 package software.aporia.tracking;
 
+import org.jspecify.annotations.NullMarked;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
@@ -16,6 +17,7 @@ public class TrackingApplication {
      *
      * @param args argumentos repassados ao Spring Boot, incluindo opções de configuração e perfis
      */
+    @NullMarked
     public static void main(String[] args) {
         // O contexto assume a configuração e o encerramento; não é necessário iniciar as threads aqui.
         SpringApplication.run(TrackingApplication.class, args);

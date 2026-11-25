@@ -302,7 +302,7 @@ public class TcpGateway {
         }
         // Resolve o protocolo fixo na partida para falhar antes de aceitar conexões.
         var fixedAdapter = registry.get(protocolId);
-        return firstByte -> fixedAdapter;
+        return _ -> fixedAdapter;
     }
 
     /**

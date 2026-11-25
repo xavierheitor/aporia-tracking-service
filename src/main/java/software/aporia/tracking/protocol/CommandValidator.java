@@ -1,5 +1,7 @@
 package software.aporia.tracking.protocol;
 
+import org.jspecify.annotations.NonNull;
+
 /**
  * Define a validação sintática dos bytes de comando segundo o protocolo do dispositivo.
  * Um formato válido ainda depende das permissões e da política de execução do chamador.
@@ -11,7 +13,7 @@ public interface CommandValidator {
      *
      * @return identificador do protocolo desta implementação
      */
-    String protocolId();
+    @NonNull String protocolId();
 
     /**
      * Verifica o formato do comando. A sobrecarga com identidade permite ao protocolo conferir

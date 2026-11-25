@@ -7,15 +7,15 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-
 import javax.sql.DataSource;
 
+import org.jspecify.annotations.NonNull;
 import org.slf4j.LoggerFactory;
 
 import software.aporia.tracking.observability.metrics.CommandMetrics;
 import software.aporia.tracking.protocol.suntech.FirmwareVersionRequest;
-import software.aporia.tracking.storage.command.DeviceCommandDispatchRepository;
 import software.aporia.tracking.storage.command.DeviceCommandDispatchRepository.Failure;
+import software.aporia.tracking.storage.command.DeviceCommandDispatchRepository;
 import software.aporia.tracking.storage.command.DeviceCommandRecoveryRepository;
 
 /**
@@ -84,7 +84,7 @@ public final class CommandDispatcher {
      * @return desfecho da tentativa observado pelo dispatcher
      * @throws SQLException se a operação JDBC falhar
      */
-    private DispatchResult dispatchNextInternal(UUID tenantId, UUID deviceId) throws SQLException {
+    private @NonNull DispatchResult dispatchNextInternal(UUID tenantId, UUID deviceId) throws SQLException {
         synchronized (owner) {
             UUID ownerId = owner.id();
             var endpoint = transport.connect(tenantId, deviceId);
@@ -113,7 +113,8 @@ public final class CommandDispatcher {
                 }
             }
 
-            DispatchResult result = rejection.isPresent() ? rejection.get() : transmit(command, session);
+            DispatchResult result = Objects.requireNonNull(
+                    rejection.isPresent() ? rejection.get() : transmit(command, session));
             LoggerFactory.getLogger(CommandDispatcher.class).info(
                     "Command dispatch tenant={} device={} command={} attempt={} result={}",
                     tenantId,
@@ -125,7 +126,7 @@ public final class CommandDispatcher {
         }
     }
 
-    public DispatchResult dispatchNext(
+    public @NonNull DispatchResult dispatchNext(
             UUID tenantId,
             UUID deviceId) throws SQLException {
 
@@ -185,7 +186,7 @@ public final class CommandDispatcher {
     /**
      * Escreve somente após o commit da autorização e registra o resultado observado.
      */
-    private DispatchResult transmit(
+    private @NonNull DispatchResult transmit(
             DeviceCommandDispatchRepository.ClaimedCommand command,
             CommandTransport.Endpoint session) throws SQLException {
         UUID tenantId = command.tenantId();

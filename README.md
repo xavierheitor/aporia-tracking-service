@@ -78,6 +78,16 @@ mvn -Plint clean test-compile
 mvn clean test
 ```
 
+A política de análise Java está versionada em [`config/java/jdt.prefs`](config/java/jdt.prefs), e o VS Code Java a carrega por `java.settings.url` em `.vscode/settings.json`. As anotações reconhecidas são JSpecify. No Eclipse, importe as mesmas preferências de compilador para o projeto.
+
+Produção e testes usam a mesma política. Permanecem habilitados os diagnósticos de acesso nulo, acesso potencialmente nulo, violação de contrato, conflitos de inferência e conversões de nulidade desconhecida para não nula. Uma anotação incompatível em uma implementação deve ser corrigida, inclusive em doubles de teste.
+
+Duas categorias informativas ficam desabilitadas: `nonnullTypeVariableFromLegacyInvocation` (inferência de retorno não nulo em APIs genéricas sem anotações completas, como JDK/JDBC) e `annotatedTypeArgumentToUnannotated` (passagem de um tipo anotado para uma API ainda não anotada). Esses diagnósticos indicam limites da cobertura de anotações, sem demonstrar um defeito por si só. Isso não torna JDBC seguro contra `NULL`: os contratos do schema, a validação nas fronteiras e os testes de persistência continuam necessários. Reavalie essa escolha quando as bibliotecas fornecerem contratos completos.
+
+Não adicionar comportamento de fallback, verificações redundantes ou supressões locais apenas para obter zero avisos. Marcar ausências válidas com `@Nullable`; usar `@NullMarked` somente onde o contrato for verdadeiro. Um painel sem avisos não certifica segurança, isolamento por tenant, concorrência ou integridade transacional.
+
+O `javac` usado pelo Maven não executa a análise de nulidade do JDT; `mvn -Plint test` e a análise da IDE são verificações complementares. Para uma verificação em lote, use o compilador Eclipse com Java 25, `-properties config/java/jdt.prefs` e o classpath de testes do Maven, incluindo `src/main/java` e `src/test/java`.
+
 A preparação de comandos legados, payloads inválidos e estados históricos fica em `src/test`, especialmente em `CommandTestFixtures`. Os testes de operações normais usam os contratos de produção: ingestão com tenant/dispositivo, solicitação auditada de firmware e reserva vinculada ao token de sessão. A persistência de produção não oferece versões menos restritivas para montar cenários de teste.
 
 Para incluir as integrações JDBC e TCP, configure `TRACKING_TEST_DB_URL`, `TRACKING_TEST_DB_USER` e `TRACKING_TEST_DB_PASSWORD` para o banco `aporia_tracking_test`. A suíte cria e remove um schema isolado por execução. Os testes que iniciam as JVMs também criam e removem dois logins exclusivos para validar as permissões reais dos serviços. Use uma credencial de teste com permissão para criar roles.

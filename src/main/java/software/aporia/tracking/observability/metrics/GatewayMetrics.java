@@ -1,8 +1,11 @@
 package software.aporia.tracking.observability.metrics;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullMarked;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -12,6 +15,7 @@ import io.micrometer.core.instrument.Timer;
 
 @Component
 @Profile("gateway")
+@NullMarked
 public final class GatewayMetrics {
 
         private final Counter acceptedConnections;
@@ -21,7 +25,7 @@ public final class GatewayMetrics {
         private final Counter receivedBytes;
         private final Counter protocolErrors;
 
-        private final Map<String, ProtocolMetrics> protocols;
+        private final Map<String, @NonNull ProtocolMetrics> protocols;
 
         private record ProtocolMetrics(
                         Counter frames,
@@ -58,13 +62,13 @@ public final class GatewayMetrics {
                                 .description("Invalid protocol or session frames")
                                 .register(registry);
 
-                protocols = Map.of(
+                protocols = Objects.requireNonNull(Map.of(
                                 "suntech",
                                 registerProtocol(registry, "suntech"),
                                 "teltonika",
                                 registerProtocol(registry, "teltonika"),
                                 "other",
-                                registerProtocol(registry, "other"));
+                                registerProtocol(registry, "other")));
         }
 
         public void connectionAccepted() {
@@ -127,9 +131,9 @@ public final class GatewayMetrics {
         }
 
         private ProtocolMetrics protocol(String protocol) {
-                return protocols.getOrDefault(
+                return Objects.requireNonNull(protocols.getOrDefault(
                                 protocol,
-                                protocols.get("other"));
+                                Objects.requireNonNull(protocols.get("other"))));
         }
 
         public void bytesReceived(int bytes) {

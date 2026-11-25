@@ -56,7 +56,7 @@ public final class SessionRegistry {
 
         AtomicReference<DeviceSession> replaced = new AtomicReference<>();
 
-        sessions.compute(key, (ignored, previous) -> {
+        sessions.compute(key, (_, previous) -> {
 
             activate.run();
             if (previous != null && previous != session) {

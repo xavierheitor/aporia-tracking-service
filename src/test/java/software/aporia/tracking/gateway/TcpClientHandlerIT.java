@@ -101,7 +101,7 @@ class TcpClientHandlerIT {
                 new JdbcPacketIngestion(dataSource),
                 new JdbcDeviceLookup(dataSource),
                 sessionRegistry,
-                first -> new SuntechAdapter(),
+                _ -> new SuntechAdapter(),
                 running,
                 metrics);
     }
@@ -187,11 +187,11 @@ class TcpClientHandlerIT {
      *
      * @param condition condição observada até o prazo do cenário
      */
-    @SuppressWarnings("SleepWhileInLoop") // Polling limitado pelo timeout do teste.
+    // Polling limitado pelo timeout do teste.
     private void awaitCondition(BooleanSupplier condition) {
 
         assertTimeoutPreemptively(
-                Duration.ofSeconds(5),
+                java.util.Objects.requireNonNull(Duration.ofSeconds(5)),
                 () -> {
                     while (!condition.getAsBoolean()) {
                         Thread.sleep(10);

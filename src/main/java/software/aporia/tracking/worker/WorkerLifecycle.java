@@ -5,6 +5,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
@@ -167,7 +168,7 @@ public final class WorkerLifecycle implements SmartLifecycle {
      * @param callback confirmação executada após observar o término da thread
      */
     @Override
-    public void stop(Runnable callback) {
+    public void stop(@NonNull Runnable callback) {
         Thread thread = requestStop();
 
         if (thread == null || !thread.isAlive()) {

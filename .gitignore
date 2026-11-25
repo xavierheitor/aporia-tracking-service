@@ -12,7 +12,8 @@ replay_pid*
 
 # Local IDE files
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 *.iml
 .classpath
 .project

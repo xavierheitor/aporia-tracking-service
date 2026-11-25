@@ -1,5 +1,7 @@
 package software.aporia.tracking.protocol;
 
+import org.jspecify.annotations.NonNull;
+
 /**
  * Define a detecção e a abertura de sessões de um protocolo e a descrição de equipamentos a
  * partir de quadros reconhecidos.
@@ -15,7 +17,7 @@ public interface ProtocolAdapter {
      *
      * @return identificador do protocolo desta implementação
      */
-    String protocolId();
+    @NonNull String protocolId();
 
     /**
      * Versão gravada com os bytes brutos para orientar o processamento posterior.

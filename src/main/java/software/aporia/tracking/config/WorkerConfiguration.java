@@ -1,15 +1,16 @@
 package software.aporia.tracking.config;
 
 import java.util.List;
-
 import javax.sql.DataSource;
 
+import org.jspecify.annotations.NullMarked;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
-import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.binder.MeterBinder;
+
 import software.aporia.tracking.observability.metrics.WorkerMetrics;
 import software.aporia.tracking.protocol.DecoderRegistry;
 import software.aporia.tracking.protocol.suntech.SuntechDecoder;
@@ -65,6 +66,7 @@ public class WorkerConfiguration {
     }
 
     @Bean
+    @NullMarked
     public MeterBinder workerGauges(
             WorkerLifecycle lifecycle) {
 

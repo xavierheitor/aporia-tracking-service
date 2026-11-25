@@ -59,6 +59,12 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- Contratos de nulidade; versão gerenciada pelo Spring Boot -->
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+        </dependency>
+
         <!-- Exportação de métricas Prometheus -->
         <dependency>
             <groupId>io.micrometer</groupId>

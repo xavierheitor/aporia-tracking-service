@@ -5,8 +5,9 @@ import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
-
 import javax.sql.DataSource;
+
+import org.jspecify.annotations.NonNull;
 
 /**
  * Consulta exclusivamente indicadores agregados das filas persistidas no PostgreSQL.
@@ -73,7 +74,7 @@ public final class QueueMetricsRepository {
         this.queryTimeoutSeconds = queryTimeoutSeconds;
     }
 
-    public QueueSnapshot collect() throws SQLException {
+    public @NonNull QueueSnapshot collect() throws SQLException {
 
         try (Connection connection = dataSource.getConnection()) {
 
@@ -104,7 +105,7 @@ public final class QueueMetricsRepository {
         }
     }
 
-    private QueueSnapshot readSnapshot(
+    private @NonNull QueueSnapshot readSnapshot(
             Connection connection) throws SQLException {
 
         long pendingPackets;

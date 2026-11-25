@@ -34,7 +34,7 @@ public final class SessionCommandTransport
      */
     @Override
     public Optional<Endpoint> connect(UUID tenantId, UUID deviceId) {
-        return sessions.find(tenantId, deviceId).filter(DeviceSession::isConnected)
+        return sessions.find(tenantId, deviceId).filter(session -> session.isConnected())
                 .map(session -> session);
     }
 }

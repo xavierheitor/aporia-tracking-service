@@ -231,7 +231,6 @@ class GatewayCommandCycleIT {
      * @param predicate   condição observada até o prazo do cenário
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
-    @SuppressWarnings("SleepWhileInLoop")
     private void await(String description, Callable<Boolean> predicate) throws Exception {
         long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < end) {

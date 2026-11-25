@@ -1,13 +1,15 @@
 package software.aporia.tracking.protocol.teltonika;
 
-import software.aporia.tracking.protocol.DecodedPacket;
-import software.aporia.tracking.protocol.TelemetryDecoder;
-
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.util.ArrayList;
+
+import org.jspecify.annotations.NonNull;
+
 import software.aporia.tracking.core.Telemetry;
+import software.aporia.tracking.protocol.DecodedPacket;
+import software.aporia.tracking.protocol.TelemetryDecoder;
 
 /**
  * Valida lotes AVL Codec 8 e 8E e extrai suas leituras GPS na ordem dos registros.
@@ -26,7 +28,7 @@ public final class TeltonikaAvl implements TelemetryDecoder {
      *
      * @return identificador do protocolo desta implementação
      */
-    @Override public String protocolId() { return "teltonika"; }
+    @Override public @NonNull String protocolId() { return "teltonika"; }
 
     /**
      * Informa a versão de decodificação usada na persistência do pacote.

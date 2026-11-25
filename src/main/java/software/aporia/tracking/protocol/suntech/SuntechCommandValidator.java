@@ -1,11 +1,13 @@
 
 package software.aporia.tracking.protocol.suntech;
 
-import software.aporia.tracking.protocol.CommandValidator;
-
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.regex.Pattern;
+
+import org.jspecify.annotations.NonNull;
+
+import software.aporia.tracking.protocol.CommandValidator;
 
 /**
  * Valida a sintaxe de comandos Suntech e confere o destinatário quando o chamador informa a
@@ -38,7 +40,7 @@ public final class SuntechCommandValidator
      * @return identificador do protocolo desta implementação
      */
     @Override
-    public String protocolId() {
+    public @NonNull String protocolId() {
         return "suntech";
     }
 

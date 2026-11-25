@@ -72,7 +72,7 @@ class PacketProcessingRepositoryIT {
                     }).orElseThrow());
             assertPacket(db, first, firstPacket, "pending", 0);
             assertPacket(db, second, secondPacket, "processed", 1);
-            assertTrue(repository.processNext(second.tenantId(), Set.of("suntech-ascii-v3"), processing -> {
+            assertTrue(repository.processNext(second.tenantId(), Set.of("suntech-ascii-v3"), _ -> {
                 fail("O tenant não tem outro pacote pendente");
                 return false;
             }).isEmpty());
@@ -112,7 +112,7 @@ class PacketProcessingRepositoryIT {
                             () -> new PacketProcessingRepository(db).processNext(
                                     fixture.tenantId(),
                                     Set.of("suntech-ascii-v3"),
-                                    processing -> {
+                                    _ -> {
                                         fail("Pacote já reservado por outro consumidor");
                                         return false;
                                     }));
@@ -162,7 +162,7 @@ class PacketProcessingRepositoryIT {
             DataSource failing = (DataSource) Proxy.newProxyInstance(
                     DataSource.class.getClassLoader(),
                     new Class<?>[] { DataSource.class },
-                    (proxy, method, args) -> {
+                    (_, method, args) -> {
                         try {
                             Object result = method.invoke(db, args);
                             if (method.getName().equals("getConnection")) {
@@ -170,7 +170,7 @@ class PacketProcessingRepositoryIT {
                                 return Proxy.newProxyInstance(
                                         Connection.class.getClassLoader(),
                                         new Class<?>[] { Connection.class },
-                                        (ignored, operation, parameters) -> {
+                                        (_, operation, parameters) -> {
                                             if (operation.getName().equals("commit")) {
                                                 throw new SQLException("SIMULATED_COMMIT_FAILURE");
                                             }

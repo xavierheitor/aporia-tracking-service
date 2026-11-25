@@ -1,14 +1,16 @@
 package software.aporia.tracking.protocol.teltonika;
 
-import software.aporia.tracking.protocol.DeviceDescription;
-import software.aporia.tracking.protocol.ProtocolAdapter;
-import software.aporia.tracking.protocol.ProtocolFrame;
-import software.aporia.tracking.protocol.ProtocolSession;
-
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+
+import org.jspecify.annotations.NonNull;
+
+import software.aporia.tracking.protocol.DeviceDescription;
+import software.aporia.tracking.protocol.ProtocolAdapter;
+import software.aporia.tracking.protocol.ProtocolFrame;
+import software.aporia.tracking.protocol.ProtocolSession;
 
 /**
  * Conduz o login por IMEI e o enquadramento AVL em TCP. Cada conexão mantém um buffer próprio
@@ -35,7 +37,7 @@ public final class TeltonikaAdapter implements ProtocolAdapter {
      *
      * @return identificador do protocolo desta implementação
      */
-    @Override public String protocolId() { return "teltonika"; }
+    @Override public @NonNull String protocolId() { return "teltonika"; }
     /**
      * Obtém do decodificador a versão que acompanhará o lote bruto.
      *

@@ -336,7 +336,7 @@ class CommandDispatcherIT {
                     }
                     UUID newToken = UUID.randomUUID();
                     activate(db, fixture, newToken);
-                    var second = dispatcher(db, other, fixture, newToken, payload -> fail("second writer"));
+                    var second = dispatcher(db, other, fixture, newToken, _ -> fail("second writer"));
                     second.recover();
                     assertEquals("transmitting", status(db, fixture, command));
                     assertEquals(NO_COMMAND, second.dispatchNext(fixture.tenantId(), fixture.deviceId()));
@@ -357,7 +357,7 @@ class CommandDispatcherIT {
                         restarted,
                         fixture,
                         UUID.randomUUID(),
-                        payload -> fail("unexpected replay"));
+                        _ -> fail("unexpected replay"));
                 dispatcher.recover();
                 assertEquals("delivery_unknown", status(db, fixture, command));
                 assertEquals(NO_COMMAND, dispatcher.dispatchNext(fixture.tenantId(), fixture.deviceId()));
@@ -376,8 +376,8 @@ class CommandDispatcherIT {
                 var b = DispatchOwner.open(directory.resolve("b"));
                 var c = DispatchOwner.open(directory.resolve("c"))
         ) {
-            var first = dispatcher(db, a, device, bytes -> fail("sessão antiga"));
-            var second = dispatcher(db, b, device, bytes -> fail("sessão substituída"));
+            var first = dispatcher(db, a, device, _ -> fail("sessão antiga"));
+            var second = dispatcher(db, b, device, _ -> fail("sessão substituída"));
             var output = new ByteArrayOutputStream();
             var third = dispatcher(db, c, device, output::writeBytes);
             UUID id = requestFirmware(db, device);
