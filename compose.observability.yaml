@@ -1,0 +1,117 @@
+name: aporia-observability
+
+x-observability: &observability
+
+  restart: unless-stopped
+
+  security_opt:
+    - no-new-privileges:true
+
+  networks:
+    - observability
+
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+
+
+services:
+
+  prometheus:
+    <<: *observability
+
+    image: prom/prometheus:v3.5.0
+
+    user: "${OBSERVABILITY_UID:-1000}:${OBSERVABILITY_GID:-1000}"
+
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-30d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-5GB}
+
+    ports:
+      - "${OBSERVABILITY_PUBLISH_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
+
+    volumes:
+      - ./docker/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/observability/prometheus/rules:/etc/prometheus/rules:ro
+      - ./runtime/observability/prometheus:/prometheus
+
+    secrets:
+      - tracking_monitoring_password
+
+    mem_limit: 768m
+    cpus: 1.0
+
+
+  grafana:
+    <<: *observability
+
+    image: grafana/grafana:12.1.0
+
+    environment:
+
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?required}
+
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+
+    ports:
+      - "${OBSERVABILITY_PUBLISH_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
+
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+      - ./docker/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+
+      - ./docker/observability/grafana/dashboards:/var/lib/grafana/dashboards/tracking:ro
+
+    mem_limit: 512m
+    cpus: 1.0
+
+
+  alertmanager:
+    <<: *observability
+
+    image: prom/alertmanager:v0.28.1
+
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+
+    ports:
+      - "${OBSERVABILITY_PUBLISH_ADDRESS:-127.0.0.1}:${ALERTMANAGER_PORT:-9093}:9093"
+
+    volumes:
+      - ./docker/observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+
+    mem_limit: 128m
+    cpus: 0.5
+
+
+networks:
+
+  observability:
+    name: aporia-observability
+    external: true
+
+
+volumes:
+
+  grafana-data:
+
+  alertmanager-data:
+
+
+secrets:
+
+  tracking_monitoring_password:
+    file: ./runtime/observability/secrets/tracking-monitoring-password

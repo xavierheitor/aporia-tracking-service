@@ -2,9 +2,11 @@ name: aporia-tracking-service
 
 x-postgres: &postgres
   image: aporia-postgres-postgis:16
+
   build:
     context: .
     dockerfile: docker/postgres/Dockerfile
+
   healthcheck:
     test:
       - CMD-SHELL
@@ -13,45 +15,241 @@ x-postgres: &postgres
     timeout: 3s
     retries: 10
     start_period: 10s
+
   stop_grace_period: 30s
 
+
+x-tracking-environment: &tracking-environment
+
+  TRACKING_DB_URL: ${TRACKING_CONTAINER_DB_URL:?required}
+
+  TRACKING_DB_POOL_MAX: ${TRACKING_DB_POOL_MAX:-10}
+  TRACKING_DB_POOL_MIN: ${TRACKING_DB_POOL_MIN:-2}
+
+  TRACKING_DB_CONNECTION_TIMEOUT_MS: ${TRACKING_DB_CONNECTION_TIMEOUT_MS:-3000}
+  TRACKING_DB_VALIDATION_TIMEOUT_MS: ${TRACKING_DB_VALIDATION_TIMEOUT_MS:-1000}
+
+  TRACKING_MONITORING_USER: ${TRACKING_MONITORING_USER:-monitoring}
+  TRACKING_MONITORING_PASSWORD: ${TRACKING_MONITORING_PASSWORD:?required}
+
+  TRACKING_MANAGEMENT_BIND: 0.0.0.0
+  TRACKING_MANAGEMENT_PORT: 9100
+
+  JAVA_TOOL_OPTIONS: >-
+    -XX:InitialRAMPercentage=20.0
+    -XX:MaxRAMPercentage=50.0
+    -XX:+ExitOnOutOfMemoryError
+    -Dfile.encoding=UTF-8
+    -Duser.timezone=UTC
+
+
+x-tracking: &tracking
+
+  image: aporia-tracking-service:local
+
+  build:
+    context: .
+    dockerfile: docker/java/Dockerfile
+
+  profiles: [app]
+
+  restart: unless-stopped
+
+  init: true
+
+  stop_grace_period: 60s
+
+  security_opt:
+    - no-new-privileges:true
+
+  cap_drop:
+    - ALL
+
+  read_only: true
+
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,size=64m
+
+  networks:
+    - backend
+    - observability
+
+  healthcheck:
+    test:
+      - CMD
+      - curl
+      - --fail
+      - --silent
+      - --max-time
+      - "5"
+      - http://127.0.0.1:9100/actuator/health/liveness
+    interval: 15s
+    timeout: 6s
+    retries: 3
+    start_period: 30s
+
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+
+
 services:
+
   postgres:
     <<: *postgres
+
     profiles: [dev]
+
     restart: unless-stopped
+
     environment:
       POSTGRES_DB: aporia_tracking
       POSTGRES_USER: tracking_admin
       POSTGRES_PASSWORD: ${TRACKING_ADMIN_DB_PASSWORD:?required}
+
     ports:
       - "127.0.0.1:5437:5432"
+
     volumes:
       - postgres-data:/var/lib/postgresql/data
+
     networks:
       - backend
 
+
   postgres-test:
     <<: *postgres
+
     profiles: [test]
+
     restart: "no"
+
     environment:
       POSTGRES_DB: aporia_tracking_test
       POSTGRES_USER: tracking_test_admin
       POSTGRES_PASSWORD: ${TRACKING_TEST_DB_PASSWORD:?required}
+
     ports:
       - "127.0.0.1:15437:5432"
+
     volumes:
       - postgres-test-data:/var/lib/postgresql/data
+
     networks:
       - testing
 
+
+  gateway:
+    <<: *tracking
+
+    command:
+      - --spring.profiles.active=gateway
+
+    environment:
+      <<: *tracking-environment
+
+      TRACKING_DB_USER: tracking_gateway
+      TRACKING_DB_PASSWORD: ${TRACKING_GATEWAY_DB_PASSWORD:?required}
+
+      TRACKING_TCP_BIND: 0.0.0.0
+      TRACKING_TCP_PORT: 5500
+
+      TRACKING_PROTOCOL: ${TRACKING_PROTOCOL:-auto}
+      TRACKING_TCP_SESSION_IDLE_SECONDS: ${TRACKING_TCP_SESSION_IDLE_SECONDS:-180}
+
+      TRACKING_DISPATCH_OWNER_FILE: /app/runtime/dispatch-owner
+
+    ports:
+      - "${TRACKING_PUBLISH_ADDRESS:-127.0.0.1}:${TRACKING_TCP_PORT:-5500}:5500"
+      - "127.0.0.1:${TRACKING_GATEWAY_MANAGEMENT_PORT:-9101}:9100"
+
+    volumes:
+      - gateway-runtime:/app/runtime
+
+    mem_limit: ${TRACKING_GATEWAY_MEMORY:-512m}
+    cpus: ${TRACKING_GATEWAY_CPUS:-1.0}
+
+    networks:
+      backend:
+      observability:
+        aliases:
+          - tracking-gateway
+
+
+  worker:
+    <<: *tracking
+
+    command:
+      - --spring.profiles.active=worker
+
+    environment:
+      <<: *tracking-environment
+
+      TRACKING_DB_USER: tracking_worker
+      TRACKING_DB_PASSWORD: ${TRACKING_WORKER_DB_PASSWORD:?required}
+
+      TRACKING_WORKER_HEARTBEAT_TIMEOUT_SECONDS: ${TRACKING_WORKER_HEARTBEAT_TIMEOUT_SECONDS:-60}
+
+    ports:
+      - "127.0.0.1:${TRACKING_WORKER_MANAGEMENT_PORT:-9102}:9100"
+
+    mem_limit: ${TRACKING_WORKER_MEMORY:-512m}
+    cpus: ${TRACKING_WORKER_CPUS:-1.0}
+
+    networks:
+      backend:
+      observability:
+        aliases:
+          - tracking-worker
+
+
+  monitor:
+    <<: *tracking
+
+    command:
+      - --spring.profiles.active=monitor
+
+    environment:
+      <<: *tracking-environment
+
+      TRACKING_DB_USER: ${TRACKING_MONITOR_DB_USER:-tracking_monitor}
+      TRACKING_DB_PASSWORD: ${TRACKING_MONITOR_DB_PASSWORD:?required}
+
+      TRACKING_QUEUE_COLLECTION_INTERVAL_MS: ${TRACKING_QUEUE_COLLECTION_INTERVAL_MS:-30000}
+      TRACKING_QUEUE_QUERY_TIMEOUT_SECONDS: ${TRACKING_QUEUE_QUERY_TIMEOUT_SECONDS:-3}
+
+    ports:
+      - "127.0.0.1:${TRACKING_MONITOR_MANAGEMENT_PORT:-9104}:9100"
+
+    mem_limit: ${TRACKING_MONITOR_MEMORY:-384m}
+    cpus: ${TRACKING_MONITOR_CPUS:-0.5}
+
+    networks:
+      backend:
+      observability:
+        aliases:
+          - tracking-monitor
+
+
 networks:
+
   backend:
     driver: bridge
+
   testing:
     driver: bridge
 
+  observability:
+    name: aporia-observability
+    external: true
+
+
 volumes:
+
   postgres-data:
+
   postgres-test-data:
+
+  gateway-runtime:

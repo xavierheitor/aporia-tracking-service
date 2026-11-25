@@ -1,0 +1,112 @@
+groups:
+
+  - name: tracking-availability
+
+    rules:
+
+      - alert: TrackingServiceDown
+
+        expr: up{job=~"tracking-.*"} == 0
+
+        for: 1m
+
+        labels:
+          severity: critical
+
+        annotations:
+          summary: "Tracking service unavailable"
+          description: "{{ $labels.job }} is not responding to Prometheus."
+
+
+      - alert: TrackingWorkerHeartbeatExpired
+
+        expr: tracking_worker_heartbeat_age_seconds > 60
+
+        for: 30s
+
+        labels:
+          severity: critical
+
+        annotations:
+          summary: "Tracking worker heartbeat expired"
+          description: "Worker is not starting new processing cycles."
+
+
+      - alert: TrackingQueueSnapshotUnavailable
+
+        expr: tracking_queue_snapshot_available == 0
+
+        for: 1m
+
+        labels:
+          severity: critical
+
+        annotations:
+          summary: "Queue snapshot unavailable"
+          description: "Monitor has not collected a valid queue snapshot."
+
+
+      - alert: TrackingQueueSnapshotStale
+
+        expr: tracking_queue_snapshot_age_seconds > 90
+
+        for: 30s
+
+        labels:
+          severity: critical
+
+        annotations:
+          summary: "Queue metrics are stale"
+          description: "Last successful collection occurred more than 90 seconds ago."
+
+
+  - name: tracking-processing
+
+    rules:
+
+      - alert: TrackingPacketBacklogAgeHigh
+
+        expr: |
+          (tracking_queue_packets_oldest_age_seconds > 300)
+          and
+          (tracking_queue_snapshot_age_seconds < 90)
+
+        for: 2m
+
+        labels:
+          severity: warning
+
+        annotations:
+          summary: "Old pending tracking packets"
+          description: "There are pending packets older than five minutes."
+
+
+      - alert: TrackingWorkerProcessingErrors
+
+        expr: |
+          sum(increase(tracking_worker_cycles_failed_total[5m])) > 5
+
+        for: 1m
+
+        labels:
+          severity: warning
+
+        annotations:
+          summary: "Repeated worker processing errors"
+
+
+      - alert: TrackingCommandDeliveryUnknown
+
+        expr: |
+          sum(increase(
+            tracking_command_dispatch_total{
+              result="delivery_unknown"
+            }[5m]
+          )) > 0
+
+        labels:
+          severity: warning
+
+        annotations:
+          summary: "Uncertain command delivery"
+          description: "At least one command has an uncertain transmission result."
