@@ -1,38 +1,34 @@
 package software.aporia.tracking.observability.errors;
 
+import java.util.List;
+import java.util.Map;
+
+import org.jspecify.annotations.NonNull;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.sentry.Hint;
 import io.sentry.SentryEvent;
 import io.sentry.SentryOptions;
 import io.sentry.protocol.Request;
 import io.sentry.protocol.SentryException;
-import io.sentry.protocol.User;
-
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-
 import io.sentry.protocol.SentryStackFrame;
 import io.sentry.protocol.SentryStackTrace;
-
-import java.util.Map;
+import io.sentry.protocol.User;
 
 class ErrorTrackingConfigurationTest {
 
-        private SimpleMeterRegistry registry;
+        private final @NonNull SimpleMeterRegistry registry = new SimpleMeterRegistry();
 
         private SentryOptions.BeforeSendCallback callback;
 
         @BeforeEach
         void setUp() {
-
-                registry = new SimpleMeterRegistry();
 
                 var configuration = new ErrorTrackingConfiguration();
 
@@ -147,7 +143,7 @@ class ErrorTrackingConfigurationTest {
                                 counterValue("tracking.error.events.discarded"));
         }
 
-        private double counterValue(String name) {
+        private double counterValue(@NonNull String name) {
 
                 return registry.get(name)
                                 .counter()

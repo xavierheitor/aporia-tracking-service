@@ -1,13 +1,16 @@
 package software.aporia.tracking.observability.errors;
 
+import java.time.Duration;
+import java.util.List;
+import java.util.Objects;
+import java.util.StringJoiner;
+
+import org.jspecify.annotations.NonNull;
+
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.sentry.SentryEvent;
 import io.sentry.protocol.SentryException;
-
-import java.time.Duration;
-import java.util.List;
-import java.util.StringJoiner;
 
 /**
  * Limita o envio de exceções recorrentes ao serviço externo de error tracking.
@@ -16,14 +19,14 @@ import java.util.StringJoiner;
  */
 public final class ErrorEventLimiter {
 
-    private final Cache<String, Boolean> recentEvents;
+    private final Cache<String, @NonNull Boolean> recentEvents;
 
     public ErrorEventLimiter(
             Duration interval,
             long maximumSignatures) {
 
         this.recentEvents = Caffeine.newBuilder()
-                .expireAfterWrite(interval)
+                .expireAfterWrite(Objects.requireNonNull(interval))
                 .maximumSize(maximumSignatures)
                 .build();
     }
@@ -39,7 +42,7 @@ public final class ErrorEventLimiter {
         String signature = signatureOf(exceptions);
 
         return recentEvents.asMap()
-                .putIfAbsent(signature, Boolean.TRUE) == null;
+                .putIfAbsent(signature, true) == null;
     }
 
     private String signatureOf(

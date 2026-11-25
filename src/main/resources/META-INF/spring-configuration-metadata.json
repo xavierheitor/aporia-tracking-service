@@ -1,0 +1,64 @@
+{
+  "groups": [
+    {
+      "name": "tracking",
+      "description": "Configuração operacional do serviço de rastreamento."
+    },
+    {
+      "name": "tracking.gateway",
+      "description": "Listener TCP e dispatcher."
+    },
+    {
+      "name": "tracking.worker",
+      "description": "Monitoramento do worker."
+    },
+    {
+      "name": "tracking.monitor",
+      "description": "Coleta das métricas de filas."
+    }
+  ],
+  "properties": [
+    {
+      "name": "tracking.gateway.bind",
+      "type": "java.lang.String",
+      "description": "Endereço local do listener TCP.",
+      "defaultValue": "0.0.0.0"
+    },
+    {
+      "name": "tracking.gateway.port",
+      "type": "java.lang.Integer",
+      "description": "Porta do listener TCP.",
+      "defaultValue": 5500
+    },
+    {
+      "name": "tracking.gateway.protocol",
+      "type": "java.lang.String",
+      "description": "Protocolo fixo ou detecção automática com auto.",
+      "defaultValue": "auto"
+    },
+    {
+      "name": "tracking.gateway.dispatch-owner-file",
+      "type": "java.lang.String",
+      "description": "Arquivo persistente de propriedade do emissor; vazio desabilita o polling de comandos.",
+      "defaultValue": ""
+    },
+    {
+      "name": "tracking.worker.heartbeat-timeout-seconds",
+      "type": "java.lang.Long",
+      "description": "Prazo em segundos para considerar o heartbeat do worker expirado.",
+      "defaultValue": 60
+    },
+    {
+      "name": "tracking.monitor.collection-interval-ms",
+      "type": "java.lang.Long",
+      "description": "Intervalo em milissegundos entre coletas das filas.",
+      "defaultValue": 30000
+    },
+    {
+      "name": "tracking.monitor.query-timeout-seconds",
+      "type": "java.lang.Integer",
+      "description": "Timeout em segundos das consultas de monitoramento.",
+      "defaultValue": 3
+    }
+  ]
+}

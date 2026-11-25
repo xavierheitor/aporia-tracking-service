@@ -86,6 +86,10 @@ Duas categorias informativas ficam desabilitadas: `nonnullTypeVariableFromLegacy
 
 Não adicionar comportamento de fallback, verificações redundantes ou supressões locais apenas para obter zero avisos. Marcar ausências válidas com `@Nullable`; usar `@NullMarked` somente onde o contrato for verdadeiro. Um painel sem avisos não certifica segurança, isolamento por tenant, concorrência ou integridade transacional.
 
+As propriedades `tracking.*` consumidas por `@Value` e `@Scheduled` são documentadas em `src/main/resources/META-INF/spring-configuration-metadata.json`; mantenha esses metadados alinhados aos consumidores e aos perfis YAML. O projeto usa Flyway pelo plugin Maven e pelo suporte de testes, sem o módulo `spring-boot-flyway` de autoconfiguração: migrations não são executadas na partida dos serviços. A inclusão futura desse módulo exige revisar essa política explicitamente.
+
+A IDE ignora apenas a sugestão de atualizar para uma versão minor mais nova do Spring Boot. Os alertas de versão patch, incompatibilidade e fim de suporte continuam com as severidades padrão da extensão.
+
 O `javac` usado pelo Maven não executa a análise de nulidade do JDT; `mvn -Plint test` e a análise da IDE são verificações complementares. Para uma verificação em lote, use o compilador Eclipse com Java 25, `-properties config/java/jdt.prefs` e o classpath de testes do Maven, incluindo `src/main/java` e `src/test/java`.
 
 A preparação de comandos legados, payloads inválidos e estados históricos fica em `src/test`, especialmente em `CommandTestFixtures`. Os testes de operações normais usam os contratos de produção: ingestão com tenant/dispositivo, solicitação auditada de firmware e reserva vinculada ao token de sessão. A persistência de produção não oferece versões menos restritivas para montar cenários de teste.

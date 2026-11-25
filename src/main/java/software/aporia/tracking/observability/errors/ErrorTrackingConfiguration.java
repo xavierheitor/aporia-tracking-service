@@ -1,21 +1,22 @@
 package software.aporia.tracking.observability.errors;
 
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Duration;
 
-import io.sentry.SentryOptions;
-import io.sentry.protocol.SentryException;
-
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullMarked;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.time.Duration;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.sentry.SentryOptions;
+import io.sentry.protocol.SentryException;
 
 @Configuration(proxyBeanMethods = false)
 public class ErrorTrackingConfiguration {
 
     @Bean
-    public ErrorEventLimiter errorEventLimiter() {
+    public @NonNull ErrorEventLimiter errorEventLimiter() {
 
         return new ErrorEventLimiter(
                 Duration.ofMinutes(1),
@@ -23,6 +24,7 @@ public class ErrorTrackingConfiguration {
     }
 
     @Bean
+    @NullMarked
     public SentryOptions.BeforeSendCallback sanitizeErrorEvents(
             ErrorEventLimiter limiter,
             MeterRegistry registry) {
@@ -42,7 +44,7 @@ public class ErrorTrackingConfiguration {
                 .description("Error events discarded by capture policy")
                 .register(registry);
 
-        return (event, hint) -> {
+        return (event, _) -> {
 
             var exceptions = event.getExceptions();
 

@@ -22,9 +22,6 @@ spring:
       idle-timeout: 300000
       max-lifetime: 1800000
 
-  flyway:
-    enabled: false
-
   security:
     user:
       name: ${TRACKING_MONITORING_USER:monitoring}
@@ -67,7 +64,7 @@ logging:
 
   level:
     root: INFO
-    software.aporia.tracking: INFO
+    "[software.aporia.tracking]": INFO
 
 sentry:
   dsn: ${TRACKING_SENTRY_DSN:}
