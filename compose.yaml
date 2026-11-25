@@ -18,9 +18,7 @@ x-postgres: &postgres
 
   stop_grace_period: 30s
 
-
 x-tracking-environment: &tracking-environment
-
   TRACKING_DB_URL: ${TRACKING_CONTAINER_DB_URL:?required}
 
   TRACKING_DB_POOL_MAX: ${TRACKING_DB_POOL_MAX:-10}
@@ -35,6 +33,12 @@ x-tracking-environment: &tracking-environment
   TRACKING_MANAGEMENT_BIND: 0.0.0.0
   TRACKING_MANAGEMENT_PORT: 9100
 
+  # Error tracking
+  TRACKING_SENTRY_DSN: ${TRACKING_CONTAINER_SENTRY_DSN:-}
+  TRACKING_SENTRY_ENVIRONMENT: ${TRACKING_SENTRY_ENVIRONMENT:-development}
+  TRACKING_SENTRY_RELEASE: ${TRACKING_SENTRY_RELEASE:-1.0-SNAPSHOT}
+
+  # JVM
   JAVA_TOOL_OPTIONS: >-
     -XX:InitialRAMPercentage=20.0
     -XX:MaxRAMPercentage=50.0
@@ -42,9 +46,7 @@ x-tracking-environment: &tracking-environment
     -Dfile.encoding=UTF-8
     -Duser.timezone=UTC
 
-
 x-tracking: &tracking
-
   image: aporia-tracking-service:local
 
   build:
@@ -94,9 +96,7 @@ x-tracking: &tracking
       max-size: "20m"
       max-file: "5"
 
-
 services:
-
   postgres:
     <<: *postgres
 
@@ -118,7 +118,6 @@ services:
     networks:
       - backend
 
-
   postgres-test:
     <<: *postgres
 
@@ -139,7 +138,6 @@ services:
 
     networks:
       - testing
-
 
   gateway:
     <<: *tracking
@@ -177,7 +175,6 @@ services:
         aliases:
           - tracking-gateway
 
-
   worker:
     <<: *tracking
 
@@ -203,7 +200,6 @@ services:
       observability:
         aliases:
           - tracking-worker
-
 
   monitor:
     <<: *tracking
@@ -232,9 +228,7 @@ services:
         aliases:
           - tracking-monitor
 
-
 networks:
-
   backend:
     driver: bridge
 
@@ -245,9 +239,7 @@ networks:
     name: aporia-observability
     external: true
 
-
 volumes:
-
   postgres-data:
 
   postgres-test-data:

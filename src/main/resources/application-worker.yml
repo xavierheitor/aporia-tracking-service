@@ -26,3 +26,7 @@ management:
 tracking:
   worker:
     heartbeat-timeout-seconds: ${TRACKING_WORKER_HEARTBEAT_TIMEOUT_SECONDS:60}
+
+sentry:
+  tags:
+    component: worker

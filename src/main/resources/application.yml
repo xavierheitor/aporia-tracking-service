@@ -68,3 +68,28 @@ logging:
   level:
     root: INFO
     software.aporia.tracking: INFO
+
+sentry:
+  dsn: ${TRACKING_SENTRY_DSN:}
+
+  environment: ${TRACKING_SENTRY_ENVIRONMENT:development}
+
+  release: ${TRACKING_SENTRY_RELEASE:1.0-SNAPSHOT}
+
+  send-default-pii: false
+
+  traces-sample-rate: 0.0
+
+  max-breadcrumbs: 0
+
+  attach-stacktrace: true
+
+  debug: false
+
+  logging:
+    enabled: true
+    minimum-event-level: ERROR
+    minimum-breadcrumb-level: ERROR
+
+  tags:
+    application: aporia-tracking-service

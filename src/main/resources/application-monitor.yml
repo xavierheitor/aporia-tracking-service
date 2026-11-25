@@ -39,3 +39,7 @@ tracking:
   monitor:
     collection-interval-ms: ${TRACKING_QUEUE_COLLECTION_INTERVAL_MS:30000}
     query-timeout-seconds: ${TRACKING_QUEUE_QUERY_TIMEOUT_SECONDS:3}
+
+sentry:
+  tags:
+    component: monitor

@@ -133,14 +133,98 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - alloy-data:/var/lib/alloy/data
 
+    mem_limit: 512m
+    cpus: 0.5
+
+  glitchtip-postgres:
+    <<: *observability
+
+    image: postgres:17-alpine
+
+    profiles: [glitchtip]
+
+    environment:
+      POSTGRES_DB: ${GLITCHTIP_DB_NAME:-glitchtip}
+      POSTGRES_USER: ${GLITCHTIP_DB_USER:-glitchtip}
+      POSTGRES_PASSWORD: ${GLITCHTIP_DB_PASSWORD:-}
+
+    volumes:
+      - glitchtip-postgres-data:/var/lib/postgresql/data
+
+    networks:
+      - glitchtip-backend
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
     mem_limit: 256m
     cpus: 0.5
+
+    stop_grace_period: 30s
+
+
+  glitchtip:
+    <<: *observability
+
+    image: glitchtip/glitchtip:6.2.2
+
+    profiles: [glitchtip]
+
+    environment:
+      DATABASE_URL: postgresql://${GLITCHTIP_DB_USER:-glitchtip}:${GLITCHTIP_DB_PASSWORD:-}@glitchtip-postgres:5432/${GLITCHTIP_DB_NAME:-glitchtip}
+
+      SECRET_KEY: ${GLITCHTIP_SECRET_KEY:-}
+
+      GLITCHTIP_DOMAIN: ${GLITCHTIP_DOMAIN:-http://localhost:8000}
+
+      DEFAULT_FROM_EMAIL: glitchtip@localhost
+      EMAIL_URL: consolemail://
+
+      VALKEY_URL: ""
+
+      SERVER_ROLE: all_in_one
+      GLITCHTIP_EMBED_WORKER: "true"
+
+      GRANIAN_WORKERS: "1"
+      VTASKS_CONCURRENCY: "2"
+      DATABASE_POOL_MAX_SIZE: "5"
+
+      LOG_LEVEL: WARNING
+
+    depends_on:
+      glitchtip-postgres:
+        condition: service_healthy
+
+    ports:
+      - "127.0.0.1:${GLITCHTIP_PORT:-8000}:8000"
+
+    volumes:
+      - glitchtip-uploads:/code/uploads
+
+    networks:
+      - observability
+      - glitchtip-backend
+
+    mem_limit: 512m
+    cpus: 1.0
+
+    stop_grace_period: 60s
 
 networks:
 
   observability:
     name: aporia-observability
     external: true
+
+  glitchtip-backend:
+    driver: bridge
+    internal: true
 
 
 volumes:
@@ -152,6 +236,10 @@ volumes:
   loki-data:
 
   alloy-data:
+
+  glitchtip-postgres-data:
+
+  glitchtip-uploads:
 
 
 secrets:

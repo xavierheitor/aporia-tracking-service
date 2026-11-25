@@ -8,7 +8,7 @@ management:
   metrics:
     tags:
       component: gateway
-  
+
   endpoint:
     health:
       group:
@@ -29,3 +29,7 @@ tracking:
     port: ${TRACKING_TCP_PORT:5500}
     protocol: ${TRACKING_PROTOCOL:auto}
     dispatch-owner-file: ${TRACKING_DISPATCH_OWNER_FILE:}
+
+sentry:
+  tags:
+    component: gateway
