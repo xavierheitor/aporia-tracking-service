@@ -1,4 +1,4 @@
-FROM postgres:16-bookworm
+FROM postgres:16-trixie
 
 # Instala os arquivos de extensão que permitem habilitar o PostGIS em cada banco.
 RUN apt-get update \

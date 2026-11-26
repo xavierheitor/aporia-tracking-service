@@ -22,7 +22,7 @@ services:
   prometheus:
     <<: *observability
 
-    image: prom/prometheus:v3.5.0
+    image: prom/prometheus:v3.16.0
 
     user: "${OBSERVABILITY_UID:-1000}:${OBSERVABILITY_GID:-1000}"
 
@@ -50,7 +50,7 @@ services:
   grafana:
     <<: *observability
 
-    image: grafana/grafana:12.1.0
+    image: grafana/grafana:13.3.2
 
     environment:
 
@@ -80,7 +80,7 @@ services:
   alertmanager:
     <<: *observability
 
-    image: prom/alertmanager:v0.28.1
+    image: prom/alertmanager:v0.35.1
 
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
@@ -99,7 +99,7 @@ services:
   loki:
     <<: *observability
 
-    image: grafana/loki:3.5.1
+    image: grafana/loki:3.7.10
 
     command:
       - -config.file=/etc/loki/loki.yml
@@ -115,9 +115,7 @@ services:
   alloy:
     <<: *observability
 
-    image: grafana/alloy:v1.9.2
-
-    user: "0:0"
+    image: grafana/alloy:v1.22.0
 
     command:
       - run
@@ -130,11 +128,28 @@ services:
 
     volumes:
       - ./docker/observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - alloy-data:/var/lib/alloy/data
 
+    networks:
+      - observability
+      - docker-api
+ 
+    depends_on:
+      docker-socket-proxy:
+        condition: service_started
+
+    cap_drop:
+      - ALL
+
     mem_limit: 512m
-    cpus: 0.5
+    cpus: 0.50
+
+    user: "473:473"
+
+    read_only: true
+
+    tmpfs:
+       - /tmp:rw,nosuid,nodev,noexec,size=32m
 
   glitchtip-postgres:
     <<: *observability
@@ -172,7 +187,7 @@ services:
   glitchtip:
     <<: *observability
 
-    image: glitchtip/glitchtip:6.2.2
+    image: glitchtip/glitchtip:7.0.0
 
     profiles: [glitchtip]
 
@@ -182,6 +197,7 @@ services:
       SECRET_KEY: ${GLITCHTIP_SECRET_KEY:-}
 
       GLITCHTIP_DOMAIN: ${GLITCHTIP_DOMAIN:-http://localhost:8000}
+      ALLOWED_HOSTS: "${GLITCHTIP_ALLOWED_HOSTS:-localhost,127.0.0.1,glitchtip}"
 
       DEFAULT_FROM_EMAIL: glitchtip@localhost
       EMAIL_URL: consolemail://
@@ -216,6 +232,43 @@ services:
 
     stop_grace_period: 60s
 
+  docker-socket-proxy:
+    <<: *observability
+
+    image: tecnativa/docker-socket-proxy:0.3.0
+
+    environment:
+      CONTAINERS: "1"
+      NETWORKS: "1"
+      PING: "1"
+      VERSION: "1"
+      EVENTS: "0"
+
+      POST: "0"
+      AUTH: "0"
+      BUILD: "0"
+      COMMIT: "0"
+      CONFIGS: "0"
+      EXEC: "0"
+      IMAGES: "0"
+      INFO: "0"
+      NODES: "0"
+      PLUGINS: "0"
+      SECRETS: "0"
+      SERVICES: "0"
+      SWARM: "0"
+      SYSTEM: "0"
+      TASKS: "0"
+      VOLUMES: "0"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    networks:
+      - docker-api
+
+    mem_limit: 64m
+    cpus: 0.25
 networks:
 
   observability:
@@ -226,6 +279,9 @@ networks:
     driver: bridge
     internal: true
 
+  docker-api:
+    driver: bridge
+    internal: true
 
 volumes:
 
