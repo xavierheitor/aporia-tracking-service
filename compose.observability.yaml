@@ -117,6 +117,8 @@ services:
 
     image: grafana/alloy:v1.22.0
 
+    user: "473:473"
+
     command:
       - run
       - --server.http.listen-addr=0.0.0.0:12345
@@ -133,7 +135,7 @@ services:
     networks:
       - observability
       - docker-api
- 
+
     depends_on:
       docker-socket-proxy:
         condition: service_started
@@ -141,16 +143,13 @@ services:
     cap_drop:
       - ALL
 
-    mem_limit: 512m
-    cpus: 0.50
-
-    user: "473:473"
-
     read_only: true
 
     tmpfs:
-       - /tmp:rw,nosuid,nodev,noexec,size=32m
+      - /tmp:rw,nosuid,nodev,noexec,size=32m
 
+    mem_limit: 512m
+    cpus: 0.5
   glitchtip-postgres:
     <<: *observability
 
