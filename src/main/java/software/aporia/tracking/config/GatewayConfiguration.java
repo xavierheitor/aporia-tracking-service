@@ -20,7 +20,9 @@ import software.aporia.tracking.observability.metrics.GatewayMetrics;
  * Monta os componentes TCP quando o perfil {@code gateway} está ativo. O Spring fornece o pool, as métricas e resolve
  * as propriedades antes de criar o gateway.
  *
- * A criação dos beans não abre o listener: a partida é feita por {@link GatewayLifecycle}.
+ * <p>A criação dos beans não abre o listener: {@link GatewayLifecycle} conecta a partida e a parada ao
+ * contexto, e somente o {@code start()} do ciclo de vida abre o socket. O {@link MeterBinder} registra dois
+ * gauges sem tags, cuja cardinalidade não cresce com conexões nem com dispositivos.</p>
  */
 @Configuration(proxyBeanMethods = false)
 @Profile("gateway")
@@ -48,6 +50,7 @@ public class GatewayConfiguration {
             @Value("${tracking.gateway.protocol}") String protocolId,
             @Value("${tracking.gateway.dispatch-owner-file}") String dispatchOwnerFile) {
 
+        // A construção apenas guarda as dependências; o listener só é aberto no start() do lifecycle.
         return new TcpGateway(
                 dataSource,
                 bindAddress,
@@ -72,7 +75,11 @@ public class GatewayConfiguration {
     }
 
     /**
-     * Registra os indicadores de estado atual do gateway.
+     * Registra os indicadores de estado atual do gateway no contexto.
+     *
+     * <p>O binder é aplicado na inicialização do registro e mantém dois gauges: conexões TCP ativas e
+     * dispositivos com sessão local. Cada coleta consulta o gateway; não há tags variáveis, então a
+     * cardinalidade é fixa. Os gauges refletem o estado no instante da coleta e não acumulam histórico.</p>
      *
      * @param gateway instância monitorada
      * @return componente de registro das métricas
@@ -83,6 +90,7 @@ public class GatewayConfiguration {
 
         return registry -> {
 
+            // Os gauges consultam o gateway a cada coleta; não guardam contadores próprios.
             Gauge.builder(
                     "tracking.tcp.connections.active",
                     gateway,

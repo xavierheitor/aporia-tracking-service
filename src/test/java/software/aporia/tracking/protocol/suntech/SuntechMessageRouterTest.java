@@ -8,7 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
-/** Verifica os caminhos de processamento ativados para cada combinação de capacidades. */
+/**
+ * Verifica os caminhos de processamento ativados para cada combinação de capacidades.
+ *
+ * <p>As decisões são independentes: uma resposta com posição pode exigir telemetria e registro
+ * de resposta no mesmo pacote.</p>
+ */
 class SuntechMessageRouterTest {
 
     /** Roteador usado para verificar o plano de processamento. */
@@ -29,6 +34,8 @@ class SuntechMessageRouterTest {
 
     /**
      * Encaminha uma posição para o processamento de telemetria.
+     *
+     * <p>Posição pura ativa somente a extração de leituras.</p>
      */
     @Test
     void shouldRouteTelemetry() {
@@ -41,6 +48,8 @@ class SuntechMessageRouterTest {
 
     /**
      * Ativa o registro da resposta a comando.
+     *
+     * <p>Resposta simples não contém posição, então só o registro da resposta é ativado.</p>
      */
     @Test
     void shouldRouteCommandResponse() {
@@ -55,6 +64,8 @@ class SuntechMessageRouterTest {
 
     /**
      * Ativa os dois caminhos quando a resposta inclui posição.
+     *
+     * <p>O prefixo RES e o STT embutido pedem os dois processamentos no mesmo quadro.</p>
      */
     @Test
     void shouldRouteTelemetryAndCommandResponse() {
@@ -69,6 +80,8 @@ class SuntechMessageRouterTest {
 
     /**
      * Encaminha a mensagem de presença.
+     *
+     * <p>ALV ativa presença, não telemetria.</p>
      */
     @Test
     void shouldRouteHeartbeat() {
@@ -81,6 +94,8 @@ class SuntechMessageRouterTest {
 
     /**
      * Rejeita uma mensagem para a qual o roteador não encontra trabalho.
+     *
+     * <p>Falhar evita descartar a mensagem em silêncio quando o cabeçalho não é reconhecido.</p>
      */
     @Test
     void shouldRejectUnknownMessage() {

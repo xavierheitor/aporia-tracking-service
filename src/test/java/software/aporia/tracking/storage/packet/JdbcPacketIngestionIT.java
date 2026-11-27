@@ -16,11 +16,19 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Verifica a ingestão para um equipamento cadastrado e o tratamento de identidades desconhecidas. */
+/**
+ * Verifica a ingestão para um equipamento cadastrado e o tratamento de identidades desconhecidas.
+ *
+ * <p>A ingestão revalida o dispositivo habilitado e grava o pacote bruto na mesma transação. Os
+ * cenários usam um tenant próprio de {@link TestFixtures}, removido ao final, e conferem o estado
+ * persistido no escopo do tenant.</p>
+ */
 class JdbcPacketIngestionIT {
 
     /**
-     * Confere a ingestão de um quadro de dispositivo cadastrado.
+     * Cenário: dispositivo Suntech habilitado, com identidade fixa. Ação: ingere um quadro ALV da
+     * sessão. Resultado: a recepção é gravada com os mesmos bytes, status {@code pending} e o
+     * dispositivo do cadastro.
      *
      * @throws SQLException se a operação JDBC falhar
      */
@@ -29,6 +37,7 @@ class JdbcPacketIngestionIT {
         try (var dataSource = TestDatabase.createDataSource();
              var fixtures = new TestFixtures(dataSource, "9876500061")) {
             String identity = fixtures.deviceIdentity();
+            // A identidade e o escopo do quadro precisam coincidir com o cadastro e com a sessão.
             ReceivedFrame frame = new ReceivedFrame(
                     "suntech",
                     identity,
@@ -37,6 +46,7 @@ class JdbcPacketIngestionIT {
 
             UUID packetId = new JdbcPacketIngestion(dataSource).accept(frame, fixtures.tenantId(), fixtures.deviceId());
 
+            // A ingestão só devolve o UUID depois de confirmar a transação.
             assertNotNull(packetId);
             try (var connection = dataSource.getConnection(); var query = connection.prepareStatement("""
                     SELECT payload, status, device_id FROM raw_packets WHERE tenant_id=? AND id=?
@@ -53,7 +63,11 @@ class JdbcPacketIngestionIT {
         }
     }
 
-    /** Verifica a rejeição de um quadro cujo dispositivo não está habilitado no cadastro. */
+    /**
+     * Cenário: identidade sem cadastro. Ação: ingere o quadro com tenant e dispositivo aleatórios.
+     * Resultado: {@link IllegalArgumentException} com {@code Unknown or disabled device}; nenhum
+     * pacote é gravado.
+     */
     @Test
     void shouldRejectUnknownDevice() {
 
@@ -67,6 +81,7 @@ class JdbcPacketIngestionIT {
 
         try (var dataSource = TestDatabase.createDataSource()) {
             var ingestion = new JdbcPacketIngestion(dataSource);
+            // A consulta combina protocolo, identidade, tenant e dispositivo habilitado.
             IllegalArgumentException exception = assertThrows(
                     IllegalArgumentException.class,
                     () -> ingestion.accept(frame, UUID.randomUUID(), UUID.randomUUID())
@@ -79,17 +94,27 @@ class JdbcPacketIngestionIT {
         }
     }
 
-    /** A identidade correta não permite ignorar o tenant ou o dispositivo da sessão. */
+    /**
+     * Cenário: dispositivo cadastrado da fixture. Ação: ingere com tenant ou dispositivo nulos e,
+     * depois, com tenant ou dispositivo de outro escopo. Resultado: nulos falham com
+     * {@link NullPointerException} antes do JDBC; escopos divergentes falham com
+     * {@link IllegalArgumentException}; a contagem final é zero, confirmando que nenhuma tentativa
+     * deixou pacote.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void shouldRequireMatchingSessionScope() throws Exception {
         try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db)) {
             var ingestion = new JdbcPacketIngestion(db);
             var frame = new ReceivedFrame("suntech", fixture.deviceIdentity(),
                     ("ALV;" + fixture.deviceIdentity() + "\r").getBytes(StandardCharsets.US_ASCII), "suntech-ascii-v3");
+            // NullPointerException é lançada antes de abrir conexão, sem tocar no banco.
             assertThrows(NullPointerException.class, () -> ingestion.accept(frame, null, fixture.deviceId()));
             assertThrows(NullPointerException.class, () -> ingestion.accept(frame, fixture.tenantId(), null));
             assertThrows(IllegalArgumentException.class, () -> ingestion.accept(frame, UUID.randomUUID(), fixture.deviceId()));
             assertThrows(IllegalArgumentException.class, () -> ingestion.accept(frame, fixture.tenantId(), UUID.randomUUID()));
+            // Cada aceite rejeitado abre a própria transação e não deixa pacote no tenant da fixture.
             try (var connection = db.getConnection(); var query = connection.prepareStatement(
                     "SELECT count(*) FROM raw_packets WHERE tenant_id=?")) {
                 query.setObject(1, fixture.tenantId());

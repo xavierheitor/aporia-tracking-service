@@ -29,3 +29,8 @@ replay_pid*
 
 backups/
 /runtime/
+# Python load testing
+__pycache__/
+*.py[cod]
+# Cache local do índice de código do harness
+.dsh-code-index/

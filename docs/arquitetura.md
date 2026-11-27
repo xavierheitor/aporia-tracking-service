@@ -34,9 +34,9 @@ flowchart LR
 | Agendador do dispatcher | Quando habilitado, executa uma rodada de recuperação e percorre as sessões. Aguarda 1 s **após** a rodada para iniciar a próxima. Uma escrita lenta pode atrasar outros dispositivos nessa varredura. |
 | Agendador de prazo de escrita | Compartilhado pelas sessões na JVM. Se a escrita exceder 5 s, fecha o socket para desbloquear a operação. A escrita e a invalidação usam o mesmo bloqueio por sessão. |
 | Laço principal do worker | Processa até um pacote por chamada, repete imediatamente após trabalho e dorme 1 s quando a fila está vazia. Após erro no laço, espera 3 s antes de continuar. |
-| Pool JDBC por JVM | Cada processo mantém seu HikariCP com máximo de 10 conexões, mínimo ocioso de 2 e espera de até 10 s por uma conexão. Com um gateway e um worker, reserve capacidade para até 20 conexões da aplicação, além das administrativas. Uma sessão TCP ociosa não exige uma conexão JDBC exclusiva. |
+| Pool JDBC por JVM | Cada processo mantém seu HikariCP com máximo de 10 conexões, mínimo ocioso de 2 e espera de até 3 s por uma conexão. Com um gateway e um worker, reserve capacidade para até 20 conexões da aplicação, além das administrativas. Uma sessão TCP ociosa não exige uma conexão JDBC exclusiva. |
 
-Ao encerrar, o gateway interrompe o aceite e fecha sockets para liberar as leituras. O worker sinaliza a parada e permite a conclusão do ciclo corrente. Os hooks aguardam até 10 s, e o Compose concede 15 s antes do encerramento forçado. As sessões vivem na memória da instância; um gateway recém-iniciado volta a enxergar cada equipamento quando ele reconecta. [Gateway](../src/main/java/software/aporia/tracking/gateway/TcpGateway.java) · [Sessão TCP](../src/main/java/software/aporia/tracking/gateway/DeviceSession.java) · [Pool JDBC](../src/main/java/software/aporia/tracking/storage/Database.java)
+Ao encerrar, o gateway interrompe o aceite e fecha sockets para liberar as leituras. O worker sinaliza a parada e permite a conclusão do ciclo corrente. Os hooks aguardam a terminação sem timeout próprio; o Spring limita a fase de shutdown a 30 s (`timeout-per-shutdown-phase`), e o Compose concede 60 s antes do encerramento forçado. As sessões vivem na memória da instância; um gateway recém-iniciado volta a enxergar cada equipamento quando ele reconecta. [Gateway](../src/main/java/software/aporia/tracking/gateway/TcpGateway.java) · [Sessão TCP](../src/main/java/software/aporia/tracking/gateway/DeviceSession.java) · [Pool JDBC](../src/main/resources/application.yml)
 
 ## Do pacote à posição
 
@@ -74,3 +74,11 @@ A admissão e a reserva de um comando disputam o bloqueio da mesma linha de disp
 - **A autorização do comando entra primeiro.** O dispatcher confirma a reserva e o estado `transmitting` em uma única transação e libera a conexão JDBC antes de escrever. A nova conexão pode assumir o UUID e ingerir telemetria imediatamente. A tentativa já autorizada continua vinculada ao socket capturado pelo emissor anterior. O índice exclusivo e a consulta de reserva impedem um segundo comando em voo para o dispositivo.
 
 Se o emissor cair, apenas novos comandos desse dispositivo aguardam a recuperação com o arquivo persistente do proprietário. Uma tentativa incerta termina em `delivery_unknown` sem reenvio. O próximo comando elegível usa a conexão mais recente. [Operação com balanceador](deploy.md#gateways-atrás-do-mesmo-ip)
+
+## Documentos relacionados
+
+- [Índice da documentação](README.md)
+- [Gateway TCP e protocolos](gateway-tcp.md)
+- [Migrations e schema](migrations.md)
+- [Métricas e painéis](metricas.md)
+- [Deploy e operação](deploy.md)

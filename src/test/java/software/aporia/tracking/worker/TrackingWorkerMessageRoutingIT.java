@@ -30,10 +30,14 @@ import software.aporia.tracking.support.TestFixtures;
 /** Verifica a persistência de respostas Suntech e o tratamento de telemetria presente na mesma mensagem. */
 class TrackingWorkerMessageRoutingIT {
 
+    /** Registro isolado para observar os contadores de cada cenário. */
     private SimpleMeterRegistry meterRegistry;
+    /** Métricas do worker ligadas ao registro acima. */
     private WorkerMetrics metrics;
+    /** Decodificadores Suntech e Teltonika disponíveis ao worker. */
     private DecoderRegistry decoderRegistry;
 
+    /** Prepara métricas isoladas e os dois decodificadores usados pelo worker. */
     @BeforeEach
     void setUpWorkerDependencies() {
         meterRegistry = new SimpleMeterRegistry();
@@ -42,6 +46,7 @@ class TrackingWorkerMessageRoutingIT {
                 new SuntechDecoder(), new TeltonikaAvl()));
     }
 
+    /** Fecha o registro de métricas para não vazar estado entre testes. */
     @AfterEach
     void closeMeterRegistry() {
         meterRegistry.close();
@@ -337,7 +342,11 @@ class TrackingWorkerMessageRoutingIT {
         }
     }
 
-    /** Uma versão desconhecida aguarda outro worker sem impedir a leitura da próxima recepção. */
+    /**
+     * Uma versão desconhecida aguarda outro worker sem impedir a leitura da próxima recepção.
+     *
+     * @throws Exception se a preparação ou a verificação falhar
+     */
     @Test
     void skipsUnknownVersionAndKeepsPacketPending() throws Exception {
         try (var db = TestDatabase.createDataSource(); var device = new TestFixtures(db, IDENTITY);
@@ -365,7 +374,11 @@ class TrackingWorkerMessageRoutingIT {
         }
     }
 
-    /** Uma posição sem ativo esgota as tentativas sem desfazer ou duplicar a resposta do pacote. */
+    /**
+     * Uma posição sem ativo esgota as tentativas sem desfazer ou duplicar a resposta do pacote.
+     *
+     * @throws Exception se a preparação ou a verificação falhar
+     */
     @Test
     void preservesResponseWhenEmbeddedPositionIsRejected() throws Exception {
         try (var db = TestDatabase.createDataSource(); var device = new TestFixtures(db, IDENTITY);

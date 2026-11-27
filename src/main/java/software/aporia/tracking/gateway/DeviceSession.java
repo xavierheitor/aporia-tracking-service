@@ -15,25 +15,25 @@ import org.slf4j.LoggerFactory;
 import software.aporia.tracking.command.dispatcher.CommandTransport.Endpoint;
 
 /**
- * Vincula uma conexão TCP autorizada ao tenant, dispositivo, protocolo e
- * identidade
- * do rastreador. Cada conexão recebe um token próprio, usado na admissão no
- * banco
- * para distinguir reconexões do mesmo equipamento.
+ * Sessão TCP autorizada de um rastreador, vinculada a tenant, dispositivo, protocolo e identidade. Cada
+ * conexão recebe um token próprio, publicado no banco durante a admissão para distinguir reconexões do mesmo
+ * equipamento.
  *
- * <p>
- * O {@link TcpClientHandler} recebe os quadros e usa esta sessão para enviar
- * ACKs. O dispatcher também a utiliza para escrever comandos no mesmo socket.
- * </p>
+ * <p> Colaboradores: o {@link TcpClientHandler} recebe os quadros e usa esta sessão para enviar ACKs; o
+ * dispatcher usa {@link #send(byte[])} para escrever comandos no mesmo socket. O {@link SessionRegistry}
+ * decide qual conexão é a atual e invalida a substituída. </p>
+ *
+ * <p> Invariantes: tenant, dispositivo, protocolo, identidade e socket são fixos durante a vida da instância.
+ * O único estado mutável é {@code active}, que passa de {@code true} para {@code false} uma única vez e nunca
+ * volta a {@code true}. ACKs e comandos compartilham o mesmo bloqueio de escrita, de modo que os bytes de uma
+ * mensagem não se intercalam com os de outra. </p>
+ *
  * <ol>
- * <li>{@link #send(byte[])} valida o conteúdo, adquire o bloqueio de escrita e
- * verifica a disponibilidade local da sessão. ACKs e comandos são
- * serializados.</li>
+ * <li>{@link #send(byte[])} valida o conteúdo antes do bloqueio, adquire o
+ * bloqueio de escrita e verifica a disponibilidade local. ACKs e comandos são serializados.</li>
  * <li>Após adquirir o bloqueio, agenda um prazo de cinco segundos para a
- * escrita
- * e o flush. Se o prazo vencer ou ocorrer falha de E/S, invalida a sessão e
- * tenta
- * fechar o socket. O prazo não inclui a espera pelo bloqueio.</li>
+ * escrita e o flush. Se o prazo vencer ou ocorrer falha de E/S, invalida a sessão e tenta fechar o socket. O
+ * prazo não inclui a espera pelo bloqueio.</li>
  * <li>{@link #invalidate()} aguarda a escrita em curso e impede novos envios,
  * sem fechar o socket. O registro usa essa operação durante a substituição da
  * sessão.</li>
@@ -41,11 +41,10 @@ import software.aporia.tracking.command.dispatcher.CommandTransport.Endpoint;
  * leituras pendentes do handler.</li>
  * </ol>
  *
- * <p>
- * A conclusão de {@code send()} indica somente escrita local concluída.
- * Não confirma recebimento ou execução pelo rastreador; uma falha pode ocorrer
- * após envio parcial. A persistência do resultado cabe ao dispatcher.
- * </p>
+ * <p> Limites: {@link #isConnected()} é uma fotografia local; o equipamento remoto pode desconectar antes da
+ * próxima escrita. A conclusão de {@code send()} indica somente escrita local concluída, não recebimento ou
+ * execução pelo rastreador, e uma falha pode ocorrer após envio parcial. Não há reenvio automático: a
+ * persistência do resultado cabe ao dispatcher. </p>
  */
 public final class DeviceSession implements Endpoint {
 
@@ -118,7 +117,8 @@ public final class DeviceSession implements Endpoint {
     }
 
     /**
-     * Identifica esta conexão, inclusive quando o mesmo dispositivo reconecta.
+     * Identifica esta conexão, inclusive quando o mesmo dispositivo reconecta. O token é gerado na construção
+     * e não muda; o handler o publica no cadastro para que a reserva de comandos confira a conexão vigente.
      *
      * @return token estável durante a vida da sessão
      */
@@ -130,7 +130,7 @@ public final class DeviceSession implements Endpoint {
     /**
      * Retorna o identificador do locatário.
      *
-     * @return o identificador do locatário
+     * @return tenant dono do cadastro desta sessão
      */
     public UUID tenantId() {
         return tenantId;
@@ -139,37 +139,30 @@ public final class DeviceSession implements Endpoint {
     /**
      * Retorna o identificador do dispositivo.
      *
-     * @return o identificador do dispositivo
+     * @return identificador interno do equipamento cadastrado
      */
     public UUID deviceId() {
         return deviceId;
     }
 
-    /**
-     * Retorna o identificador do protocolo.
-     *
-     * @return o identificador do protocolo
-     */
+    /** Retorna o identificador do protocolo. */
     @Override
     public String protocol() {
         return protocol;
     }
 
-    /**
-     * Retorna a identidade declarada pelo equipamento no protocolo.
-     *
-     * @return a identidade declarada pelo equipamento no protocolo
-     */
+    /** Retorna a identidade declarada pelo equipamento no protocolo. */
     @Override
     public String identity() {
         return identity;
     }
 
     /**
-     * Consulta o estado local do socket e da sessão. O equipamento remoto pode
-     * desconectar antes da próxima escrita.
+     * Consulta o estado local da sessão e do socket; não envia probe ao equipamento. O resultado pode mudar
+     * imediatamente depois da consulta, pois o equipamento remoto pode desconectar antes da próxima escrita.
      *
-     * @return true se a sessão está conectada, false caso contrário
+     * @return verdadeiro somente se a sessão não foi invalidada e o socket está
+     *         conectado, aberto e com saída disponível
      */
     public boolean isConnected() {
         return active
@@ -179,13 +172,15 @@ public final class DeviceSession implements Endpoint {
     }
 
     /**
-     * Serializa as escritas no socket. O vencimento do prazo encerra a conexão
-     * e torna o resultado da tentativa incerto.
+     * Serializa as escritas no socket. Valida o payload antes de adquirir o bloqueio; uma sessão já
+     * invalidada ou desconectada é recusada. O vencimento do prazo fecha o socket e torna o resultado da
+     * tentativa incerto.
      *
      * @param payload bytes originais do quadro ou comando
      * @throws NullPointerException     se o payload for nulo
      * @throws IllegalArgumentException se o payload estiver vazio
-     * @throws IOException              se a sessão estiver indisponível, a escrita
+     * @throws IOException              se a sessão estiver indisponível
+     *                                  ({@code DEVICE_DISCONNECTED}), a escrita
      *                                  falhar ou seu prazo vencer
      */
     @Override
@@ -239,9 +234,9 @@ public final class DeviceSession implements Endpoint {
     }
 
     /**
-     * Invalida e tenta fechar o socket sem adquirir o bloqueio de escrita.
-     * Usado pelo temporizador para interromper E/S e pelo fechamento normal
-     * depois da invalidação sincronizada. Falhas de fechamento são registradas.
+     * Invalida e tenta fechar o socket sem adquirir o bloqueio de escrita. Usado pelo temporizador para
+     * interromper E/S e pelo fechamento normal depois da invalidação sincronizada. É seguro chamar mais de
+     * uma vez; falhas de fechamento são registradas e não propagadas.
      */
     private void abortSocket() {
         active = false;
@@ -253,13 +248,13 @@ public final class DeviceSession implements Endpoint {
     }
 
     /**
-     * Rejeita a troca de identidade dentro da mesma conexão.
+     * Rejeita a troca de identidade dentro da mesma conexão comparando o valor recebido com a identidade
+     * fixada na construção.
      *
-     * @param receivedIdentity identidade declarada pelo equipamento no
-     *                         protocolo
-     * @throws IllegalArgumentException se a identidade declarada pelo
-     *                                  equipamento no protocolo for diferente da
-     *                                  identidade atual
+     * @param receivedIdentity identidade declarada pelo equipamento no protocolo;
+     *                         {@code null} não coincide com a identidade atual
+     * @throws IllegalArgumentException se a identidade recebida, inclusive nula,
+     *                                  for diferente da identidade da sessão
      */
     public void validateIdentity(String receivedIdentity) {
         if (!identity.equals(receivedIdentity)) {
@@ -269,8 +264,8 @@ public final class DeviceSession implements Endpoint {
     }
 
     /**
-     * Impede novas escritas após aguardar a conclusão de uma escrita que já
-     * detenha o bloqueio.
+     * Impede novas escritas após aguardar a conclusão de uma escrita que já detenha o bloqueio. Não fecha o
+     * socket nem invalida o token, e pode ser chamado mais de uma vez.
      */
     public void invalidate() {
         writeLock.lock();
@@ -283,10 +278,12 @@ public final class DeviceSession implements Endpoint {
     }
 
     /**
-     * Invalida a sessão e fecha o socket para interromper as leituras.
+     * Invalida a sessão e fecha o socket para interromper leituras e escritas pendentes. A falha de
+     * fechamento é registrada e não propagada, portanto a chamada é segura durante a substituição da sessão.
      *
-     * @throws IOException prevista no contrato de fechamento. Esta implementação
-     *                     captura e registra falhas do socket
+     * @throws IOException previsto no contrato de fechamento; a implementação
+     *                     atual captura e registra as falhas do socket, sem
+     *                     relançá-las
      */
     public void close() throws IOException {
         invalidate();

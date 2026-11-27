@@ -11,7 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
-/** Exercita a seleção do validador e a verificação do destinatário de comandos Suntech. */
+/**
+ * Exercita a seleção do validador pelo protocolo, a verificação do destinatário e a rejeição de
+ * registros duplicados ou de protocolos sem validador.
+ *
+ * <p>A seleção errada permitiria enviar um comando com a gramática de outro protocolo; por isso
+ * o registro precisa ser explícito e único.</p>
+ */
 class CommandValidatorRegistryTest {
 
     /** Registro de implementações exercitado pelo cenário. */
@@ -32,10 +38,14 @@ class CommandValidatorRegistryTest {
 
     /**
      * Valida o comando usando o validador registrado para Suntech.
+     *
+     * <p>O payload é um CMD bem formado; a ausência de exceção confirma que o registro resolveu
+     * a implementação correta.</p>
      */
     @Test
     void shouldValidateSuntechCommand() {
 
+        // CMD;identidade;grupo;código;parâmetro: consulta de versão de firmware.
         byte[] payload = ascii(
                 "CMD;1234567890;03;04;1\r"
         );
@@ -47,10 +57,14 @@ class CommandValidatorRegistryTest {
 
     /**
      * Verifica o reconhecimento da sintaxe de programação pelo registro.
+     *
+     * <p>PRG compartilha o validador Suntech, mas usa pares código#valor em vez de um código de
+     * operação.</p>
      */
     @Test
     void shouldValidateProgramCommand() {
 
+        // PRG;identidade;grupo;código#valor: programação de um parâmetro.
         byte[] payload = ascii(
                 "PRG;1234567890;16;70#60\r"
         );
@@ -62,6 +76,8 @@ class CommandValidatorRegistryTest {
 
     /**
      * Confere o destinatário quando a chamada inclui a identidade esperada.
+     *
+     * <p>A sobrecarga com identidade deve aceitar o comando endereçado à própria sessão.</p>
      */
     @Test
     void shouldValidateDeviceIdentity() {
@@ -70,6 +86,7 @@ class CommandValidatorRegistryTest {
                 "CMD;1234567890;03;04;1\r"
         );
 
+        // A identidade esperada coincide com o destinatário do comando.
         assertDoesNotThrow(
                 () -> registry.validate(
                         "suntech",
@@ -81,10 +98,14 @@ class CommandValidatorRegistryTest {
 
     /**
      * Rejeita um comando endereçado a outro dispositivo.
+     *
+     * <p>Validar a sintaxe não basta: o comando não pode ser escrito na sessão de outra
+     * identidade.</p>
      */
     @Test
     void shouldRejectDifferentDeviceIdentity() {
 
+        // O comando é destinado a 1234567890, mas a sessão pertence a 0987654321.
         byte[] payload = ascii(
                 "CMD;1234567890;03;04;1\r"
         );
@@ -106,6 +127,8 @@ class CommandValidatorRegistryTest {
 
     /**
      * Rejeita bytes incompatíveis com o formato ASCII do comando.
+     *
+     * <p>O protocolo é textual; bytes de controle não podem ser interpretados como campos.</p>
      */
     @Test
     void shouldRejectInvalidAscii() {
@@ -114,6 +137,7 @@ class CommandValidatorRegistryTest {
                 IllegalArgumentException.class,
                 () -> registry.validate(
                         "suntech",
+                        // Bytes de controle fora do ASCII imprimível aceito pela gramática.
                         new byte[]{0, 1, 2}
                 )
         );
@@ -122,6 +146,8 @@ class CommandValidatorRegistryTest {
 
     /**
      * Confere a rejeição de uma mensagem com estrutura de comando inválida.
+     *
+     * <p>Um cabeçalho sem os quatro campos mínimos não pode ser confundido com comando.</p>
      */
     @Test
     void shouldRejectMalformedCommand() {
@@ -138,6 +164,8 @@ class CommandValidatorRegistryTest {
 
     /**
      * Verifica o erro ao solicitar um protocolo sem validador.
+     *
+     * <p>Falhar na seleção evita validar bytes com uma gramática diferente da esperada.</p>
      */
     @Test
     void shouldRejectUnknownProtocol() {
@@ -146,6 +174,7 @@ class CommandValidatorRegistryTest {
                 IllegalArgumentException.class,
                 () -> registry.validate(
                         "teltonika",
+                        // Não há validador Teltonika registrado nesta instância.
                         ascii("CMD;1234567890;03;04;1")
                 )
         );
@@ -154,6 +183,9 @@ class CommandValidatorRegistryTest {
 
     /**
      * Impede que dois validadores disputem o mesmo identificador de protocolo.
+     *
+     * <p>A escolha implícita pelo primeiro registro tornaria o envio dependente da ordem da
+     * lista.</p>
      */
     @Test
     void shouldRejectDuplicateValidators() {
@@ -173,6 +205,7 @@ class CommandValidatorRegistryTest {
     @Test
     void shouldRejectUnknownProtocolWhenIdentityIsProvided() {
         var error = assertThrows(IllegalArgumentException.class,
+                // A sobrecarga com identidade deve falhar na seleção antes de olhar o payload.
                 () -> registry.validate("teltonika", ascii("CMD;1234567890;03;04;1"), "1234567890"));
         assertEquals("UNSUPPORTED_COMMAND_PROTOCOL: teltonika", error.getMessage());
     }

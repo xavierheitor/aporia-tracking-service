@@ -14,12 +14,16 @@ import software.aporia.tracking.protocol.DecodedPacket;
 import software.aporia.tracking.protocol.TelemetryDecoder;
 
 /**
- * Interpreta mensagens Suntech, incluindo posições com mapa de campos, heartbeats e respostas com
- * telemetria embutida.
+ * Interpreta mensagens Suntech, incluindo posições com mapa de campos, heartbeats e respostas com telemetria
+ * embutida.
  *
- * <p>{@link #decodePacket(byte[], String)} determina os conteúdos presentes e
- * monta o resultado do worker. {@link #decode(byte[])} interpreta uma leitura;
- * {@code decodePosition()} usa o mapa para localizar apenas os campos transmitidos.</p>
+ * <p>{@link #decodePacket(byte[], String)} determina os conteúdos presentes e monta o resultado do worker.
+ * {@link #decode(byte[])} interpreta uma leitura completa; {@code decodePosition} usa o mapa para localizar
+ * apenas os campos transmitidos. A identidade sempre vem do próprio quadro, não do cadastro; o worker é quem
+ * compara as duas.</p>
+ *
+ * <p>A classe não guarda o buffer de recepção. O {@link SuntechProtocol} interno é usado apenas para extrair
+ * a identidade, sem acumular bytes entre chamadas.</p>
  */
 public class SuntechDecoder implements TelemetryDecoder {
 
@@ -33,6 +37,9 @@ public class SuntechDecoder implements TelemetryDecoder {
     /**
      * Identifica a versão do formato gravada com os pacotes Suntech.
      *
+     * <p>Deve coincidir com a versão informada por {@link SuntechAdapter#decoderVersion()}, pois o worker
+     * seleciona o decodificador por esse texto.</p>
+     *
      * @return versão usada para interpretar os bytes persistidos
      */
     @Override
@@ -40,7 +47,12 @@ public class SuntechDecoder implements TelemetryDecoder {
         return "suntech-ascii-v3";
     }
 
-    /** Nomes dos campos na ordem dos bits do mapa de presença. */
+    /**
+     * Nomes dos campos na ordem dos bits do mapa de presença.
+     *
+     * <p>Cobre os bits 0 a 21; o bit 22 não é aceito e o bit 23 anuncia o mapa estendido, cujos valores não
+     * viram propriedades de {@link Telemetry}.</p>
+     */
     private static final String[] FIELDS = {
         "map", "model", "firmware", "realtime",
         "date", "time", "cell", "mcc",
@@ -50,21 +62,27 @@ public class SuntechDecoder implements TelemetryDecoder {
         "reason", "sequence"
     };
 
-    /** Formato decimal aceito antes da conversão dos campos numéricos. */
+    /** Formato decimal aceito antes da conversão: sinal opcional e ponto, sem expoente. */
     private static final Pattern NUMBER = Pattern.compile(
             "[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)"
     );
 
-    /** Enquadrador Suntech usado para reconhecer a identidade do quadro. */
+    /** Enquadrador usado apenas para extrair a identidade; não acumula bytes de recepção aqui. */
     private final SuntechProtocol protocol = new SuntechProtocol();
 
     /**
      * Combina o plano de roteamento com a leitura de telemetria, preservando o tipo de resposta
      * em mensagens compostas.
      *
+     * <p>Heartbeat gera uma leitura sem posição; resposta sem posição gera lista vazia. O campo {@code
+     * responseType} é apenas o cabeçalho ({@code RES} ou {@code RPR}), sem identificar qual comando originou
+     * a resposta. {@code registeredIdentity} não é usado: a identidade é lida do quadro e a comparação com o
+     * cadastro fica a cargo do worker.</p>
+     *
      * @param frame quadro recebido para interpretação ou ingestão
-     * @param registeredIdentity identidade de referência do equipamento
+     * @param registeredIdentity identidade de referência do equipamento; não usada aqui
      * @return identidade, leituras e eventual resposta presentes no pacote
+     * @throws IllegalArgumentException se o quadro, o cabeçalho ou os campos forem inválidos
      */
     @Override
     public DecodedPacket decodePacket(byte[] frame, String registeredIdentity) {
@@ -77,6 +95,7 @@ public class SuntechDecoder implements TelemetryDecoder {
         var readings = plan.processTelemetry() || plan.processHeartbeat()
                 ? java.util.List.of(decode(frame)) : java.util.List.<Telemetry>of();
         String response = plan.processCommandResponse() ? new String(frame, 0, 3, StandardCharsets.US_ASCII) : null;
+        // O tipo registrado é o cabeçalho, não o comando: não há correlação automática aqui.
         return new DecodedPacket(identity, readings, response);
     }
 
@@ -84,13 +103,20 @@ public class SuntechDecoder implements TelemetryDecoder {
      * Extrai a telemetria de uma mensagem de posição ou presença, inclusive de uma posição
      * embutida em resposta.
      *
+     * <p>O último byte deve ser o CR; o texto é dividido preservando campos vazios. Uma resposta {@code RES}
+     * sem posição embutida não tem telemetria e é rejeitada com {@link UnsupportedOperationException}; {@link
+     * #decodePacket(byte[], String)} evita chamar este método nesse caso.</p>
+     *
      * @param frame quadro recebido para interpretação ou ingestão
      * @return telemetria interpretada a partir dos campos do equipamento
+     * @throws IllegalArgumentException se o cabeçalho ou os campos forem inválidos
+     * @throws UnsupportedOperationException se for uma resposta sem posição embutida
      */
     public Telemetry decode(byte[] frame) {
 
         String identity = protocol.identify(frame);
 
+        // identify já validou o CR final; removê-lo deixa os campos sem o terminador no último valor.
         String message = new String(
                 frame,
                 0,
@@ -107,6 +133,7 @@ public class SuntechDecoder implements TelemetryDecoder {
                     throw invalid("INVALID_FIELD_COUNT");
                 }
 
+                // ALV não traz mapa: a leitura registra apenas a presença do equipamento.
                 yield new Telemetry(
                 identity,
                 null,
@@ -145,6 +172,7 @@ public class SuntechDecoder implements TelemetryDecoder {
                 );
             }
 
+            // RPR, aceito no envelope, não tem leitura e cai aqui quando decode é chamado direto.
             default ->
                 throw invalid("UNSUPPORTED_MESSAGE");
         };
@@ -154,9 +182,16 @@ public class SuntechDecoder implements TelemetryDecoder {
      * Percorre o mapa de presença para associar cada campo à sua posição no texto e validar os
      * valores da leitura.
      *
+     * <p>O mapa precisa ter o bit 0 ligado e não pode usar bits fora de {@code 0xBFFFFF}. Cada bit ligado
+     * consome exatamente um campo, na ordem de {@link #FIELDS}. O bit 23 consome um mapa estendido de oito
+     * dígitos hexadecimais e os campos indicados por ele, que são descartados. Um {@code ;} imediatamente
+     * antes do CR é aceito como campo vazio final.</p>
+     *
      * @param identity identidade declarada pelo rastreador no protocolo
      * @param parts campos da mensagem separados por ponto e vírgula
      * @return telemetria interpretada a partir dos campos do equipamento
+     * @throws IllegalArgumentException se o mapa, a contagem ou qualquer valor validado for
+     *         inválido
      */
     private Telemetry decodePosition(
             String identity,
@@ -243,6 +278,7 @@ public class SuntechDecoder implements TelemetryDecoder {
 
         Double heading = number(values.get("heading"), 0, 360);
 
+        // 360 graus é equivalente a 0; normalizar mantém o rumo no intervalo [0, 360).
         if (heading != null && heading == 360) {
             heading = 0d;
         }
@@ -260,11 +296,12 @@ public class SuntechDecoder implements TelemetryDecoder {
             if (!inputs.matches("[01]{8}")) {
                 throw invalid("INVALID_INPUTS");
             }
-            // O bit menos significativo das entradas digitais representa a ignição.
+            // Nesta implementação, a ignição é o bit menos significativo das entradas digitais.
             ignition = (Integer.parseInt(inputs, 2) & 1) == 1;
         }
 
-        // null significa ausência de coordenadas; false indica posição sem fix válido.
+        // Sem coordenadas não há posição a validar. Com coordenadas, só fix=1 é posição válida;
+        // fix ausente ou outro código aceito resulta em false.
         Boolean validFix = latitude == null
                 ? null
                 : fix != null && fix == 1;
@@ -289,12 +326,15 @@ public class SuntechDecoder implements TelemetryDecoder {
      * @param min limite inclusivo do intervalo aceito
      * @param max limite inclusivo do intervalo aceito
      * @return valor convertido, ou nulo para campo ausente
+     * @throws IllegalArgumentException se o valor não tiver forma decimal ou estiver fora do
+     *         intervalo
      */
     private Double number(String value, double min, double max) {
         if (value == null || value.isEmpty()) {
             return null;
         }
 
+        // A regex restringe a forma decimal; a finitude e a faixa são conferidas depois.
         if (!NUMBER.matcher(value).matches()) {
             throw invalid("INVALID_NUMBER");
         }
@@ -316,6 +356,7 @@ public class SuntechDecoder implements TelemetryDecoder {
      * @param min limite inclusivo do intervalo aceito
      * @param max limite inclusivo do intervalo aceito
      * @return valor convertido, ou nulo para campo ausente
+     * @throws IllegalArgumentException se o valor não for um inteiro dentro do intervalo
      */
     private Integer integer(String value, int min, int max) {
         Double parsed = number(value, min, max);
@@ -324,6 +365,7 @@ public class SuntechDecoder implements TelemetryDecoder {
             return null;
         }
 
+        // number já aplicou a faixa; aqui só falta recusar uma parte fracionária.
         if (parsed % 1 != 0) {
             throw invalid("INVALID_NUMBER");
         }

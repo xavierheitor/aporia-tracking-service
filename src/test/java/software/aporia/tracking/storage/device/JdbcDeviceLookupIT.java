@@ -18,7 +18,16 @@ import software.aporia.tracking.support.TestFixtures;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Exercita a consulta de equipamentos habilitados e a disputa entre tenants pela aprovação de uma descoberta. */
+/**
+ * Exercita a consulta de equipamentos habilitados e a disputa entre tenants pela aprovação de uma
+ * descoberta.
+ *
+ * <p>Os cenários de consulta inserem tenant e dispositivo diretamente e removem no bloco
+ * {@code finally}. O cenário concorrente usa {@link TestFixtures} para dois tenants e
+ * {@code device_discoveries}, cuja aprovação cria o dispositivo reaproveitando o id da descoberta.
+ * O schema é isolado por JVM; as identidades fixas evitam colisão com o índice único
+ * {@code (protocol, identity)}.</p>
+ */
 class JdbcDeviceLookupIT {
 
     /**
@@ -32,7 +41,9 @@ class JdbcDeviceLookupIT {
     }
 
     /**
-     * Cria o tenant e seu cadastro de equipamento para a consulta.
+     * Cenário: tenant ainda sem cadastro. Ação: insere tenant e dispositivo com a identidade e o
+     * estado de habilitação informados e confirma os dois INSERTs juntos. Resultado: o cadastro fica
+     * visível às consultas; uma falha desfaz a transação e é propagada.
      *
      * @param dataSource fonte de conexões JDBC para a operação
      * @param tenantId identificador do tenant que delimita a operação
@@ -91,7 +102,10 @@ class JdbcDeviceLookupIT {
     }
 
     /**
-     * Remove os registros criados no cenário em ordem de dependência.
+     * Remove dispositivo e tenant do cenário na ordem das chaves estrangeiras, em uma transação.
+     *
+     * <p>A rotina não apaga {@code device_discoveries}: os cenários que a usam não criam registros
+     * nessa tabela.</p>
      *
      * @param dataSource fonte de conexões JDBC para a operação
      * @param tenantId identificador do tenant que delimita a operação
@@ -134,7 +148,10 @@ class JdbcDeviceLookupIT {
     }
 
     /**
-     * Disputa uma descoberta entre dois tenants e confere a propriedade do cadastro resultante.
+     * Cenário: uma descoberta pendente do protocolo Teltonika e dois tenants disputando a aprovação.
+     * Ação: duas threads chamam {@code approve_device_discovery} sob a mesma barreira. Resultado:
+     * exatamente uma aprovação vence e a outra é classificada como
+     * {@code DISCOVERY_ALREADY_APPROVED}; a consulta habilitada devolve o tenant vencedor.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -142,13 +159,16 @@ class JdbcDeviceLookupIT {
     void concurrentApprovalsAssignDiscoveryToExactlyOneTenant() throws Exception {
         try (var db = createDataSource(); var first = new TestFixtures(db); var second = new TestFixtures(db);
              var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            // Prefixo do protocolo Teltonika para não colidir com as identidades Suntech da fixture.
             String identity = "35000" + first.deviceIdentity();
             var lookup = new JdbcDeviceLookup(db);
             lookup.recordDiscovery("teltonika", identity, new DeviceDescription("Teltonika", "gps_tracker", "Codec 8", null));
             var barrier = new CyclicBarrier(2);
+            // As aprovações partem juntas para disputar o FOR UPDATE da função.
             var a = executor.submit(() -> approve(db, identity, first.tenantId(), barrier));
             var b = executor.submit(() -> approve(db, identity, second.tenantId(), barrier));
             boolean firstApproved = a.get(10, TimeUnit.SECONDS);
+            // Apenas um dos dois retornos pode ser verdadeiro.
             assertEquals(!firstApproved, b.get(10, TimeUnit.SECONDS));
             var registered = lookup.find("teltonika", identity).filter(registration -> registration.enabled()).map(registration -> registration.device()).orElseThrow();
             assertEquals(firstApproved ? first.tenantId() : second.tenantId(), registered.tenantId());
@@ -156,8 +176,9 @@ class JdbcDeviceLookupIT {
     }
 
     /**
-     * Sincroniza os dois operadores antes da aprovação e distingue o vencedor do conflito
-     * esperado.
+     * Cenário: uma tentativa de aprovação concorrente. Ação: prepara o SELECT da função, espera a
+     * barreira e executa. Resultado: verdadeiro quando este operador aprova; falso quando o banco
+     * sinaliza {@code DISCOVERY_ALREADY_APPROVED}; outras falhas SQL são propagadas.
      *
      * @param db fonte de conexões JDBC para a operação
      * @param identity identidade declarada pelo rastreador no protocolo
@@ -177,6 +198,7 @@ class JdbcDeviceLookupIT {
                 assertTrue(row.next());
                 return true;
             } catch (SQLException conflict) {
+                // A função bloqueia a descoberta; o perdedor a encontra já aprovada por outro tenant.
                 if (conflict.getMessage().contains("DISCOVERY_ALREADY_APPROVED")) return false;
                 throw conflict;
             }
@@ -184,7 +206,9 @@ class JdbcDeviceLookupIT {
     }
 
     /**
-     * Localiza o equipamento habilitado pelo par protocolo e identidade.
+     * Cenário: dispositivo Suntech habilitado, com identidade fixa. Ação: consulta pelo par protocolo
+     * e identidade e filtra habilitação. Resultado: tenant, dispositivo, protocolo e identidade
+     * coincidem com o cadastro; a fixture é removida no {@code finally}.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -227,7 +251,8 @@ class JdbcDeviceLookupIT {
     }
 
     /**
-     * Confere que o cadastro desabilitado fica fora da consulta de habilitados.
+     * Cenário: dispositivo Suntech desabilitado. Ação: consulta e filtra habilitação. Resultado:
+     * vazio; a busca encontra o cadastro, mas a sessão não pode ser admitida.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -266,7 +291,8 @@ class JdbcDeviceLookupIT {
     }
 
     /**
-     * Verifica o resultado vazio para uma identidade sem cadastro.
+     * Cenário: identidade sem cadastro no schema. Ação: consulta Suntech de um número fixo. Resultado:
+     * vazio, sem criar registros e sem limpeza.
      */
     @Test
     void shouldRejectUnknownDevice() {
@@ -284,7 +310,9 @@ class JdbcDeviceLookupIT {
     }
 
     /**
-     * Impede que a identidade seja resolvida sob outro protocolo.
+     * Cenário: dispositivo Suntech habilitado. Ação: consulta a mesma identidade como Teltonika.
+     * Resultado: vazio; a busca sempre combina protocolo e identidade e a fixture é removida no
+     * {@code finally}.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */

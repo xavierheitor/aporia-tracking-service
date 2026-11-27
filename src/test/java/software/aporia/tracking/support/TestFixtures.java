@@ -7,7 +7,16 @@ import java.util.UUID;
 
 import javax.sql.DataSource;
 
-/** Cria os registros de um tenant de teste e remove os dependentes em ordem compatível com as chaves estrangeiras. */
+/**
+ * Cria os registros de um tenant de teste e remove os dependentes em ordem compatível com as
+ * chaves estrangeiras.
+ *
+ * <p>Cada instância sorteia tenant, dispositivo, ativo e token de sessão; o construtor
+ * sobrecarregado permite fixar a identidade. O cadastro é gravado em uma única transação e o
+ * escopo de todas as rotinas é o {@code tenant_id} da instância. {@link #close()} exclui respostas,
+ * outbox, posições, mensagens, pacotes, comandos, associações, ativos, descobertas aprovadas,
+ * dispositivos e por fim o tenant, confirmando a limpeza em uma transação.</p>
+ */
 public final class TestFixtures implements AutoCloseable {
 
     /** Fonte de conexões JDBC usadas pela instância. */
@@ -23,14 +32,19 @@ public final class TestFixtures implements AutoCloseable {
     /** Token de sessão do cadastro, disponível aos testes da reserva com identidade completa. */
     private final UUID sessionToken = UUID.randomUUID();
 
-    /** @return token publicado no cadastro do equipamento de teste */
+    /**
+     * Expõe o token gravado em {@code devices.command_session_token}, usado pela reserva para
+     * reconhecer a sessão admitida do equipamento.
+     *
+     * @return token publicado no cadastro do equipamento de teste
+     */
     public UUID sessionToken() { return sessionToken; }
 
     /** Identidade que acompanha os quadros do equipamento. */
     private final String deviceIdentity;
 
     /**
-     * Cria os registros de teste com a identidade atribuída pelo construtor.
+     * Monta o cadastro com uma identidade numérica aleatória de dez dígitos.
      *
      * @param dataSource fonte de conexões JDBC para a operação
      * @throws SQLException se a operação JDBC falhar
@@ -41,7 +55,7 @@ public final class TestFixtures implements AutoCloseable {
     }
 
     /**
-     * Prepara o tenant, o equipamento e a associação usados pelo cenário.
+     * Prepara tenant, equipamento, ativo e associação do cenário com a identidade informada.
      *
      * @param dataSource fonte de conexões JDBC para a operação
      * @param deviceIdentity identidade declarada pelo rastreador no protocolo
@@ -59,7 +73,10 @@ public final class TestFixtures implements AutoCloseable {
     }
 
     /**
-     * Insere os registros relacionados dentro de uma transação.
+     * Insere tenant, dispositivo, ativo e associação dentro de uma transação.
+     *
+     * <p>Qualquer falha de SQL ou de execução desfaz o conjunto, evitando cadastro parcial
+     * reutilizado por outro teste.</p>
      *
      * @throws SQLException se a operação JDBC falhar
      */
@@ -78,6 +95,7 @@ public final class TestFixtures implements AutoCloseable {
                         "Integration Test"
                 );
 
+                // O token fica no cadastro para que a reserva reconheça a sessão admitida.
                 execute(
                         connection,
                         """
@@ -106,6 +124,7 @@ public final class TestFixtures implements AutoCloseable {
                         "Test Vehicle"
                 );
 
+                // O início fixo garante que a telemetria dos testes sempre encontre a associação vigente.
                 execute(
                         connection,
                         """
@@ -197,7 +216,11 @@ public final class TestFixtures implements AutoCloseable {
     }
 
     /**
-     * Remove primeiro os registros dependentes e confirma a limpeza em uma transação.
+     * Remove os dependentes na ordem das chaves estrangeiras e confirma a limpeza em uma transação.
+     *
+     * <p>A ordem evita violação de FK: respostas antes de comandos e pacotes, posições antes de
+     * mensagens, associações antes de ativos e dispositivos. A falha de qualquer exclusão desfaz a
+     * limpeza inteira e é propagada.</p>
      *
      * @throws SQLException se a operação JDBC falhar
      */
@@ -273,6 +296,9 @@ public final class TestFixtures implements AutoCloseable {
                         tenantId
                 );
 
+                // A descoberta aprovada reaproveita o id do dispositivo criado na aprovação; por
+                // isso sai antes de devices. Descobertas não aprovadas não têm tenant e não são
+                // alcançadas por este DELETE.
                 execute(connection, """
                         DELETE FROM device_discoveries WHERE id IN (SELECT id FROM devices WHERE tenant_id=?)
                         """, tenantId);
@@ -291,6 +317,7 @@ public final class TestFixtures implements AutoCloseable {
                         tenantId
                 );
 
+                // Confirma todos os DELETEs juntos; qualquer erro anterior cai no rollback abaixo.
                 connection.commit();
 
             } catch (SQLException | RuntimeException e) {

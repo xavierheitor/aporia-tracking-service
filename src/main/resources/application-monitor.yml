@@ -1,9 +1,15 @@
+# Perfil monitor: coleta periódica das métricas de fila.
+# Não expõe API de negócio; publica gauges no Actuator/Prometheus.
+
 server:
+  # Sem API HTTP de negócio neste processo.
   port: -1
 
 spring:
   datasource:
     hikari:
+      # O monitor só executa consultas agregadas curtas: um pool pequeno evita
+      # competir com gateway e worker no banco.
       pool-name: aporia-tracking-monitor-pool
       maximum-pool-size: 2
       minimum-idle: 1
@@ -13,6 +19,7 @@ spring:
       pool:
         size: 1
       shutdown:
+        # Aguarda a coleta em curso terminar durante o encerramento.
         await-termination: true
         await-termination-period: 20s
 
@@ -27,9 +34,12 @@ management:
   endpoint:
     health:
       group:
+        # Liveness não depende do banco: só confirma que o processo responde.
         liveness:
           include:
             - livenessState
+
+        # Readiness exige o banco, pois sem ele não há snapshot de filas.
         readiness:
           include:
             - readinessState
@@ -37,7 +47,9 @@ management:
 
 tracking:
   monitor:
+    # Intervalo entre coletas agendadas.
     collection-interval-ms: ${TRACKING_QUEUE_COLLECTION_INTERVAL_MS:30000}
+    # Prazo máximo de cada consulta ao banco.
     query-timeout-seconds: ${TRACKING_QUEUE_QUERY_TIMEOUT_SECONDS:3}
 
 sentry:

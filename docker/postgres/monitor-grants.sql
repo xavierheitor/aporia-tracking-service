@@ -1,4 +1,8 @@
--- Aplicar como proprietário do schema após o Flyway.
+-- Aplicar como proprietário do schema depois do Flyway.
+--
+-- O monitor só precisa ler colunas específicas das filas; não recebe INSERT,
+-- UPDATE nem CREATE. O bloco inicial rejeita uma role com privilégios
+-- administrativos e o script pode ser reaplicado.
 
 DO $$
 BEGIN
@@ -36,6 +40,7 @@ BEGIN
 END
 $$;
 
+-- Fila de pacotes: profundidade por estado e idade da pendência mais antiga.
 GRANT SELECT (
     status,
     attempts,
@@ -44,6 +49,7 @@ GRANT SELECT (
 )
 ON raw_packets TO tracking_monitor;
 
+-- Fila de comandos: contagem por estado e comandos vencidos.
 GRANT SELECT (
     status,
     created_at,
@@ -52,6 +58,7 @@ GRANT SELECT (
 )
 ON device_commands TO tracking_monitor;
 
+-- Outbox: eventos ainda não publicados.
 GRANT SELECT (
     created_at,
     published_at

@@ -11,12 +11,21 @@ import java.util.UUID;
 /**
  * Reserva comandos e condiciona autorização e conclusão ao token da tentativa,
  * para impedir atualizações por um emissor obsoleto.
+ *
+ * <p>As operações usam a conexão do chamador e não confirmam nem desfazem a transação. O tenant delimita
+ * todas as mutações; a reserva e o encerramento de falha também restringem o dispositivo. A reserva exige
+ * transação aberta, bloqueia as linhas do comando e do dispositivo e grava um token novo, que as transições
+ * seguintes precisam apresentar junto do estado esperado. O índice parcial {@code uq_commands_in_flight}
+ * garante no máximo um comando em voo por dispositivo.</p>
  */
 public final class DeviceCommandDispatchRepository {
 
     /**
-     * Reserva identificada pelo token exigido nas transições seguintes. Os bytes
-     * são copiados para preservar a tentativa.
+     * Reserva identificada pelo token exigido nas transições seguintes. Os bytes são copiados na construção e
+     * em cada leitura para preservar a tentativa mesmo que o chamador altere o array recebido.
+     *
+     * <p>{@code attempts} é o número da tentativa depois do incremento feito na reserva. O token não aparece
+     * em {@link #toString()}.</p>
      *
      * @param id         UUID do comando reservado
      * @param tenantId   tenant da reserva
@@ -46,6 +55,7 @@ public final class DeviceCommandDispatchRepository {
          * @param payload    bytes do conteúdo da mensagem
          * @param attempts   número de tentativas associado à operação
          * @param claimToken token que identifica a reserva vigente
+         * @throws NullPointerException se algum componente obrigatório for nulo
          */
         public ClaimedCommand {
             Objects.requireNonNull(id);
@@ -90,12 +100,17 @@ public final class DeviceCommandDispatchRepository {
      * Registra a escrita local concluída se a tentativa ainda detiver o token e
      * estiver em transmissão.
      *
+     * <p>É uma única instrução condicional: não exige transação explícita e não confirma nada. Sucesso
+     * significa apenas que os bytes foram entregues ao socket, nunca que o rastreador os recebeu ou executou.
+     * A transição limpa o token e grava {@code sent_at}, de modo que repetir a chamada retorna falso.</p>
+     *
      * @param connection conexão JDBC usada pelo chamador
      * @param tenantId   identificador do tenant que delimita a operação
      * @param commandId  identificador do comando na fila
      * @param claimToken token que identifica a reserva vigente
      * @return verdadeiro se a transição condicional alterou a linha da tentativa
-     * @throws SQLException se a operação JDBC falhar
+     * @throws SQLException         se a operação JDBC falhar
+     * @throws NullPointerException se algum argumento obrigatório for nulo
      */
     public boolean markSent(
             Connection connection,
@@ -108,6 +123,8 @@ public final class DeviceCommandDispatchRepository {
         Objects.requireNonNull(commandId);
         Objects.requireNonNull(claimToken);
 
+        // Só a tentativa dona do token e ainda em transmissão pode concluir; outro
+        // emissor ou uma repetição atualiza zero linhas.
         String sql = """
                 UPDATE device_commands
                 SET status = 'sent',
@@ -133,6 +150,11 @@ public final class DeviceCommandDispatchRepository {
      * tentativa, com proprietário, identidade da sessão e auditoria obrigatórios.
      * O chamador deve confirmar a transação antes de escrever no socket.
      *
+     * <p>A linha só passa de {@code sending} para {@code transmitting} se ainda não expirou, se o comando tem
+     * solicitante e chave de requisição e se o cadastro do dispositivo está habilitado, no mesmo tenant e
+     * protocolo, com a identidade da sessão atual. O proprietário e o instante de início ficam gravados para
+     * a recuperação posterior. Não confirma a transação.</p>
+     *
      * @param connection      conexão JDBC usada pelo chamador
      * @param tenantId        identificador do tenant que delimita a operação
      * @param commandId       identificador do comando na fila
@@ -152,6 +174,8 @@ public final class DeviceCommandDispatchRepository {
         Objects.requireNonNull(owner, "owner");
         Objects.requireNonNull(sessionIdentity, "sessionIdentity");
 
+        // A transição exige a mesma reserva, prazo vigente e auditoria completa. O
+        // EXISTS confirma que o dispositivo segue habilitado na sessão informada.
         String sql = """
                 UPDATE device_commands
                 SET status = 'transmitting',
@@ -184,6 +208,9 @@ public final class DeviceCommandDispatchRepository {
      * Reserva para a conexão reconhecida pelo banco e mantém o cadastro bloqueado
      * até o commit. Tenant, dispositivo e token são obrigatórios.
      *
+     * <p>É a entrada usada pelo dispatcher: delega a reserva transacional e não confirma. O token recebido é
+     * o da sessão admitida, não o token da tentativa, que é gerado e devolvido em {@link ClaimedCommand}.</p>
+     *
      * @param connection conexão da transação que manterá a reserva
      * @param tenantId tenant proprietário do dispositivo
      * @param deviceId dispositivo cuja sessão pode receber o comando
@@ -201,14 +228,20 @@ public final class DeviceCommandDispatchRepository {
 
     /**
      * Bloqueia o dispositivo elegível e verifica novamente a fila antes de atribuir
-     * o token de
-     * reserva.
+     * o token de reserva.
      *
-     * @param connection conexão JDBC usada pelo chamador
-     * @param tenantId   identificador do tenant que delimita a operação
-     * @param deviceId   identificador do equipamento cadastrado
+     * <p>Primeiro seleciona, com {@code FOR UPDATE OF c, d SKIP LOCKED}, um comando na fila para o
+     * dispositivo e a sessão informados; depois repete as condições no {@code UPDATE} que incrementa {@code
+     * attempts}. {@code SKIP LOCKED} faz um concorrente ignorar a linha já reservada em vez de esperar. O
+     * comando e o cadastro permanecem bloqueados até o commit ou rollback do chamador.</p>
+     *
+     * @param connection   conexão JDBC usada pelo chamador
+     * @param tenantId     identificador do tenant que delimita a operação
+     * @param deviceId     identificador do equipamento cadastrado
+     * @param sessionToken token da sessão admitida no cadastro
      * @return comando reservado com seu token, ou vazio se nenhum for elegível
-     * @throws SQLException se a operação JDBC falhar
+     * @throws SQLException          se a operação JDBC falhar
+     * @throws IllegalStateException se a conexão estiver em autocommit
      */
     private Optional<ClaimedCommand> claim(Connection connection, UUID tenantId, UUID deviceId, UUID sessionToken)
             throws SQLException {
@@ -217,6 +250,8 @@ public final class DeviceCommandDispatchRepository {
                     "CLAIM_REQUIRES_TRANSACTION");
         }
 
+        // A sessão admitida e o escopo de tenant/device limitam a busca; o NOT
+        // EXISTS impede outro comando em voo para o mesmo dispositivo.
         String select = """
                     SELECT c.id
                     FROM device_commands c
@@ -253,7 +288,8 @@ public final class DeviceCommandDispatchRepository {
         }
 
         // Após obter o bloqueio, a próxima consulta em READ COMMITTED enxerga reservas
-        // recém-confirmadas.
+        // recém-confirmadas. As condições são repetidas para que a reserva só ocorra
+        // se o comando ainda for elegível no instante da escrita.
         String update = """
                 UPDATE device_commands c SET status='sending', attempts=c.attempts+1,
                     claimed_at=now(), claim_token=?
@@ -283,6 +319,8 @@ public final class DeviceCommandDispatchRepository {
                         result.getInt("attempts"),
                         result.getObject("claim_token", UUID.class));
 
+                // O UPDATE deve devolver no máximo uma linha; duas violariam o
+                // contrato de um único comando reservado.
                 if (result.next()) {
                     throw new SQLException(
                             "MULTIPLE_COMMANDS_CLAIMED");
@@ -295,8 +333,11 @@ public final class DeviceCommandDispatchRepository {
 
     /**
      * Motivo usado para distinguir recusa antes do envio de falha potencialmente
-     * posterior à
-     * escrita.
+     * posterior à escrita.
+     *
+     * <p>Os dois primeiros valores encerram a reserva em {@code sending} sem transmissão; {@link
+     * #TCP_WRITE_UNCERTAIN} só pode ser usado depois de a transmissão ter sido autorizada e resulta em {@code
+     * delivery_unknown}.</p>
      */
     public enum Failure {
         /** Os bytes ou o protocolo divergiram da operação permitida. */
@@ -309,21 +350,30 @@ public final class DeviceCommandDispatchRepository {
 
     /**
      * Registra o desfecho compatível com a etapa da falha e indica se a tentativa
-     * ainda podia
-     * alterar o comando.
+     * ainda podia alterar o comando.
+     *
+     * <p>O estado esperado depende do motivo: {@code sending} para recusas antes da escrita e {@code
+     * transmitting} para falha incerta após a autorização. A transição exige o token e o dispositivo da
+     * reserva, limpa o token e grava o código do motivo. É uma única instrução e não confirma a
+     * transação.</p>
      *
      * @param connection conexão JDBC usada pelo chamador
      * @param command    comando da tentativa em curso
      * @param reason     motivo do encerramento da tentativa
      * @return verdadeiro se a transição condicional alterou a linha da tentativa
-     * @throws SQLException se a operação JDBC falhar
+     * @throws SQLException         se a operação JDBC falhar
+     * @throws NullPointerException se o comando ou o motivo for nulo
      */
     public boolean finishFailure(Connection connection, ClaimedCommand command, Failure reason)
             throws SQLException {
+        // A falha incerta encerra uma transmissão já autorizada; as demais encerram
+        // a reserva ainda em sending.
         boolean writing = reason == Failure.TCP_WRITE_UNCERTAIN;
         String transition = writing
                 ? "status='delivery_unknown', delivery_unknown_at=now()"
                 : "status='delivery_failed'";
+        // O token, o dispositivo e o estado esperado delimitam a atualização e
+        // impedem que um emissor obsoleto altere a tentativa.
         String sql = "UPDATE device_commands SET claim_token=NULL, error_code=?, " + transition
                 + " WHERE tenant_id=? AND device_id=? AND id=? AND claim_token=? AND status=?";
         try (var statement = connection.prepareStatement(sql)) {

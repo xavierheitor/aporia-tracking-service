@@ -11,6 +11,10 @@ import java.util.UUID;
 /**
  * Consulta a associação entre equipamento e ativo vigente no instante da leitura e no tenant
  * informado.
+ *
+ * <p>É uma leitura apenas: não abre transação própria, usa a conexão do chamador e não bloqueia nem altera
+ * linhas. A janela é semiaberta, compatível com {@code tstzrange(..., '[)')} da restrição de exclusão, que
+ * garante no máximo uma associação vigente por dispositivo.</p>
  */
 public class AssignmentRepository {
 
@@ -56,6 +60,8 @@ public class AssignmentRepository {
                 java.sql.Timestamp.from(recordedAt)
             );
 
+             // A restrição de exclusão sobre o intervalo garante no máximo uma
+             // associação vigente, então LIMIT 1 não escolhe entre candidatas.
              try (ResultSet result = statement.executeQuery()) {
                 if (result.next()) {
                     return Optional.of(

@@ -12,9 +12,26 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.sentry.SentryOptions;
 import io.sentry.protocol.SentryException;
 
+/**
+ * Configura a sanitização e a deduplicação dos eventos enviados ao Sentry.
+ *
+ * <p>O callback {@link SentryOptions.BeforeSendCallback} remove dados pessoais e payloads antes de o evento
+ * sair do processo, aplica o limite de recorrência e contabiliza, em métricas Micrometer, os eventos
+ * admitidos, suprimidos e descartados. Os beans existem em qualquer perfil; o envio efetivo depende de {@code
+ * sentry.dsn} configurado.</p>
+ *
+ * <p>O callback pode ser executado concorrentemente pela thread que captura a exceção. Os contadores e o
+ * limitador são thread-safe, e a sanitização ocorre antes do cálculo da assinatura para que apenas módulo,
+ * tipo e quadros permaneçam disponíveis à deduplicação.</p>
+ */
 @Configuration(proxyBeanMethods = false)
 public class ErrorTrackingConfiguration {
 
+    /**
+     * Cria o limitador de recorrência com janela de um minuto e até 2048 assinaturas.
+     *
+     * @return limitador compartilhado pelo callback de envio
+     */
     @Bean
     public @NonNull ErrorEventLimiter errorEventLimiter() {
 
@@ -23,6 +40,21 @@ public class ErrorTrackingConfiguration {
                 2048);
     }
 
+    /**
+     * Cria o callback que limpa, conta e limita cada evento antes do envio.
+     *
+     * <p>Remove usuário, requisição, extras, breadcrumbs, mensagem, servidor, transação, threads, debug
+     * metadata, fingerprints e campos desconhecidos; preserva apenas os contextos {@code runtime} e {@code
+     * spring} e limpa variáveis e trechos de código dos quadros. Depois disso, eventos sem exceção são
+     * descartados, repetições dentro da janela são suprimidas e o restante é admitido.</p>
+     *
+     * <p>Os contadores não têm tags e são incrementados uma vez por evento avaliado, na ordem das
+     * decisões.</p>
+     *
+     * @param limiter  limitador de recorrência compartilhado
+     * @param registry registro onde os três contadores são criados
+     * @return callback executado pelo Sentry antes de transmitir o evento
+     */
     @Bean
     @NullMarked
     public SentryOptions.BeforeSendCallback sanitizeErrorEvents(
@@ -55,6 +87,8 @@ public class ErrorTrackingConfiguration {
                 return null;
             }
 
+            // O evento é limpo antes de qualquer decisão para não vazar dados nem para o cache de
+            // assinaturas.
             event.setUser(null);
             event.setRequest(null);
             event.setExtras(null);
@@ -105,6 +139,7 @@ public class ErrorTrackingConfiguration {
 
             event.setThrowable(null);
 
+            // A deduplicação acontece por último, quando só permanecem os dados usados na assinatura.
             if (!limiter.shouldSend(event)) {
 
                 suppressed.increment();

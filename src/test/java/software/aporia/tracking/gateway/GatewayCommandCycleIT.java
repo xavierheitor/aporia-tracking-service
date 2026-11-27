@@ -38,38 +38,69 @@ import software.aporia.tracking.support.TestFixtures;
 import software.aporia.tracking.TrackingApplication;
 
 /**
- * Inicia gateway e worker em processos separados para observar descoberta, aprovação, ingestão e envio de comandos pelo
- * socket.
+ * Protege o ciclo de comando entre componentes reais: gateway TCP, worker e PostgreSQL.
+ *
+ * <p>
+ * Cada cenário inicia JVMs separadas com os perfis {@code gateway} e {@code worker}, usando
+ * logins efêmeros e os grants de {@code docker/postgres/runtime-grants.sql}. Sockets de
+ * loopback representam rastreadores e a porta TCP efêmera é lida do log do gateway. A fila,
+ * a aprovação de descobertas e a correlação de respostas são observadas pelas tabelas e
+ * funções reais, sem atalhos de produção.
+ * </p>
  */
 class GatewayCommandCycleIT {
     /** Diretório temporário que isola os arquivos gerados pelo cenário. */
     @TempDir
     Path runtime;
 
+    /** Sufixo aleatório que torna exclusivos os nomes de role desta execução. */
     private static final String suffix = UUID.randomUUID().toString().replace("-", "");
+    /** Login efêmero do gateway, criado no banco de testes. */
     private static final String gatewayLogin = "gateway_it_" + suffix;
+    /** Login efêmero do worker, criado no banco de testes. */
     private static final String workerLogin = "worker_it_" + suffix;
+    /** Senha exclusiva do login do gateway nesta execução. */
     private static final String gatewayPassword = UUID.randomUUID().toString();
+    /** Senha exclusiva do login do worker nesta execução. */
     private static final String workerPassword = UUID.randomUUID().toString();
+    /** Indica que os roles foram criados e podem ser removidos na limpeza. */
     private static boolean rolesCreated;
 
+    /** Perfis de aplicação usados para iniciar gateway ou worker em processos separados. */
     private enum ServiceProfile {
+        /** Processo que atende o listener TCP e grava pacotes. */
         GATEWAY("gateway"),
+        /** Processo que consome a fila e grava posições. */
         WORKER("worker");
 
+        /** Nome do perfil Spring passado ao processo filho. */
         private final String profile;
 
+        /**
+         * Associa o perfil Spring ao nome usado nos argumentos do processo.
+         *
+         * @param profile nome do perfil Spring
+         */
         ServiceProfile(String profile) {
             this.profile = profile;
         }
 
+        /**
+         * Devolve o nome do perfil Spring deste serviço.
+         *
+         * @return nome do perfil usado na linha de comando
+         */
         public String profile() {
             return profile;
         }
     }
 
     /**
-     * Aplica as permissões do deploy a logins efêmeros no schema isolado desta suíte.
+     * Cenário: banco de teste isolado sem os logins de runtime. Ação: criar dois roles efêmeros
+     * e aplicar o script de grants do deploy no schema da suíte. Resultado: as permissões de
+     * gateway e worker ficam disponíveis apenas para processos deste ensaio.
+     *
+     * @throws Exception se a preparação do banco falhar
      */
     @BeforeAll
     static void provisionRuntimeRoles() throws Exception {
@@ -79,16 +110,26 @@ class GatewayCommandCycleIT {
                 var sql = c.createStatement()
         ) {
             c.setAutoCommit(false);
+            // Os logins efêmeros substituem os nomes fixos do script, sem alterar os roles de deploy.
             String grants = Files.readString(Path.of("docker/postgres/runtime-grants.sql"))
                     .replace("tracking_gateway", gatewayLogin).replace("tracking_worker", workerLogin);
+            // As credenciais aleatórias mantêm os logins exclusivos desta execução.
             sql.execute("CREATE ROLE " + gatewayLogin + " LOGIN PASSWORD '" + gatewayPassword + "'");
             sql.execute("CREATE ROLE " + workerLogin + " LOGIN PASSWORD '" + workerPassword + "'");
             sql.execute(grants);
             c.commit();
+            // Só marca sucesso após o commit para a limpeza não remover roles inexistentes.
             rolesCreated = true;
         }
     }
 
+    /**
+     * Cenário: roles efêmeros criados por {@link #provisionRuntimeRoles()}. Ação: remover os
+     * privilégios e os logins criados para a suíte. Resultado: o banco de teste volta a ficar sem
+     * roles desta execução.
+     *
+     * @throws Exception se a limpeza do banco falhar
+     */
     @AfterAll
     static void removeRuntimeRoles() throws Exception {
         if (!rolesCreated)
@@ -106,6 +147,13 @@ class GatewayCommandCycleIT {
         }
     }
 
+    /**
+     * Cenário: logins de gateway e worker provisionados com os grants de runtime. Ação: tentar
+     * aprovar descoberta, alterar tabela e criar tabela. Resultado: as três operações falham com
+     * SQLState {@code 42501} (privilégio insuficiente) em cada login.
+     *
+     * @throws Exception se a preparação ou a conexão JDBC falhar
+     */
     @Test
     void runtimeRolesCannotApproveOrChangeSchema() throws Exception {
         try (var db = TestDatabase.createDataSource()) {
@@ -119,6 +167,7 @@ class GatewayCommandCycleIT {
                             "SELECT approve_device_discovery(gen_random_uuid(),gen_random_uuid())",
                             "ALTER TABLE devices ADD COLUMN forbidden int",
                             "CREATE TABLE forbidden(id int)")) {
+                        // 42501 é insufficient_privilege; sucesso aqui quebraria a separação de papéis.
                         var failure = assertThrows(java.sql.SQLException.class, () -> sql.execute(forbidden));
                         assertEquals("42501", failure.getSQLState());
                     }
@@ -128,16 +177,18 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * * Controla o ciclo de vida de uma JVM iniciada pelo teste.
-     * 
+     * Controla o ciclo de vida de uma JVM iniciada pelo teste.
+     *
      * @param process processo filho iniciado para o ensaio
      */
     private record Service(Process process) implements AutoCloseable {
         /**
-         * Solicita o encerramento do processo filho e aguarda até o limite do cenário.
+         * Cenário: JVM filha ainda em execução. Ação: solicitar o encerramento e aguardar até
+         * 45 segundos. Resultado: desligamento gracioso ou falha explícita do ensaio.
          */
         @Override
         public void close() {
+            // destroy() envia SIGTERM; o prazo cobre o desligamento gracioso do Spring.
             process.destroy();
             try {
                 if (!process.waitFor(45, TimeUnit.SECONDS)) {
@@ -153,11 +204,13 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * Inicia gateway ou worker com a conexão do schema isolado e captura seus logs.
+     * Cenário: schema isolado e perfil de serviço escolhido. Ação: montar a linha de comando e o
+     * ambiente da JVM filha e iniciá-la, redirecionando a saída para um arquivo. Resultado:
+     * processo em execução com porta TCP efêmera, banco e credenciais do perfil.
      *
-     * @param main classe com o ponto de entrada do processo filho
-     * @param db   fonte de conexões JDBC para a operação
-     * @param log  arquivo que recebe a saída do processo de teste
+     * @param profile perfil de serviço do processo filho
+     * @param db      fonte de conexões JDBC para a operação
+     * @param log     arquivo que recebe a saída do processo de teste
      * @return processo filho acompanhado pelo cenário
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -171,6 +224,7 @@ class GatewayCommandCycleIT {
                 "bin",
                 "java");
 
+        // O processo filho reutiliza o classpath do surefire para carregar a aplicação.
         var builder = new ProcessBuilder(
                 java.toString(),
                 "-cp",
@@ -198,6 +252,7 @@ class GatewayCommandCycleIT {
                 "TRACKING_DB_PASSWORD",
                 gateway ? gatewayPassword : workerPassword);
 
+        // Porta zero publica uma porta efêmera; o log revela a porta efetivamente aberta.
         env.put("TRACKING_TCP_BIND", "127.0.0.1");
         env.put("TRACKING_TCP_PORT", "0");
         env.put("TRACKING_PROTOCOL", "auto");
@@ -208,6 +263,7 @@ class GatewayCommandCycleIT {
                 UUID.randomUUID().toString());
 
         if (gateway) {
+            // Apenas o gateway recebe o arquivo do emissor; o worker não despacha comandos.
             env.put(
                     "TRACKING_DISPATCH_OWNER_FILE",
                     log.resolveSibling(
@@ -225,7 +281,9 @@ class GatewayCommandCycleIT {
 
     // Os processos são externos à JVM de teste. A espera intercala consultas até o prazo de dez segundos.
     /**
-     * Repete a observação até a condição se cumprir ou o prazo expirar.
+     * Cenário: processo externo ou estado de banco que muda de forma assíncrona. Ação: repetir a
+     * condição a cada 25 ms. Resultado: retorno quando ela ocorrer ou falha com a descrição
+     * após dez segundos.
      *
      * @param description descrição da observação
      * @param predicate   condição observada até o prazo do cenário
@@ -242,7 +300,8 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * Conta os registros da tabela no tenant do cenário.
+     * Cenário: conexão JDBC do cenário e tabela conhecida. Ação: contar os registros filtrados
+     * pelo tenant. Resultado: quantidade restrita ao escopo do tenant consultado.
      *
      * @param c      conexão JDBC usada pelo chamador
      * @param table  tabela consultada pelo cenário
@@ -251,6 +310,7 @@ class GatewayCommandCycleIT {
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
     private int count(Connection c, String table, UUID tenant) throws Exception {
+        // O nome da tabela é constante do próprio teste, não entrada externa.
         try (var s = c.prepareStatement("SELECT count(*) FROM " + table + " WHERE tenant_id=?")) {
             s.setObject(1, tenant);
             try (var rows = s.executeQuery()) {
@@ -261,7 +321,9 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * Persiste a consulta de firmware com a chave idempotente da requisição.
+     * Cenário: dispositivo cadastrado e com protocolo Suntech. Ação: enfileirar a consulta de
+     * firmware em transação com a chave idempotente. Resultado: UUID do comando, o mesmo UUID em
+     * repetição da chave, ou nulo para tenant/dispositivo inelegível.
      *
      * @param db        fonte de conexões JDBC para a operação
      * @param fixture   cadastro de teste utilizado no cenário
@@ -274,6 +336,7 @@ class GatewayCommandCycleIT {
     private UUID enqueue(HikariDataSource db, TestFixtures fixture, UUID tenant, UUID principal, UUID key)
             throws Exception {
         try (var c = db.getConnection()) {
+            // A repository exige transação explícita para serializar idempotência e limite da fila.
             c.setAutoCommit(false);
             var id = new DeviceCommandRepository().enqueueFirmwareVersion(
                     c,
@@ -282,16 +345,24 @@ class GatewayCommandCycleIT {
                     principal,
                     key);
             c.commit();
+            // A ausência de id indica que o tenant não alcança o dispositivo habilitado.
             return id.orElse(null);
         }
     }
 
     /**
-     * Obtém a porta efêmera publicada pela JVM que efetivamente abriu o listener.
+     * Cenário: gateway iniciado com porta TCP efêmera. Ação: aguardar a linha de escuta no log e
+     * extrair a porta. Resultado: porta atribuída pelo sistema operacional.
+     *
+     * @param gateway processo do gateway iniciado pelo cenário
+     * @param log     arquivo com a saída do processo
+     * @return porta TCP efetivamente aberta pelo gateway
+     * @throws Exception se o processo não publicar a porta no prazo
      */
     private int gatewayPort(Service gateway, Path log) throws Exception {
         var listener = Pattern.compile("Tracking TCP Gateway listening on 127\\.0\\.0\\.1:(\\d+)");
         await("Gateway did not start", () -> {
+            // A espera também confirma que o processo continua vivo durante a inicialização.
             assertTrue(gateway.process().isAlive());
             return listener.matcher(Files.readString(log)).find();
         });
@@ -301,7 +372,11 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * Mantém os dois sockets abertos e observa em qual deles o comando realmente chega.
+     * Cenário: o mesmo dispositivo abre sessão em dois gateways que compartilham o banco. Ação:
+     * enfileirar uma consulta de firmware e observar os dois sockets. Resultado: o comando chega
+     * apenas ao socket da sessão mais recente; o antigo não recebe bytes.
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
     @Test
     void reconnectAcrossGatewaysRoutesCommandToNewSocket() throws Exception {
@@ -316,9 +391,11 @@ class GatewayCommandCycleIT {
                 var oldSocket = new Socket("127.0.0.1", gatewayPort(first, firstLog));
                 var newSocket = new Socket("127.0.0.1", gatewayPort(second, secondLog))
         ) {
+            // As duas JVMs de gateway compartilham o banco e escutam em portas distintas.
             byte[] alive = ("ALV;" + device.deviceIdentity() + "\r").getBytes(StandardCharsets.US_ASCII);
             oldSocket.getOutputStream().write(alive);
             await("Primeira sessão", () -> count(c, "raw_packets", device.tenantId()) == 1);
+            // O ALV registra a segunda sessão e substitui a primeira no banco compartilhado.
             newSocket.getOutputStream().write(alive);
             await("Segunda sessão", () -> count(c, "raw_packets", device.tenantId()) == 2);
             UUID id = enqueue(db, device, device.tenantId(), UUID.randomUUID(), UUID.randomUUID());
@@ -326,13 +403,18 @@ class GatewayCommandCycleIT {
             newSocket.setSoTimeout(8000);
             byte[] expected = FirmwareVersionRequest.encode(device.deviceIdentity());
             assertArrayEquals(expected, newSocket.getInputStream().readNBytes(expected.length));
+            // O prazo curto no socket antigo comprova que o comando não foi duplicado nele.
             oldSocket.setSoTimeout(300);
             assertThrows(java.net.SocketTimeoutException.class, () -> oldSocket.getInputStream().read());
         }
     }
 
     /**
-     * Reproduz no banco a tentativa deixada por um emissor interrompido após confirmar a autorização.
+     * Cenário: comando deixado em "transmitting" por um emissor que não está mais ativo e outro
+     * comando na fila. Ação: conectar o dispositivo e enviar uma posição. Resultado: a posição é
+     * ingerida, o comando incerto não é reenviado e o segundo permanece "queued".
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
     @Test
     void receivesPositionWhilePreviousOwnerIsUnavailable() throws Exception {
@@ -348,6 +430,7 @@ class GatewayCommandCycleIT {
             UUID interrupted = enqueue(db, device, tenant, UUID.randomUUID(), UUID.randomUUID());
             var dispatch = new software.aporia.tracking.storage.command.DeviceCommandDispatchRepository();
             c.setAutoCommit(false);
+            // Reproduz a reserva confirmada e autorizada por um emissor que foi interrompido.
             var claim = dispatch.claimForSession(c, tenant, device.deviceId(), device.sessionToken()).orElseThrow();
             assertEquals(interrupted, claim.id());
             assertTrue(
@@ -364,10 +447,12 @@ class GatewayCommandCycleIT {
             try (var socket = new Socket("127.0.0.1", gatewayPort(gateway, log))) {
                 String frame = "STT;" + device.deviceIdentity() + ";013831;20261120;08:45:00;-16.67;-49.25;45.5;1\r";
                 socket.getOutputStream().write(frame.getBytes(StandardCharsets.US_ASCII));
+                // O worker ingere a posição mesmo com o comando anterior preso em "transmitting".
                 await("Posição pela réplica", () -> {
                     assertTrue(worker.process().isAlive());
                     return count(c, "positions", tenant) == 1;
                 });
+                // Um reenvio indevido produziria bytes antes do vencimento deste prazo de leitura.
                 socket.setSoTimeout(1500);
                 assertThrows(java.net.SocketTimeoutException.class, () -> socket.getInputStream().read());
 
@@ -378,7 +463,10 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * Percorre enfileiramento offline, reconexão, envio e respostas sem correlação pelas entradas reais do serviço.
+     * Cenário: dispositivo Suntech com fila offline e respostas sem correlação; a mesma porta
+     * também recebe a descoberta AVL Teltonika. Ação: enfileirar com idempotência, reconectar,
+     * vencer o primeiro comando e enviar respostas. Resultado: isolamento de tenant, primeiro
+     * comando "timeout", segundo "sent", posição ingerida e quatro respostas sem command_id.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -399,6 +487,7 @@ class GatewayCommandCycleIT {
             UUID tenant = fixture.tenantId();
             UUID principal = UUID.randomUUID();
             UUID key = UUID.randomUUID();
+            // Outro tenant não alcança o dispositivo; a repetição da chave devolve o mesmo comando.
             assertNull(enqueue(db, fixture, UUID.randomUUID(), principal, key));
             UUID first = enqueue(db, fixture, tenant, principal, key);
             assertNotNull(first);
@@ -435,6 +524,7 @@ class GatewayCommandCycleIT {
                 tracker.setSoTimeout(8000);
                 tracker.getOutputStream().write(alive);
                 assertArrayEquals(expected, tracker.getInputStream().readNBytes(expected.length));
+                // As respostas não trazem o identificador do comando; não podem ser correlacionadas.
                 String res = "RES;" + identity + ";03;04;01;STB.201.1.1.11\r";
                 String pos = "RES;STT;" + identity + ";013831;20261120;08:45:00;-16.6700;-49.2500;45.5;1\r";
                 tracker.getOutputStream().write(
@@ -463,8 +553,10 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * Mede três rajadas de 200 posições em sockets persistentes, separadas por um minuto. O cronômetro inclui envio,
-     * ingestão e commit da última posição de cada rodada.
+     * Cenário: 200 dispositivos com associação e ativo próprios; o teste só roda com
+     * {@code TRACKING_TEST_FLEET=200}. Ação: enviar três rajadas em sockets persistentes, uma
+     * por minuto. Resultado: cada rodada é drenada em menos de um minuto, com pacotes,
+     * posições e eventos consistentes e uma única tentativa por pacote.
      *
      * @throws Exception se o ambiente isolado ou os processos do ensaio falharem
      */
@@ -508,12 +600,14 @@ class GatewayCommandCycleIT {
                 }
             }
             assertEquals(fleetSize, identities.size());
+            // Sockets persistentes evitam que a medição inclua o custo de reconexão entre rodadas.
             List<Socket> sockets = new ArrayList<>();
             try {
                 for (int i = 0; i < fleetSize; i++)
                     sockets.add(new Socket("127.0.0.1", port));
                 long first = System.nanoTime();
                 for (int round = 0; round < 3; round++) {
+                    // As rodadas começam no minuto 0, 1 e 2 contados a partir do primeiro envio.
                     TimeUnit.NANOSECONDS.sleep(first + TimeUnit.MINUTES.toNanos(round) - System.nanoTime());
                     long start = System.nanoTime();
                     String time = String.format(Locale.ROOT, "08:%02d:00", round);
@@ -561,7 +655,10 @@ class GatewayCommandCycleIT {
     }
 
     /**
-     * Exercita descoberta AVL, aprovação, ingestão, retransmissão e desabilitação na mesma porta TCP.
+     * Cenário: dispositivo Teltonika desconhecido na mesma porta do gateway. Ação: enviar login
+     * e lotes Codec 8/8E inválidos e válidos, aprovar a descoberta, reenviar os lotes e
+     * desabilitar o cadastro. Resultado: pendência com metadados, aprovação idempotente, ACKs
+     * dos lotes válidos, recusa após a desabilitação e quatro posições persistidas.
      *
      * @param port    porta TCP atribuída ao gateway de teste
      * @param c       conexão JDBC usada pelo chamador
@@ -571,10 +668,11 @@ class GatewayCommandCycleIT {
     private void verifyAvl(int port, Connection c, TestFixtures fixture) throws Exception {
         String imei = "35000" + fixture.deviceIdentity();
         var hex = java.util.HexFormat.of();
+        // O login Teltonika usa dois bytes de tamanho (15) seguidos do IMEI em ASCII.
         byte[] login = java.nio.ByteBuffer.allocate(17).putShort((short) 15)
                 .put(imei.getBytes(StandardCharsets.US_ASCII)).array();
-        // Cada lote traz duas posições nos hemisférios sul e oeste. O lote estendido também inclui um campo de tamanho
-        // variável.
+        // Cada lote traz duas posições nos hemisférios sul e oeste. O lote estendido também
+        // inclui um campo de tamanho variável.
         byte[] codec8 = hex.parseHex(
                 "00000000000000430802000001a3185c500000e3fc5e80f268ff00007b001f070019000101ef01000000000001a3185c500100e3fc5e80f268ff00007b001f070019000101ef010000000200005a0c");
         byte[] extended = hex.parseHex(

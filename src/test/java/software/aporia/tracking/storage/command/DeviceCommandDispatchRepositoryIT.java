@@ -21,7 +21,16 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Verifica reserva concorrente, autorização condicional, rollback e revogação do token no PostgreSQL. */
+/**
+ * Verifica reserva concorrente, autorização condicional, rollback e revogação do token no
+ * PostgreSQL.
+ *
+ * <p>A reserva condiciona tenant, dispositivo e token da sessão e bloqueia a linha com
+ * {@code FOR UPDATE SKIP LOCKED}; as transições seguintes exigem o {@code claim_token} emitido.
+ * Cada teste cria o próprio tenant em {@link TestFixtures} e controla commit e rollback, que também
+ * são a limpeza dos comandos criados. O schema é isolado por JVM, então varreduras globais de
+ * recuperação são avaliadas com {@code >= 1}.</p>
+ */
 class DeviceCommandDispatchRepositoryIT {
 
     /** Entrada da fila usada para preparar as solicitações de teste. */
@@ -32,7 +41,16 @@ class DeviceCommandDispatchRepositoryIT {
     private final DeviceCommandDispatchRepository dispatcher
             = new DeviceCommandDispatchRepository();
 
-    /** Cria uma consulta auditada pelo mesmo contrato usado para comandos operacionais. */
+    /**
+     * Cenário: comando auditado necessário aos testes de transmissão. Ação: chama a entrada real de
+     * produção dentro de uma transação, confirma e restaura o autocommit. Resultado: o UUID fica
+     * commitado e elegível à reserva; uma falha desfaz a transação e é propagada.
+     *
+     * @param connection conexão JDBC usada pelo chamador
+     * @param fixtures cadastro de teste que define o escopo do comando
+     * @return UUID do comando confirmado
+     * @throws SQLException se a operação JDBC falhar
+     */
     private UUID enqueueFirmware(Connection connection, TestFixtures fixtures) throws SQLException {
         connection.setAutoCommit(false);
         try {
@@ -49,7 +67,9 @@ class DeviceCommandDispatchRepositoryIT {
     }
 
     /**
-     * Verifica que a mesma solicitação só pode ser reservada uma vez.
+     * Cenário: um comando em {@code queued}. Ação: reserva na primeira conexão, confirma e tenta
+     * reservar novamente. Resultado: a primeira reserva devolve o comando com tentativa 1 e status
+     * {@code sending}; a segunda devolve vazio porque a tentativa ativa exclui nova reserva.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -61,6 +81,7 @@ class DeviceCommandDispatchRepositoryIT {
                 dataSource, "9876500010"
         ); Connection connection = dataSource.getConnection()) {
 
+            // O INSERT direto é confirmado pelo autocommit antes de abrir a transação de reserva.
             UUID commandId = CommandTestFixtures.enqueue(
                     connection,
                     fixtures.tenantId(),
@@ -117,7 +138,8 @@ class DeviceCommandDispatchRepositoryIT {
     }
 
     /**
-     * Exige uma transação aberta para adquirir a reserva.
+     * Cenário: conexão em autocommit. Ação: tenta reservar. Resultado:
+     * {@link IllegalStateException} com {@code CLAIM_REQUIRES_TRANSACTION} antes de qualquer SQL.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -128,6 +150,7 @@ class DeviceCommandDispatchRepositoryIT {
                 var dataSource = TestDatabase.createDataSource(); var fixtures = new TestFixtures(dataSource); Connection connection = dataSource.getConnection()) {
             assertTrue(connection.getAutoCommit());
 
+            // A checagem ocorre antes do SELECT, então nenhum bloqueio é adquirido.
             var error = assertThrows(
                     IllegalStateException.class,
                     () -> CommandTestFixtures.claim(dispatcher, connection, fixtures)
@@ -137,7 +160,10 @@ class DeviceCommandDispatchRepositoryIT {
     }
 
     /**
-     * Mantém duas conexões concorrentes e verifica que a segunda ignora o registro bloqueado.
+     * Cenário: duas conexões abertas sobre a mesma fila. Ação: a primeira reserva e mantém a
+     * transação aberta; a segunda tenta reservar antes do commit. Resultado: a segunda devolve vazio
+     * sem esperar, pela cláusula {@code SKIP LOCKED}; após o commit, o comando fica em
+     * {@code sending}.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -171,7 +197,7 @@ class DeviceCommandDispatchRepositoryIT {
                 assertEquals(commandId, firstClaim.id());
 
                 // A primeira transação ainda mantém o lock.
-                // A segunda deve ignorar esse registro.
+                // SKIP LOCKED faz a segunda ignorar o registro em vez de esperar pela primeira.
                 assertTrue(
                         CommandTestFixtures.claim(dispatcher, second, fixtures).isEmpty()
                 );
@@ -197,7 +223,9 @@ class DeviceCommandDispatchRepositoryIT {
     }
 
     /**
-     * Confere que desfazer a transação libera o comando para nova reserva.
+     * Cenário: a primeira conexão reserva sem confirmar. Ação: desfaz essa transação e reserva na
+     * segunda conexão. Resultado: o comando volta a {@code queued}; a segunda reserva devolve o mesmo
+     * UUID com tentativa 1, porque o rollback desfez o incremento.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -243,6 +271,7 @@ class DeviceCommandDispatchRepositoryIT {
                         .orElseThrow();
 
                 assertEquals(commandId, secondClaim.id());
+                // O rollback desfez o incremento da primeira tentativa; esta é contada como tentativa 1.
                 assertEquals(1, secondClaim.attempts());
 
                 second.commit();
@@ -256,7 +285,9 @@ class DeviceCommandDispatchRepositoryIT {
     }
 
     /**
-     * Rejeita a conclusão feita com um token diferente do persistido.
+     * Cenário: comando reservado e confirmado. Ação: tenta marcar como enviado com um token
+     * aleatório. Resultado: a atualização condicional devolve falso e o status permanece
+     * {@code sending}.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -297,6 +328,7 @@ class DeviceCommandDispatchRepositoryIT {
 
             assertEquals(commandId, claimed.id());
 
+            // A transição exige token correto e status transmitting; aqui o comando continua em sending.
             assertFalse(
                     dispatcher.markSent(
                             connection,
@@ -318,7 +350,10 @@ class DeviceCommandDispatchRepositoryIT {
     }
 
     /**
-     * Confere a transição para sent quando a tentativa autorizada possui o token.
+     * Cenário: comando auditado e reservado. Ação: autoriza a transmissão com a identidade do
+     * cadastro, marca como enviado com o token da reserva e repete a conclusão. Resultado: o status
+     * chega a {@code sent} na primeira tentativa; a repetição devolve falso porque a linha já saiu de
+     * {@code transmitting}.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -349,6 +384,7 @@ class DeviceCommandDispatchRepositoryIT {
             connection.setAutoCommit(true);
 
             assertEquals(commandId, claimed.id());
+            // Cada chamada roda em autocommit, então a transição fica confirmada antes da próxima.
             assertTrue(
                     dispatcher.authorizeTransmission(
                             connection,
@@ -389,7 +425,10 @@ class DeviceCommandDispatchRepositoryIT {
     }
 
     /**
-     * Revoga a reserva e verifica que o emissor antigo perde o direito de concluí-la.
+     * Cenário: reserva antiga de um comando auditado. Ação: reserva e confirma, envelhece
+     * {@code claimed_at}, executa a recuperação por idade e tenta concluir com o token antigo.
+     * Resultado: a recuperação leva o comando a {@code delivery_unknown}, limpa o token e a
+     * conclusão do emissor obsoleto é recusada.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -472,6 +511,7 @@ class DeviceCommandDispatchRepositoryIT {
                                 java.time.Duration.ofMinutes(5)
                         );
 
+                // A varredura é global ao schema e pode alcançar outras reservas antigas.
                 assertTrue(recovered >= 1);
 
                 connection.commit();
@@ -494,6 +534,7 @@ class DeviceCommandDispatchRepositoryIT {
             );
 
             // 5. Dispatcher antigo tenta concluir o comando.
+            // O token foi anulado pela recuperação, então a condição não encontra mais a linha.
             boolean updated = dispatcher.markSent(
                     connection,
                     fixtures.tenantId(),
@@ -542,7 +583,10 @@ class DeviceCommandDispatchRepositoryIT {
     }
 
     /**
-     * Confere o início da transmissão com o token da reserva atual.
+     * Cenário: comando auditado e reservado. Ação: tenta autorizar com proprietário ou identidade
+     * nulos, com identidade divergente, com outro tenant e, por fim, com o escopo correto; repete a
+     * autorização. Resultado: entradas nulas falham com {@link NullPointerException}; escopos errados
+     * devolvem falso; o escopo correto leva a {@code transmitting}; a repetição devolve falso.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -576,10 +620,12 @@ class DeviceCommandDispatchRepositoryIT {
 
             assertEquals(commandId, claimed.id());
 
+            // Nulo é recusado antes de montar o UPDATE.
             assertThrows(NullPointerException.class, () -> dispatcher.authorizeTransmission(
                     connection, fixtures.tenantId(), commandId, claimed.claimToken(), null, fixtures.deviceIdentity()));
             assertThrows(NullPointerException.class, () -> dispatcher.authorizeTransmission(
                     connection, fixtures.tenantId(), commandId, claimed.claimToken(), UUID.randomUUID(), null));
+            // Identidade e tenant divergentes não satisfazem o EXISTS de devices.
             assertFalse(dispatcher.authorizeTransmission(connection, fixtures.tenantId(), commandId,
                     claimed.claimToken(), UUID.randomUUID(), "0000000000"));
             assertFalse(dispatcher.authorizeTransmission(connection, UUID.randomUUID(), commandId,
@@ -616,7 +662,8 @@ class DeviceCommandDispatchRepositoryIT {
     }
 
     /**
-     * Rejeita o início da transmissão com um token obsoleto.
+     * Cenário: comando auditado e reservado. Ação: tenta autorizar a transmissão com um token
+     * aleatório. Resultado: falso; o comando permanece em {@code sending}.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -646,6 +693,7 @@ class DeviceCommandDispatchRepositoryIT {
 
             connection.setAutoCommit(true);
 
+            // O UPDATE não encontra a linha porque o claim_token persistido é outro.
             assertFalse(
                     dispatcher.authorizeTransmission(
                             connection,
@@ -667,7 +715,9 @@ class DeviceCommandDispatchRepositoryIT {
     }
 
     /**
-     * Restringe a seleção da fila ao dispositivo indicado.
+     * Cenário: comando em {@code queued} do dispositivo da fixture. Ação: reserva pela sessão desse
+     * dispositivo. Resultado: a reserva devolve o comando do tenant e do dispositivo esperados, com
+     * token emitido e tentativa 1; o status persistido é {@code sending}.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -694,6 +744,7 @@ class DeviceCommandDispatchRepositoryIT {
             connection.setAutoCommit(false);
 
             try {
+                // O WHERE combina tenant, dispositivo e token da sessão antes de bloquear a linha.
                 var claimed = CommandTestFixtures.claim(dispatcher, connection, fixtures).orElseThrow();
 
                 assertEquals(commandId, claimed.id());
@@ -722,11 +773,18 @@ class DeviceCommandDispatchRepositoryIT {
         }
     }
 
-    /** Um comando sem auditoria não pode iniciar uma transmissão, mesmo com reserva válida. */
+    /**
+     * Cenário: comando inserido diretamente, sem {@code requested_by} e {@code request_key}. Ação:
+     * reserva com a sessão da fixture e tenta autorizar a transmissão. Resultado: a autorização
+     * devolve falso e o comando permanece em {@code sending} mesmo após o commit.
+     *
+     * @throws Exception se a preparação ou a verificação falhar
+     */
     @Test
     void shouldRejectTransmissionWithoutAudit() throws Exception {
         try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
              var connection = db.getConnection()) {
+            // O enqueue direto não preenche a auditoria que authorizeTransmission exige.
             UUID id = CommandTestFixtures.enqueue(connection, fixture.tenantId(), fixture.deviceId(), "suntech",
                     software.aporia.tracking.protocol.suntech.FirmwareVersionRequest.encode(fixture.deviceIdentity()),
                     Instant.now().plusSeconds(300));
@@ -740,11 +798,18 @@ class DeviceCommandDispatchRepositoryIT {
                 connection.rollback();
                 throw error;
             }
+            // O commit preserva o comando em sending; a limpeza fica com a fixture.
             assertEquals("sending", CommandTestFixtures.findStatus(connection, fixture.tenantId(), id).orElseThrow());
         }
     }
 
-    /** A reserva exige o tenant, o dispositivo e a última sessão admitida no cadastro. */
+    /**
+     * Cenário: comando auditado do tenant e do dispositivo da fixture. Ação: tenta reservar com
+     * tenant, dispositivo e token de sessão divergentes e, por fim, com o escopo correto. Resultado:
+     * as três tentativas erradas devolvem vazio; a correta devolve o comando esperado.
+     *
+     * @throws Exception se a preparação ou a verificação falhar
+     */
     @Test
     void shouldRejectClaimFromWrongTenantDeviceOrSession() throws Exception {
         try (var db = TestDatabase.createDataSource(); var fixture = new TestFixtures(db);
@@ -752,8 +817,10 @@ class DeviceCommandDispatchRepositoryIT {
             UUID command = enqueueFirmware(connection, fixture);
             connection.setAutoCommit(false);
             try {
+                // O filtro de escopo está no SQL, não em validação posterior.
                 assertTrue(dispatcher.claimForSession(connection, UUID.randomUUID(), fixture.deviceId(), fixture.sessionToken()).isEmpty());
                 assertTrue(dispatcher.claimForSession(connection, fixture.tenantId(), UUID.randomUUID(), fixture.sessionToken()).isEmpty());
+                // O token de sessão só vale para o par tenant/dispositivo do cadastro.
                 assertTrue(dispatcher.claimForSession(connection, fixture.tenantId(), fixture.deviceId(), UUID.randomUUID()).isEmpty());
                 assertEquals(command, CommandTestFixtures.claim(dispatcher, connection, fixture).orElseThrow().id());
                 connection.commit();

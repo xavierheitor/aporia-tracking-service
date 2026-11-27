@@ -17,25 +17,53 @@ import io.micrometer.core.instrument.Timer;
 
 import software.aporia.tracking.command.dispatcher.CommandDispatcher.DispatchResult;
 
+/**
+ * Registra os desfechos do dispatch e da recuperação de comandos no perfil {@code gateway}.
+ *
+ * <p>Os contadores e timers usam o enum {@link DispatchResult} como única tag variável ({@code result}),
+ * portanto a cardinalidade é limitada e não inclui tenant, dispositivo ou comando. As durações são medidas
+ * pelo dispatcher com {@link System#nanoTime()} e registradas depois que a operação retorna. O resultado
+ * {@code SENT} significa apenas escrita local concluída, não confirmação do rastreador.</p>
+ *
+ * <p>A classe é um bean singleton; contadores e timers do Micrometer são thread-safe.</p>
+ */
 @Component
 @Profile("gateway")
 @NullMarked
 public final class CommandMetrics {
 
+    /** Contador de desfechos, indexado pelo resultado do dispatch. */
     private final Map<@NonNull DispatchResult, Counter> dispatchResults = new EnumMap<>(DispatchResult.class);
 
+    /** Duração de cada desfecho, indexada pelo resultado do dispatch. */
     private final Map<@NonNull DispatchResult, Timer> dispatchDurations = new EnumMap<>(DispatchResult.class);
 
+    /** Falhas inesperadas que impediram a produção de um resultado. */
     private final Counter dispatchErrors;
+
+    /** Falhas de escrita no socket da sessão. */
     private final Counter writeErrors;
+
+    /** Ciclos de recuperação concluídos sem exceção. */
     private final Counter recoveryCompleted;
+
+    /** Ciclos de recuperação encerrados por exceção. */
     private final Counter recoveryErrors;
 
+    /** Duração da escrita, incluindo tentativas que falharam. */
     private final Timer writeDuration;
+
+    /** Duração do ciclo de recuperação, incluindo ciclos que falharam. */
     private final Timer recoveryDuration;
 
+    /**
+     * Cria os contadores e timers do dispatcher.
+     *
+     * @param registry registro Micrometer do contexto
+     */
     public CommandMetrics(MeterRegistry registry) {
 
+        // Um contador e um timer por desfecho mantêm a tag limitada ao enum.
         for (DispatchResult result : DispatchResult.values()) {
 
             String label = Objects.requireNonNull(result.name()
@@ -90,6 +118,12 @@ public final class CommandMetrics {
                 .register(registry);
     }
 
+    /**
+     * Registra o desfecho e a duração de uma tentativa de dispatch.
+     *
+     * @param result       desfecho observado pelo dispatcher
+     * @param elapsedNanos duração da operação em nanossegundos
+     */
     public void dispatchCompleted(
             DispatchResult result,
             long elapsedNanos) {
@@ -100,28 +134,50 @@ public final class CommandMetrics {
                 .record(elapsedNanos, TimeUnit.NANOSECONDS);
     }
 
+    /**
+     * Registra uma falha inesperada que não produziu desfecho.
+     */
     public void dispatchFailed() {
         dispatchErrors.increment();
     }
 
+    /**
+     * Registra uma falha de escrita no socket do dispositivo.
+     */
     public void tcpWriteFailed() {
         writeErrors.increment();
     }
 
+    /**
+     * Registra a duração de uma escrita no socket, inclusive quando ela falhou.
+     *
+     * @param elapsedNanos duração da escrita em nanossegundos
+     */
     public void recordTcpWriteDuration(long elapsedNanos) {
         writeDuration.record(
                 elapsedNanos,
                 TimeUnit.NANOSECONDS);
     }
 
+    /**
+     * Registra a conclusão de um ciclo de recuperação sem exceção.
+     */
     public void recoveryCompleted() {
         recoveryCompleted.increment();
     }
 
+    /**
+     * Registra um ciclo de recuperação encerrado por falha.
+     */
     public void recoveryFailed() {
         recoveryErrors.increment();
     }
 
+    /**
+     * Registra a duração de um ciclo de recuperação, inclusive quando ele falhou.
+     *
+     * @param elapsedNanos duração do ciclo em nanossegundos
+     */
     public void recordRecoveryDuration(long elapsedNanos) {
         recoveryDuration.record(
                 elapsedNanos,

@@ -19,20 +19,43 @@ import software.aporia.tracking.storage.command.DeviceCommandDispatchRepository;
 import software.aporia.tracking.storage.command.DeviceCommandRecoveryRepository;
 
 /**
- * Coordena a reserva no PostgreSQL e a escrita na sessão TCP. A confirmação de escrita e o resultado incerto são
- * persistidos separadamente.
+ * Coordena a reserva no PostgreSQL e a escrita na sessão TCP. A reserva e a autorização acontecem em uma transação; a
+ * escrita ocorre fora dela e o resultado é persistido em outra conexão.
+ *
+ * <p>
+ * Colaboradores: o {@link DeviceCommandDispatchRepository} reserva e condiciona as transições ao token; o
+ * {@link CommandTransport} entrega o endpoint da sessão; o {@link DispatchOwner} fornece o monitor e o UUID que
+ * identificam este emissor; o {@link DeviceCommandRecoveryRepository} reconcilia tentativas interrompidas.
+ * </p>
+ *
+ * <p>
+ * Concorrência: {@code dispatchNext} e {@code recover} sincronizam no proprietário, de modo que só há uma tentativa ou
+ * recuperação por emissor. O monitor é mantido durante a escrita no socket, que pode bloquear por até o prazo de
+ * escrita da sessão. O bloqueio de linha do cadastro impede a troca de sessão entre a reserva e o commit da
+ * autorização.
+ * </p>
+ *
+ * <p>
+ * Limites: não há reenvio automático. {@link DispatchResult#SENT} significa apenas escrita local concluída, não entrega
+ * ou execução. Uma falha de escrita é classificada como {@link DispatchResult#DELIVERY_UNKNOWN} porque pode ter
+ * ocorrido envio parcial. Exceções de runtime na escrita não são persistidas aqui; a tentativa permanece em
+ * {@code transmitting} e a recuperação a classifica como incerta.
+ * </p>
  */
 public final class CommandDispatcher {
 
     /**
-     * Resultado observado pelo dispatcher. SENT indica que a escrita local terminou.
+     * Resultado observado pelo dispatcher para uma tentativa. Não é o estado persistido do comando, embora corresponda
+     * às transições aplicadas.
      */
     public enum DispatchResult {
         /** Nenhuma sessão disponível para iniciar o envio. */
         DEVICE_OFFLINE,
         /** A consulta da fila não encontrou uma solicitação elegível. */
         NO_COMMAND,
-        /** A escrita local terminou e seu resultado foi registrado. */
+        /**
+         * A escrita local terminou e o comando foi marcado como {@code sent}; não confirma entrega nem execução.
+         */
         SENT,
         /** A tentativa foi encerrada antes de transmitir o comando. */
         DELIVERY_FAILED,
@@ -51,6 +74,7 @@ public final class CommandDispatcher {
     /** Proprietário cujo bloqueio delimita as tentativas deste emissor. */
     private final DispatchOwner owner;
 
+    /** Métricas de tentativa, escrita e recuperação. */
     private final CommandMetrics metrics;
 
     /**
@@ -59,7 +83,9 @@ public final class CommandDispatcher {
      * @param dataSource fonte de conexões JDBC para a operação
      * @param repository repositório que controla a reserva e suas transições
      * @param transport  canal usado para alcançar a sessão do dispositivo
-     * @param owner      proprietário do envio ou seu identificador persistido
+     * @param owner      proprietário do envio, cujo monitor serializa as rodadas
+     * @param metrics    métricas de tentativa, escrita e recuperação
+     * @throws NullPointerException se qualquer dependência for nula
      */
     public CommandDispatcher(
             DataSource dataSource,
@@ -76,8 +102,9 @@ public final class CommandDispatcher {
     }
 
     /**
-     * Tenta enviar um comando do dispositivo. Quando ele está offline, a fila permanece disponível para a próxima
-     * conexão.
+     * Executa uma tentativa sob o monitor do proprietário: verifica a sessão, reserva o comando, autoriza a transmissão
+     * e, após o commit, escreve no socket. A disponibilidade da sessão é testada antes da reserva para manter comandos
+     * offline na fila.
      *
      * @param tenantId identificador do tenant que delimita a operação
      * @param deviceId identificador do equipamento cadastrado
@@ -85,6 +112,7 @@ public final class CommandDispatcher {
      * @throws SQLException se a operação JDBC falhar
      */
     private @NonNull DispatchResult dispatchNextInternal(UUID tenantId, UUID deviceId) throws SQLException {
+        // O monitor serializa tentativas e recuperação deste emissor; owner.id() exige esse lock.
         synchronized (owner) {
             UUID ownerId = owner.id();
             var endpoint = transport.connect(tenantId, deviceId);
@@ -95,6 +123,7 @@ public final class CommandDispatcher {
             var session = endpoint.get();
             DeviceCommandDispatchRepository.ClaimedCommand command;
             Optional<DispatchResult> rejection;
+            // A reserva e a autorização compartilham a transação; o commit antecede a escrita.
             try (Connection c = dataSource.getConnection()) {
                 c.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
                 c.setAutoCommit(false);
@@ -113,6 +142,7 @@ public final class CommandDispatcher {
                 }
             }
 
+            // A escrita fica fora da transação JDBC e pode falhar após envio parcial.
             DispatchResult result = Objects.requireNonNull(
                     rejection.isPresent() ? rejection.get() : transmit(command, session));
             LoggerFactory.getLogger(CommandDispatcher.class).info(
@@ -126,35 +156,48 @@ public final class CommandDispatcher {
         }
     }
 
+    /**
+     * Ponto de entrada do polling: mede a tentativa e registra métricas de sucesso ou falha antes de devolver ou
+     * propagar o resultado.
+     *
+     * @param tenantId identificador do tenant que delimita a operação
+     * @param deviceId identificador do equipamento cadastrado
+     * @return desfecho da tentativa observado pelo dispatcher
+     * @throws SQLException     se a operação JDBC falhar
+     * @throws RuntimeException propagada de repositório, transporte ou política
+     */
     public @NonNull DispatchResult dispatchNext(
             UUID tenantId,
             UUID deviceId) throws SQLException {
 
         long startedAt = System.nanoTime();
-
         DispatchResult result;
 
         try {
             result = dispatchNextInternal(
                     tenantId,
                     deviceId);
-
         } catch (SQLException | RuntimeException error) {
-
             metrics.dispatchFailed();
-
             throw error;
         }
-
         metrics.dispatchCompleted(
                 result,
                 System.nanoTime() - startedAt);
-
         return result;
     }
 
     /**
-     * Avalia o comando enquanto o bloqueio do cadastro impede uma troca concorrente de sessão.
+     * Avalia a política do comando e autoriza a transmissão enquanto o bloqueio do cadastro impede uma troca
+     * concorrente de sessão. Protocolo e identidade da sessão precisam corresponder ao comando, e o payload precisa ser
+     * permitido pelo protocolo.
+     *
+     * @param c       conexão da transação que mantém a reserva
+     * @param command comando reservado nesta tentativa
+     * @param session sessão selecionada para a escrita
+     * @param ownerId UUID do proprietário que assumirá a transmissão
+     * @return resultado da recusa, ou vazio quando a transmissão foi autorizada
+     * @throws SQLException se a operação JDBC falhar
      */
     private Optional<DispatchResult> authorize(
             Connection c,
@@ -163,6 +206,7 @@ public final class CommandDispatcher {
             UUID ownerId) throws SQLException {
         if (!session.protocol().equals(command.protocol())
                 || !FirmwareVersionRequest.permits(command.protocol(), session.identity(), command.payload())) {
+            // A recusa é persistida na mesma transação da reserva.
             return Optional.of(
                     repository.finishFailure(c, command, Failure.COMMAND_POLICY_DENIED)
                             ? DispatchResult.DELIVERY_FAILED
@@ -175,6 +219,7 @@ public final class CommandDispatcher {
                 command.claimToken(),
                 ownerId,
                 session.identity())) {
+            // Sem alterar a linha, o token já não autoriza esta tentativa.
             return Optional.of(
                     repository.finishFailure(c, command, Failure.AUTHORIZATION_REJECTED)
                             ? DispatchResult.DELIVERY_FAILED
@@ -184,7 +229,13 @@ public final class CommandDispatcher {
     }
 
     /**
-     * Escreve somente após o commit da autorização e registra o resultado observado.
+     * Escreve somente após o commit da autorização e registra o resultado observado. A falha de escrita é persistida em
+     * conexão própria como {@code delivery_unknown}; não há nova tentativa sobre o mesmo token.
+     *
+     * @param command comando já autorizado para transmissão
+     * @param session sessão selecionada para a escrita
+     * @return {@link DispatchResult#SENT}, {@link DispatchResult#DELIVERY_UNKNOWN} ou {@link DispatchResult#CLAIM_LOST}
+     * @throws SQLException se a operação JDBC de conclusão falhar
      */
     private @NonNull DispatchResult transmit(
             DeviceCommandDispatchRepository.ClaimedCommand command,
@@ -194,7 +245,8 @@ public final class CommandDispatcher {
 
         try {
             // A autorização já foi confirmada e a conexão JDBC liberada. Uma falha aqui pode ocorrer após uma escrita
-            // parcial.
+            // parcial. Exceções de runtime não são classificadas: a tentativa fica em transmitting e a recuperação
+            // decide.
             writeCommand(session, payload);
         } catch (IOException error) {
             try (Connection c = dataSource.getConnection()) {
@@ -217,7 +269,9 @@ public final class CommandDispatcher {
     }
 
     /**
-     * Reconcilia tentativas interrompidas e prazos expirados sob a mesma exclusão usada no envio.
+     * Reconcilia tentativas interrompidas e prazos expirados sob a mesma exclusão usada no envio: recupera o que
+     * pertence a este proprietário, classifica reservas e transmissões antigas sem dono e expira comandos na fila e
+     * aguardando resposta. Todas as alterações da rodada são confirmadas juntas.
      *
      * @throws SQLException se a operação JDBC falhar
      */
@@ -227,7 +281,10 @@ public final class CommandDispatcher {
             try (Connection c = dataSource.getConnection()) {
                 c.setAutoCommit(false);
                 try {
+                    // Só o dono do arquivo pode encerrar as transmissões que ele mesmo iniciou.
                     recovery.recoverOwner(c, owner);
+                    // O critério por idade não revoga tentativa com proprietário ativo; essa exige o bloqueio do
+                    // emissor.
                     recovery.markStaleSendingAsUnknown(c, Duration.ofMinutes(1));
                     recovery.markStaleTransmittingAsUnknown(c, Duration.ofMinutes(1));
                     recovery.expireQueued(c);
@@ -241,28 +298,36 @@ public final class CommandDispatcher {
         }
     }
 
+    /**
+     * Ponto de entrada do polling de recuperação: mede a rodada e registra falha ou conclusão conforme o desfecho.
+     *
+     * @throws SQLException     se a recuperação JDBC falhar
+     * @throws RuntimeException propagada de repositório ou de {@link DispatchOwner}
+     */
     public void recover() throws SQLException {
 
         long startedAt = System.nanoTime();
 
         try {
             recoverInternal();
-
         } catch (SQLException | RuntimeException error) {
-
             metrics.recoveryFailed();
-
             throw error;
-
         } finally {
-
             metrics.recordRecoveryDuration(
                     System.nanoTime() - startedAt);
         }
-
         metrics.recoveryCompleted();
     }
 
+    /**
+     * Escreve no endpoint e mede a duração da operação, contabilizando falhas de E/S e de runtime antes de propagá-las.
+     *
+     * @param session endpoint selecionado para a escrita
+     * @param payload bytes do comando
+     * @throws IOException      se a escrita falhar
+     * @throws RuntimeException se o transporte falhar antes de concluir
+     */
     private void writeCommand(
             CommandTransport.Endpoint session,
             byte[] payload) throws IOException {
@@ -271,15 +336,10 @@ public final class CommandDispatcher {
 
         try {
             session.send(payload);
-
         } catch (IOException | RuntimeException error) {
-
             metrics.tcpWriteFailed();
-
             throw error;
-
         } finally {
-
             metrics.recordTcpWriteDuration(
                     System.nanoTime() - startedAt);
         }

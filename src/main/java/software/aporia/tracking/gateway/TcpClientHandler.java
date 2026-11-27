@@ -25,53 +25,81 @@ import software.aporia.tracking.storage.packet.JdbcPacketIngestion;
 import software.aporia.tracking.observability.metrics.GatewayMetrics;
 
 /**
- * Conduz uma conexão da identificação do protocolo à descoberta do equipamento ou à ingestão dos pacotes de uma sessão
- * autorizada.
+ * Conduz uma conexão da identificação do protocolo à descoberta do equipamento ou à ingestão dos pacotes de
+ * uma sessão autorizada.
+ *
+ * <p> Colaboradores: {@link JdbcDeviceLookup} consulta e ativa o cadastro; {@link SessionRegistry} publica a
+ * sessão; {@link JdbcPacketIngestion} persiste o quadro; {@link GatewayMetrics} mede conexão, ingestão e
+ * erros; o adaptador escolhido reconhece os quadros. </p>
  *
  * <p>
  * {@link #handle(Socket)} mantém o estado de uma única conexão e orquestra:
  * </p>
  * <ol>
- * <li>Aplica o prazo de login e seleciona o adaptador pelo primeiro byte recebido. A sessão de protocolo recompõe os
- * quadros entre as leituras TCP.</li>
- * <li>Consulta o cadastro até admitir um equipamento habilitado. Um login desconhecido pode ser confirmado para
- * permitir identificar o primeiro lote, mas não cria sessão autorizada; o primeiro quadro de dados gera a descoberta e
- * encerra a conexão. Cadastros desabilitados são recusados.</li>
- * <li>{@code registerSession()} ativa o token no banco e publica a sessão local, fechando a conexão substituída. A
- * conexão admitida passa ao timeout de inatividade.</li>
- * <li>{@code processAuthorizedFrame()} valida identidade e sessão atual, confirma logins e persiste dados antes de
- * enviar o ACK correspondente.</li>
- * <li>Enquanto não houver admissão, {@code updateLoginTimeout()} mantém o prazo total de login, mesmo com leituras
- * fragmentadas. Ao sair por EOF, parada ou falha, fecha o socket e remove somente a própria sessão do registro.</li>
+ * <li>Aplica o prazo de login e seleciona o adaptador pelo primeiro byte
+ * recebido. A sessão de protocolo recompõe os quadros entre as leituras TCP.</li>
+ * <li>Consulta o cadastro até admitir um equipamento habilitado. Um login
+ * desconhecido pode ser confirmado para permitir identificar o primeiro lote, mas não cria sessão autorizada;
+ * o primeiro quadro de dados gera a descoberta e encerra a conexão. Cadastros desabilitados são
+ * recusados.</li>
+ * <li>{@code registerSession()} ativa o token no banco e publica a sessão local,
+ * fechando a conexão substituída. A conexão admitida passa ao timeout de inatividade.</li>
+ * <li>{@code processAuthorizedFrame()} valida identidade e sessão atual,
+ * confirma logins e persiste dados antes de enviar o ACK correspondente.</li>
+ * <li>Enquanto não houver admissão, {@code updateLoginTimeout()} mantém o prazo
+ * total de login, mesmo com leituras fragmentadas. Ao sair por EOF, parada ou falha, fecha o socket e remove
+ * somente a própria sessão do registro.</li>
  * </ol>
  *
- * <p>
- * A instância pode atender várias conexões: adaptador, sessão de protocolo, buffer e sessão registrada são locais a
- * cada chamada de {@code handle()}.
- * </p>
+ * <p> Concorrência: a instância pode atender várias conexões simultaneamente. O adaptador, a sessão de
+ * protocolo, o buffer e a sessão registrada são locais a cada chamada de {@code handle()}; apenas {@code
+ * running} e as dependências injetadas são compartilhados. </p>
+ *
+ * <p> Limites: o buffer de leitura tem 4096 bytes, o login tem 30 segundos e a sessão admitida usa o prazo de
+ * inatividade configurado. Falhas de E/S, protocolo e sessão substituída são registradas e encerram somente
+ * esta conexão; {@code handle()} não as propaga. </p>
  */
 public final class TcpClientHandler {
 
-    // Registra eventos e falhas associados a esta classe.
+    /** Logger de eventos e falhas associados a esta classe. */
     private static final Logger log = LoggerFactory.getLogger(TcpClientHandler.class);
 
-    // Prazo em milissegundos para a fase anterior ao registro de sessão.
+    /** Prazo total, em milissegundos, para identificar e admitir o equipamento. */
     private static final int LOGIN_TIMEOUT_MS = 30_000;
 
-    // Tempo máximo de inatividade da sessão identificada, em milissegundos.
+    /**
+     * Tempo máximo de inatividade da sessão identificada, em milissegundos. Lido de {@code
+     * TRACKING_TCP_SESSION_IDLE_SECONDS} uma única vez, na inicialização da classe; um valor inválido impede
+     * essa inicialização.
+     */
     private static final int SESSION_IDLE_MS = sessionIdleMillis();
 
-    // Metricas e monitoramento
+    /** Métricas de conexão, ingestão e erros de protocolo. */
     private final GatewayMetrics metrics;
 
-    // Persiste o pacote bruto antes da confirmação de recebimento.
+    /** Persiste o pacote bruto, com commit, antes da confirmação de recebimento. */
     private final JdbcPacketIngestion ingestion;
+    /** Consulta e ativa o cadastro do equipamento. */
     private final JdbcDeviceLookup deviceLookup;
+    /** Registro compartilhado que publica a sessão admitida. */
     private final SessionRegistry sessionRegistry;
+    /** Escolhe o adaptador a partir do primeiro byte da conexão. */
     private final java.util.function.IntFunction<ProtocolAdapter> selectAdapter;
 
+    /** Sinal compartilhado de execução; falso encerra o laço e a conexão. */
     private final AtomicBoolean running;
 
+    /**
+     * Recebe as dependências de persistência, cadastro, sessões e métricas.
+     *
+     * @param ingestion       persiste o pacote bruto antes do ACK
+     * @param deviceLookup    consulta e ativa o cadastro do equipamento
+     * @param sessionRegistry registro compartilhado de sessões ativas
+     * @param selectAdapter   escolhe o adaptador pelo primeiro byte da conexão
+     * @param running         sinal compartilhado de execução do gateway
+     * @param metrics         métricas de conexão, ingestão e erros de protocolo
+     * @throws NullPointerException se qualquer dependência for nula
+     */
     public TcpClientHandler(
             JdbcPacketIngestion ingestion,
             JdbcDeviceLookup deviceLookup,
@@ -90,6 +118,8 @@ public final class TcpClientHandler {
 
     /**
      * Consome leituras até o encerramento da conexão e remove condicionalmente a sessão registrada na saída.
+     * O socket é fechado no fim, mesmo em falha. Erros de E/S e de protocolo são registrados e encerram
+     * apenas esta conexão; o método não propaga essas falhas ao executor.
      *
      * @param client socket TCP da conexão do equipamento
      */
@@ -100,6 +130,7 @@ public final class TcpClientHandler {
                 client;
                 InputStream input = client.getInputStream()
         ) {
+            // O prazo de login é absoluto: cada fragmento recebido não o renova.
             long loginDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(LOGIN_TIMEOUT_MS);
             client.setSoTimeout(LOGIN_TIMEOUT_MS);
             byte[] buffer = new byte[4096];
@@ -109,6 +140,7 @@ public final class TcpClientHandler {
             if (bytesRead == -1)
                 return;
 
+            // O primeiro byte define o adaptador; a sessão de protocolo acumula o restante.
             ProtocolAdapter adapter = selectAdapter.apply(Byte.toUnsignedInt(buffer[0]));
             ProtocolSession protocolSession = adapter.newSession();
             do {
@@ -163,13 +195,17 @@ public final class TcpClientHandler {
     }
 
     /**
-     * Ativa o token no banco antes de publicar a sessão local. Se a ativação falhar, o registro preserva a sessão
-     * anterior e a exceção encerra a conexão.
+     * Ativa o token no banco antes de publicar a sessão local. Se a ativação falhar, o registro preserva a
+     * sessão anterior e a exceção encerra a conexão. A sessão substituída é fechada depois da publicação,
+     * quando o registro já aponta para a nova conexão.
      *
      * @param client socket do equipamento habilitado
      * @param device cadastro autorizado para esta conexão
      * @return sessão publicada no registro compartilhado
-     * @throws IOException se não for possível configurar o timeout do socket
+     * @throws IOException           se não for possível configurar o timeout do
+     *                               socket
+     * @throws IllegalStateException se a ativação no cadastro for recusada ou
+     *                               falhar
      */
     private DeviceSession registerSession(Socket client, RegisteredDevice device) throws IOException {
         client.setSoTimeout(SESSION_IDLE_MS);
@@ -179,12 +215,14 @@ public final class TcpClientHandler {
                 device.protocol(),
                 device.identity(),
                 client);
+        // A ativação do token roda dentro do registro, antes da publicação local.
         var previous = sessionRegistry.register(
                 session,
                 () -> deviceLookup.activateSession(device, session.sessionToken()));
         if (previous.isPresent()) {
             metrics.deviceReconnected(device.protocol());
             try {
+                // A sessão anterior já foi invalidada; falta apenas fechar o socket.
                 previous.get().close();
             } catch (IOException e) {
                 log.warn("Failed to close replaced session", e);
@@ -195,20 +233,26 @@ public final class TcpClientHandler {
     }
 
     /**
-     * Valida o vínculo do quadro e persiste dados no tenant e dispositivo admitidos. O ACK de dados só é enviado depois
-     * que a ingestão retorna com o commit concluído.
+     * Valida o vínculo do quadro e persiste dados no tenant e dispositivo admitidos. A ordem é identidade,
+     * sessão atual, tratamento de login, ingestão e confirmação. O ACK de dados só é enviado depois que a
+     * ingestão retorna com o commit concluído.
      *
      * @param adapter         adaptador escolhido para a conexão
      * @param protocolSession estado do protocolo usado para gerar as confirmações
      * @param session         sessão autorizada do equipamento
      * @param frame           quadro recomposto pela sessão de protocolo
-     * @throws IOException se a escrita da confirmação falhar
+     * @throws IOException              se a escrita da confirmação falhar
+     * @throws IllegalArgumentException se a identidade do quadro divergir da
+     *                                  sessão
+     * @throws IllegalStateException    se a sessão já tiver sido substituída ou a
+     *                                  ingestão falhar
      */
     private void processAuthorizedFrame(
             ProtocolAdapter adapter,
             ProtocolSession protocolSession,
             DeviceSession session,
             ProtocolFrame frame) throws IOException {
+        // A identidade é conferida antes de qualquer persistência nesta conexão.
         session.validateIdentity(frame.deviceIdentity());
         if (!sessionRegistry.isCurrent(session)) {
             throw new IllegalStateException("SESSION_REPLACED");
@@ -227,6 +271,7 @@ public final class TcpClientHandler {
         java.util.UUID packetId;
 
         try {
+            // A ingestão abre e confirma a própria transação; o ACK só sai depois disso.
             packetId = ingestion.accept(
                     receivedFrame,
                     session.tenantId(),
@@ -266,7 +311,12 @@ public final class TcpClientHandler {
         return true;
     }
 
-    /** Distingue encerramentos esperados de falhas que precisam de diagnóstico. */
+    /**
+     * Distingue encerramentos esperados de falhas que precisam de diagnóstico. Não interrompe a conexão
+     * diretamente; quem chama já está encerrando o handler.
+     *
+     * @param error falha que encerrou o processamento da conexão
+     */
     private void logProcessingFailure(IllegalStateException error) {
         if (null == error.getMessage()) {
             log.error("TCP session processing failed", error);
@@ -279,9 +329,14 @@ public final class TcpClientHandler {
     }
 
     /**
-     * Converte em milissegundos o prazo configurado para inatividade de sessões identificadas.
+     * Converte em milissegundos o prazo configurado para inatividade de sessões identificadas. Lê {@code
+     * TRACKING_TCP_SESSION_IDLE_SECONDS} e usa 180 como padrão.
      *
      * @return prazo de inatividade em milissegundos
+     * @throws NumberFormatException    se a variável não contiver um inteiro
+     * @throws IllegalArgumentException se o valor for menor ou igual a zero
+     * @throws ArithmeticException      se a conversão para milissegundos exceder o
+     *                                  limite de {@code int}
      */
     private static int sessionIdleMillis() {
         int seconds = Integer.parseInt(System.getenv().getOrDefault("TRACKING_TCP_SESSION_IDLE_SECONDS", "180"));

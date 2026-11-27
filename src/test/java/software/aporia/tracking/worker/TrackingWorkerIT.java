@@ -27,10 +27,14 @@ import software.aporia.tracking.support.TestFixtures;
 /** Verifica a rejeição de um pacote cuja identidade diverge da identidade cadastrada. */
 class TrackingWorkerIT {
 
+    /** Registro isolado para observar os contadores de cada cenário. */
     private SimpleMeterRegistry meterRegistry;
+    /** Métricas do worker ligadas ao registro acima. */
     private WorkerMetrics metrics;
+    /** Decodificadores Suntech e Teltonika disponíveis ao worker. */
     private DecoderRegistry decoderRegistry;
 
+    /** Prepara métricas isoladas e os dois decodificadores usados pelo worker. */
     @BeforeEach
     void setUpWorkerDependencies() {
         meterRegistry = new SimpleMeterRegistry();
@@ -39,6 +43,7 @@ class TrackingWorkerIT {
                 new SuntechDecoder(), new TeltonikaAvl()));
     }
 
+    /** Fecha o registro de métricas para não vazar estado entre testes. */
     @AfterEach
     void closeMeterRegistry() {
         meterRegistry.close();
@@ -54,16 +59,16 @@ class TrackingWorkerIT {
             throws Exception {
 
         try (
-                //cria a conexão com o banco de testes
-                var dataSource = TestDatabase.createDataSource(); //cria os recursos para testar
-                 var fixtures = new TestFixtures(
+                // DataSource isolado do banco de testes e fixture do dispositivo cadastrado.
+                var dataSource = TestDatabase.createDataSource();
+                var fixtures = new TestFixtures(
                         dataSource,
                         "1234567890"
                 )) {
-            //cria um uuid aleatorio para id 
             UUID packetId = UUID.randomUUID();
 
-            //payload mock
+            // ALV é uma mensagem Suntech sem posição, mas declara outra identidade
+            // (9999999999) diferente da cadastrada (1234567890).
             byte[] payload = ("ALV;9999999999\r").getBytes(StandardCharsets.US_ASCII);
 
             String hash = HexFormat.of().formatHex(
@@ -71,7 +76,7 @@ class TrackingWorkerIT {
                             .digest(payload)
             );
 
-            // Inserir o pacote no banco de testes.
+            // Insere o pacote diretamente na fila, como o gateway faria após a recepção.
             try (Connection connection
                     = dataSource.getConnection()) {
 
@@ -103,7 +108,7 @@ class TrackingWorkerIT {
                 }
             }
 
-            // Executar o worker.
+            // O worker deve consumir o pacote e comparar a identidade decodificada.
             TrackingWorker worker = new TrackingWorker(
                     dataSource,
                     fixtures.tenantId(), decoderRegistry, metrics);
@@ -113,7 +118,7 @@ class TrackingWorkerIT {
             assertEquals(0.0, meterRegistry.get("tracking.packets.processed").counter().count());
             assertEquals(1L, meterRegistry.get("tracking.packet.processing").timer().count());
 
-            // Verificar a rejeição.
+            // Confere o estado final: rejeitado, com uma tentativa contabilizada.
             try (Connection connection
                     = dataSource.getConnection()) {
 

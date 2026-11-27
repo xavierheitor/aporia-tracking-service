@@ -18,11 +18,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Verifica persistência transacional, duplicação e escopo das referências usadas nas respostas. */
+/**
+ * Verifica persistência transacional, duplicação e escopo das referências usadas nas respostas.
+ *
+ * <p>Os cenários que persistem resposta gravam tenant, dispositivo e pacote brutos na mesma conexão
+ * e dependem do rollback do teste para limpar, sem usar a fixture de tenant. As chaves estrangeiras
+ * compostas exigem que tenant, dispositivo e pacote da resposta coincidam com os do cadastro.</p>
+ */
 class DeviceCommandResponseRepositoryIT {
 
     /**
-     * Obtém o pool do banco isolado usado para persistir respostas.
+     * Abre um pool novo sobre o schema isolado reservado à JVM de testes.
      *
      * @return pool de conexões configurado
      */
@@ -42,7 +48,10 @@ class DeviceCommandResponseRepositoryIT {
     }
 
     /**
-     * Prepara os registros referenciados pela resposta do dispositivo.
+     * Cenário: o teste precisa de tenant, dispositivo e pacote válidos para a resposta. Ação: insere
+     * as três linhas na conexão recebida e calcula o SHA-256 do payload do pacote. Resultado: as
+     * referências ficam disponíveis na transação do chamador, que decide commit ou rollback; a
+     * rotina não confirma nem limpa.
      *
      * @param connection conexão JDBC usada pelo chamador
      * @param tenantId identificador do tenant que delimita a operação
@@ -88,6 +97,7 @@ class DeviceCommandResponseRepositoryIT {
                                 "RES;" + identity + ";03;04;01;STB.201.1.1.11\r"
                         );
 
+                        // O hash é obrigatório na ingestão e precisa corresponder aos bytes do pacote.
                         String hash = java.util.HexFormat.of().formatHex(
                                 java.security.MessageDigest
                                         .getInstance("SHA-256")
@@ -120,7 +130,10 @@ class DeviceCommandResponseRepositoryIT {
     }
 
     /**
-     * Exercita gravação e rollback dentro da transação do chamador.
+     * Cenário: pacote pendente do tenant e do dispositivo informados. Ação: grava uma resposta RES,
+     * repete a gravação do mesmo pacote e desfaz a transação. Resultado: a primeira gravação devolve
+     * UUID, com {@code command_id} nulo e {@code result} desconhecido; a repetição devolve nulo pelo
+     * conflito em {@code raw_packet_id}; o rollback remove fixture e resposta.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -219,13 +232,16 @@ class DeviceCommandResponseRepositoryIT {
                         assertNull(duplicate);
 
             } finally {
+                // O rollback descarta fixture e resposta; as tabelas não precisam de limpeza manual.
                 connection.rollback();
             }
         }
     }
 
     /**
-     * Rejeita um tipo fora das respostas Suntech reconhecidas.
+     * Cenário: nenhuma fixture, pois a validação ocorre antes do SQL. Ação: tenta gravar uma resposta
+     * com tipo {@code STT}. Resultado: {@link IllegalArgumentException} com
+     * {@code INVALID_RESPONSE_TYPE}, sem tocar no banco.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -254,7 +270,9 @@ class DeviceCommandResponseRepositoryIT {
     }
 
     /**
-     * Verifica que a resposta não pode referenciar um pacote de outro tenant.
+     * Cenário: pacote pertencente a um tenant diferente do informado na resposta. Ação: tenta gravar a
+     * resposta com um tenant aleatório e o pacote do cenário. Resultado: {@link java.sql.SQLException}
+     * com SQLState {@code 23503} pela chave estrangeira composta; o rollback remove a fixture.
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -289,6 +307,7 @@ class DeviceCommandResponseRepositoryIT {
                 DeviceCommandResponseRepository repository
                         = new DeviceCommandResponseRepository();
 
+                // As FKs (tenant_id, raw_packet_id) e (tenant_id, device_id) recusam o escopo cruzado.
                 var error = assertThrows(
                         java.sql.SQLException.class,
                         () -> repository.save(

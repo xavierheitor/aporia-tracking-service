@@ -19,8 +19,13 @@ import org.springframework.context.SmartLifecycle;
  * A parada libera a espera pelo latch, sem interromper à força a transação em curso. A conclusão é observada pelo
  * término da thread, e não apenas pelo sinal {@code running}.
  * </p>
+ *
+ * <p> O ciclo de vida usa fase 100 e partida automática, como o gateway. O heartbeat é atualizado no início
+ * de cada ciclo e alimenta o gauge {@code tracking.worker.heartbeat.age}; a saúde do worker usa o mesmo
+ * valor. </p>
  */
 public final class WorkerLifecycle implements SmartLifecycle {
+    /** Logger do ciclo de vida e de falhas do laço do worker. */
     private static final Logger log = LoggerFactory.getLogger(WorkerLifecycle.class);
 
     /** Intervalo entre consultas quando não há pacote elegível. */
@@ -28,16 +33,25 @@ public final class WorkerLifecycle implements SmartLifecycle {
     /** Intervalo para evitar repetir imediatamente uma operação que falhou. */
     private static final long FAILURE_DELAY_MS = 3_000;
 
+    /** Consumidor chamado uma vez por ciclo. */
     private final TrackingWorker worker;
 
+    /** Indica se o laço deve continuar; é desligado antes de liberar a pausa na parada. */
     private final AtomicBoolean running = new AtomicBoolean(false);
 
-    // volatile permite que o coordenador observe a thread publicada na partida.
+    /**
+     * Thread atual do laço; volátil para que o coordenador de parada observe a publicação feita em {@link
+     * #start()}.
+     */
     private volatile Thread processingThread;
 
-    // O latch libera as pausas antecipadamente quando a parada é solicitada.
+    /**
+     * Sinal liberado na parada para acordar a pausa entre ciclos. É trocado a cada partida porque {@link
+     * CountDownLatch} não pode ser rearmado.
+     */
     private volatile CountDownLatch stopSignal = new CountDownLatch(0);
 
+    /** Instante monotônico do início do último ciclo; lido pelo gauge e pela saúde do worker. */
     private volatile long lastHeartbeatNanos = System.nanoTime();
 
     /**
@@ -86,6 +100,7 @@ public final class WorkerLifecycle implements SmartLifecycle {
         try {
             while (running.get()) {
 
+                // O heartbeat marca o início do ciclo, antes da consulta ao banco.
                 lastHeartbeatNanos = System.nanoTime();
 
                 try {
@@ -96,11 +111,13 @@ public final class WorkerLifecycle implements SmartLifecycle {
                 } catch (RuntimeException error) {
                     log.error("Worker processing failed", error);
 
+                    // A transação já foi desfeita pelo repositório; o laço continua após a pausa.
                     awaitNextCycle(FAILURE_DELAY_MS);
                 }
             }
 
         } finally {
+            // Cobre também Error que escape do laço e mantém o estado coerente para o Spring.
             running.set(false);
 
             log.info("Tracking worker stopped");
@@ -223,6 +240,11 @@ public final class WorkerLifecycle implements SmartLifecycle {
         return 100;
     }
 
+    /**
+     * Calcula a idade do heartbeat em segundos.
+     *
+     * @return segundos desde o início do último ciclo ou desde a construção, se nunca iniciou
+     */
     public double getHeartbeatAgeSeconds() {
 
         return (System.nanoTime() - lastHeartbeatNanos)

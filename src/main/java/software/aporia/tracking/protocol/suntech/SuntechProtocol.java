@@ -7,16 +7,21 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Reconstitui quadros ASCII delimitados por retorno de carro e localiza a identidade declarada em
- * cada cabeçalho suportado.
+ * Reconstitui quadros ASCII delimitados por retorno de carro e localiza a identidade declarada em cada
+ * cabeçalho suportado.
  *
- * <p>{@link #receive(byte[])} cuida dos limites das mensagens; {@link #identify(byte[])}
- * valida o envelope textual e a identidade. Os valores de telemetria são
- * interpretados separadamente por {@link SuntechDecoder}.</p>
+ * <p>{@link #receive(byte[])} cuida dos limites das mensagens; {@link #identify(byte[])} valida o envelope
+ * textual e a identidade. Os valores de telemetria são interpretados separadamente por {@link
+ * SuntechDecoder}.</p>
+ *
+ * <p>Uma instância por conexão guarda o fragmento entre leituras e não é segura para uso concorrente. O
+ * buffer contém apenas os bytes após o último CR. {@link #receive(byte[])} não valida cabeçalho nem
+ * identidade: isso só ocorre em {@link #identify(byte[])}. Após uma exceção de limite, o chamador deve
+ * encerrar a conexão, pois os bytes rejeitados não são recuperados.</p>
  */
 public class SuntechProtocol {
 
-    /** Limite de bytes que o enquadrador aceita para uma mensagem. */
+    /** Limite de bytes que o enquadrador aceita para uma mensagem, incluindo o CR; é inclusivo. */
     private static final int MAX_FRAME_SIZE = 8192;
     /** Byte de retorno de carro que encerra uma mensagem Suntech. */
     private static final byte DELIMITER = '\r';
@@ -25,15 +30,19 @@ public class SuntechProtocol {
     private static final Set<String> HEADERS
             = Set.of("ALV", "STT", "ASTT", "RES", "RPR");
 
-    /** Armazena os bytes já recebidos da unidade de protocolo em montagem. */
+    /** Guarda somente os bytes após o último CR, à espera do terminador da mensagem. */
     private byte[] buffer = new byte[0];
 
     /**
      * Emite todos os quadros terminados por CR e conserva o fragmento restante para a próxima
      * leitura.
      *
+     * <p>O limite de {@value #MAX_FRAME_SIZE} bytes inclui o CR. Uma leitura sem CR que já ocupe o limite é
+     * rejeitada antes de completar o quadro, pois o terminador ainda precisaria caber.</p>
+     *
      * @param incoming bytes disponíveis nesta leitura TCP, possivelmente um fragmento
      * @return quadros completos nesta leitura, em ordem de recepção
+     * @throws IllegalArgumentException se {@code incoming} for nulo ou o quadro exceder o limite
      */
     public List<byte[]> receive(byte[] incoming) {
 
@@ -52,6 +61,7 @@ public class SuntechProtocol {
 
                 int frameSize = buffer.length + i - start + 1;
 
+                // O CR entra no tamanho; 8192 é aceito e 8193 é recusado.
                 if (frameSize > MAX_FRAME_SIZE) {
                     throw new IllegalArgumentException(
                             "FRAME_TOO_LARGE"
@@ -109,8 +119,11 @@ public class SuntechProtocol {
     }
 
     /**
-     * Valida o envelope e extrai a identidade, inclusive quando a resposta contém um cabeçalho de
-     * posição embutido.
+     * Valida o envelope e extrai a identidade, inclusive quando a resposta contém um cabeçalho de posição
+     * embutido.
+     *
+     * <p>O quadro precisa terminar em CR e conter apenas ASCII imprimível antes dele. Somente o cabeçalho e a
+     * identidade são validados aqui; os campos restantes são interpretados pelo decodificador.</p>
      *
      * @param frame quadro recebido para interpretação ou ingestão
      * @return identidade extraída do cabeçalho reconhecido
@@ -126,6 +139,7 @@ public class SuntechProtocol {
             throw new IllegalArgumentException("INVALID_FRAME");
         }
 
+        // A faixa imprimível também impede CR embutido no meio do quadro.
         for (int i = 0; i < frame.length - 1; i++) {
             if (frame[i] < 32 || frame[i] > 126) {
                 throw new IllegalArgumentException("INVALID_FRAME");
@@ -167,6 +181,7 @@ public class SuntechProtocol {
 
         String identity = parts[identityIndex];
 
+        // A identidade declarada é apenas o número do equipamento; não autentica a conexão.
         if (!identity.matches("\\d{10}")) {
             throw new IllegalArgumentException(
                     "INVALID_IDENTITY"

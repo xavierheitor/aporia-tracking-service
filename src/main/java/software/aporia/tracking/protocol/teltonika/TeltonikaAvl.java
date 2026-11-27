@@ -18,6 +18,10 @@ import software.aporia.tracking.protocol.TelemetryDecoder;
  * Cada chamada a {@code readRecord()} avança o mesmo buffer pelos campos GPS e
  * pelas entradas e saídas (I/O). Os codecs diferem na largura de identificadores
  * e contagens; o Codec 8E também admite valores de tamanho variável.</p>
+ *
+ * <p>O decodificador não guarda estado entre chamadas: cada invocação cria seu próprio buffer sobre o array
+ * recebido, então a instância pode ser compartilhada entre threads. Lotes truncados ou inconsistentes viram
+ * {@code IllegalArgumentException} com o código {@code INVALID_TELTONIKA_AVL}.</p>
  */
 public final class TeltonikaAvl implements TelemetryDecoder {
     /** Limite do pacote AVL em bytes, incluindo cabeçalho e CRC. */
@@ -52,7 +56,8 @@ public final class TeltonikaAvl implements TelemetryDecoder {
             if (packet.length > MAX_PACKET || data.getInt() != 0 || data.getInt() != packet.length - 12) {
                 throw invalid();
             }
-            // O pacote tem oito bytes de cabeçalho e quatro bytes finais de CRC.
+            // O primeiro int deve ser zero e o segundo deve ser o tamanho do corpo; o pacote
+            // tem oito bytes de cabeçalho e quatro bytes finais de CRC.
             int end = packet.length - 4;
             // O CRC verifica a integridade do corpo antes de interpretar seus campos.
             if (data.getInt(end) != crc16(packet, 8, end)) throw invalid();
@@ -98,10 +103,15 @@ public final class TeltonikaAvl implements TelemetryDecoder {
      * Lê um registro GPS e percorre os grupos de entradas e saídas, interpretando a ignição
      * quando disponível.
      *
+     * <p>O timestamp vira um {@link Instant} UTC. A leitura resultante usa {@code satellites > 0} como
+     * indicação de fix válido e reduz 360° de rumo a 0°.</p>
+     *
      * @param data buffer posicionado no próximo campo binário
      * @param extended indica uso das larguras do Codec 8 Extended
      * @param identity identidade declarada pelo rastreador no protocolo
      * @return telemetria interpretada a partir dos campos do equipamento
+     * @throws IllegalArgumentException se os campos estiverem fora das faixas aceitas ou se as
+     * contagens de E/S não fecharem
      */
     private static Telemetry readRecord(ByteBuffer data, boolean extended, String identity) {
         long millis = data.getLong();
@@ -117,7 +127,8 @@ public final class TeltonikaAvl implements TelemetryDecoder {
         field(data, extended); // Identificador da entrada ou saída que originou o evento.
         int remaining = field(data, extended);
         Boolean ignition = null;
-        // Os elementos de E/S vêm agrupados pela largura do valor. A contagem restante confere o total declarado.
+        // O total de E/S vem antes dos grupos de 1, 2, 4 e 8 bytes. A contagem restante
+        // precisa fechar com o fim dos grupos ou com o grupo variável do Codec 8E.
         for (int width = 1; width <= 8; width *= 2) {
             int count = field(data, extended);
             remaining -= count;
@@ -166,6 +177,7 @@ public final class TeltonikaAvl implements TelemetryDecoder {
      * @param length quantidade de bytes a consumir
      */
     private static void skip(ByteBuffer data, int length) {
+        // Confere o restante antes de avançar para não ler além do corpo do lote.
         if (length > data.remaining()) throw invalid();
         data.position(data.position() + length);
     }

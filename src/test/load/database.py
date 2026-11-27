@@ -1,3 +1,13 @@
+"""Provisionamento, snapshot e limpeza do benchmark de carga.
+
+O módulo usa exclusivamente o banco `aporia_tracking_test`, o schema
+`tracking_load` e o host local. `connect()` confirma esses três valores antes
+de qualquer escrita; se o ambiente apontar para outro banco, a execução falha.
+
+Cada execução cria um tenant próprio com nome reconhecível. A limpeza só apaga
+um tenant cujo nome case com o padrão do benchmark, o que evita remover dados
+reais por engano.
+"""
 
 import os
 import secrets
@@ -18,6 +28,8 @@ DATABASE_SCHEMA = "tracking_load"
 
 @dataclass(frozen=True)
 class Device:
+    """Dispositivo simulado com o ativo e a associação já provisionados."""
+
     id: UUID
     asset_id: UUID
     identity: str
@@ -27,11 +39,23 @@ class Device:
 
 @dataclass(frozen=True)
 class Fleet:
+    """Tenant e dispositivos de uma execução do benchmark."""
+
     tenant_id: UUID
     devices: List[Device]
 
 
 def connect():
+    """Abre e valida uma conexão com o banco de testes.
+
+    Returns:
+        Conexão psycopg já autenticada no schema `tracking_load`.
+
+    Raises:
+        RuntimeError: se banco, usuário ou schema efetivos não forem os
+            esperados. A mensagem não inclui senha.
+        KeyError: se as variáveis de credencial não estiverem no ambiente.
+    """
     connection = psycopg.connect(
         host=DATABASE_HOST,
         port=DATABASE_PORT,
@@ -39,6 +63,7 @@ def connect():
         user=os.environ["TRACKING_TEST_DB_USER"],
         password=os.environ["TRACKING_TEST_DB_PASSWORD"],
         connect_timeout=5,
+        # O search_path restringe a criação e a leitura ao schema do benchmark.
         options="-c search_path=tracking_load,public",
     )
 
@@ -59,6 +84,8 @@ def connect():
                 DATABASE_SCHEMA,
             )
 
+            # Confirma o destino antes de qualquer INSERT/DELETE: um erro de
+            # configuração não pode atingir desenvolvimento ou produção.
             if actual != expected:
                 raise RuntimeError(
                     f"Unsafe database connection: {actual}"
@@ -74,6 +101,17 @@ def connect():
 
 
 def generate_identity(protocol: str) -> str:
+    """Gera uma identidade aleatória no formato aceito pelo protocolo.
+
+    Args:
+        protocol: `suntech` (10 dígitos) ou `teltonika` (15 dígitos).
+
+    Returns:
+        Identidade numérica em string.
+
+    Raises:
+        ValueError: se o protocolo não for suportado.
+    """
     if protocol == "suntech":
         return "9" + f"{secrets.randbelow(10**9):09d}"
 
@@ -87,6 +125,22 @@ def provision_fleet(
     count: int,
     protocol: str,
 ) -> Fleet:
+    """Cria tenant, dispositivos, ativos e associações para o cenário.
+
+    A frota nasce pronta para ingestão: cada dispositivo tem um ativo
+    associado desde um dia antes, então o worker encontra a associação temporal
+    para qualquer leitura do benchmark.
+
+    Args:
+        count: quantidade de dispositivos, entre 1 e 100000.
+        protocol: `suntech`, `teltonika` ou `mixed`.
+
+    Returns:
+        Frota com o tenant e os dispositivos criados.
+
+    Raises:
+        ValueError: se quantidade ou protocolo forem inválidos.
+    """
     if not 1 <= count <= 100000:
         raise ValueError("Invalid fleet size")
 
@@ -104,6 +158,7 @@ def provision_fleet(
     for index in range(count):
         selected_protocol = protocol
 
+        # Em "mixed", alterna os fabricantes para exercitar os dois decoders.
         if protocol == "mixed":
             selected_protocol = (
                 "suntech"
@@ -111,6 +166,7 @@ def provision_fleet(
                 else "teltonika"
             )
 
+        # Repete a geração até achar uma identidade inédita nesta execução.
         while True:
             identity = generate_identity(selected_protocol)
 
@@ -122,6 +178,7 @@ def provision_fleet(
 
         codec = 0
 
+        # Alterna Codec 8 e 8E entre os Teltonika: são formatos de IO diferentes.
         if selected_protocol == "teltonika":
             codec = 0x08 if (index // 2) % 2 == 0 else 0x8E
 
@@ -137,6 +194,7 @@ def provision_fleet(
 
     with connect() as connection:
         with connection.cursor() as cursor:
+            # O nome do tenant é a marca usada pela limpeza segura.
             cursor.execute(
                 """
                 INSERT INTO tenants (id, name)
@@ -220,6 +278,15 @@ def provision_fleet(
 
 
 def snapshot(tenant_id: UUID) -> dict:
+    """Conta as linhas do tenant nas tabelas do fluxo.
+
+    Args:
+        tenant_id: tenant do benchmark.
+
+    Returns:
+        Dicionário `nome_da_coluna -> contagem` para pacotes crus, posições,
+        últimas posições, mensagens e eventos de outbox.
+    """
     with connect() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -256,6 +323,8 @@ def snapshot(tenant_id: UUID) -> dict:
 
             values = cursor.fetchone()
 
+            # Usa os nomes reais das colunas para não depender da ordem do SELECT
+            # se a consulta ganhar novas métricas.
             return {
                 column.name: value
                 for column, value in zip(
@@ -266,6 +335,17 @@ def snapshot(tenant_id: UUID) -> dict:
 
 
 def cleanup(tenant_id: UUID) -> None:
+    """Remove todos os dados de um tenant de benchmark.
+
+    A ordem das exclusões respeita as FKs: dependentes antes dos pais. O tenant
+    é travado com `FOR UPDATE` e o nome precisa seguir o padrão do benchmark.
+
+    Args:
+        tenant_id: tenant criado por `provision_fleet`.
+
+    Raises:
+        RuntimeError: se o tenant existir mas não for um tenant de benchmark.
+    """
     with connect() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -283,11 +363,13 @@ def cleanup(tenant_id: UUID) -> None:
             if tenant is None:
                 return
 
+            # Confere a marca antes de qualquer DELETE: protege dados reais.
             if tenant[0] != f"Load Test {tenant_id}":
                 raise RuntimeError(
                     "Refusing to delete a non-benchmark tenant"
                 )
 
+            # Filhos primeiro; a FK impede apagar um pai enquanto houver filho.
             tables = (
                 "device_command_responses",
                 "outbox_events",
@@ -310,6 +392,7 @@ def cleanup(tenant_id: UUID) -> None:
                     (tenant_id,),
                 )
 
+            # A descoberta usa o mesmo UUID do dispositivo; remove antes do cadastro.
             cursor.execute(
                 """
                 DELETE FROM device_discoveries

@@ -8,6 +8,10 @@ import java.util.Objects;
 /**
  * Resolve adaptadores por identificador ou pelo primeiro byte da conexão. Um prefixo ambíguo
  * impede a seleção automática.
+ *
+ * <p>O índice é preenchido no construtor e não muda depois; a instância pode ser compartilhada entre
+ * conexões. O adaptador devolvido é sem estado de conexão, mas cada socket ainda precisa de uma sessão
+ * própria criada por {@link ProtocolAdapter#newSession()}.</p>
  */
 public final class ProtocolRegistry {
 
@@ -18,6 +22,8 @@ public final class ProtocolRegistry {
      * Constrói o índice de adaptadores e rejeita identificadores vazios ou repetidos.
      *
      * @param registeredAdapters adaptadores disponíveis para seleção
+     * @throws NullPointerException se a coleção, um adaptador ou seu identificador for nulo
+     * @throws IllegalArgumentException se algum identificador estiver em branco ou repetido
      */
     public ProtocolRegistry(
             Collection<? extends ProtocolAdapter> registeredAdapters
@@ -33,12 +39,14 @@ public final class ProtocolRegistry {
                     adapter.protocolId()
             );
 
+            // Identificador em branco não serve para localizar o cadastro do dispositivo.
             if (id.isBlank()) {
                 throw new IllegalArgumentException(
                         "Protocol ID cannot be blank"
                 );
             }
 
+            // Dois adaptadores com o mesmo identificador tornariam a escolha dependente da ordem.
             if (registry.putIfAbsent(id, adapter) != null) {
                 throw new IllegalArgumentException(
                         "Duplicate protocol: " + id
@@ -46,6 +54,7 @@ public final class ProtocolRegistry {
             }
         }
 
+        // A cópia imutável congela o índice para consultas concorrentes.
         this.adapters = Map.copyOf(registry);
     }
 
@@ -77,9 +86,11 @@ public final class ProtocolRegistry {
      *
      * @param protocolId identificador do protocolo do equipamento
      * @return adaptador registrado para o protocolo
+     * @throws IllegalArgumentException se o identificador não estiver registrado
      */
     public ProtocolAdapter get(String protocolId) {
 
+        // Aqui a busca é exata pelo identificador; a detecção por prefixo fica em detect().
         ProtocolAdapter adapter = adapters.get(protocolId);
 
         if (adapter == null) {

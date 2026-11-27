@@ -1,5 +1,16 @@
+# Compose da aplicação e dos bancos locais.
+#
+# Perfis:
+#   dev   -> PostgreSQL de desenvolvimento (host 127.0.0.1:5437).
+#   test  -> PostgreSQL isolado para a suíte de integração (host 127.0.0.1:15437).
+#   app   -> gateway, worker e monitor usando a imagem local.
+#
+# A observabilidade fica em compose.observability.yaml e na rede externa
+# aporia-observability. Cada serviço usa uma role de banco própria; as senhas
+# vêm do .env e nunca são versionadas.
 name: aporia-tracking-service
 
+# Modelo comum do PostgreSQL (imagem, healthcheck e tempo de parada).
 x-postgres: &postgres
   image: aporia-postgres-postgis:16
 
@@ -18,6 +29,8 @@ x-postgres: &postgres
 
   stop_grace_period: 30s
 
+# Variáveis comuns aos três processos Java. A URL interna aponta para o serviço
+# postgres; os valores de pool e de management podem ser ajustados no .env.
 x-tracking-environment: &tracking-environment
   TRACKING_DB_URL: ${TRACKING_CONTAINER_DB_URL:?required}
 
@@ -46,6 +59,8 @@ x-tracking-environment: &tracking-environment
     -Dfile.encoding=UTF-8
     -Duser.timezone=UTC
 
+# Modelo comum dos processos Java: imagem, saúde, limites de segurança,
+# filesystem somente leitura e redes. O perfil Spring é escolhido no comando.
 x-tracking: &tracking
   image: aporia-tracking-service:local
 
@@ -97,6 +112,8 @@ x-tracking: &tracking
       max-file: "5"
 
 services:
+  # Banco de desenvolvimento. O volume mantém os dados entre reinícios; as
+  # credenciais de inicialização só valem em volume vazio.
   postgres:
     <<: *postgres
 
@@ -118,6 +135,8 @@ services:
     networks:
       - backend
 
+  # Banco exclusivo da suíte de integração. Não reutilize este volume para
+  # desenvolvimento: os testes criam e removem schemas.
   postgres-test:
     <<: *postgres
 
@@ -139,6 +158,9 @@ services:
     networks:
       - testing
 
+  # Gateway TCP: aceita conexões, identifica equipamentos e persiste pacotes.
+  # O dispatcher só é habilitado quando TRACKING_DISPATCH_OWNER_FILE aponta
+  # para o arquivo persistente de propriedade.
   gateway:
     <<: *tracking
 
@@ -175,6 +197,7 @@ services:
         aliases:
           - tracking-gateway
 
+  # Worker: consome raw_packets e grava mensagens, posições e outbox.
   worker:
     <<: *tracking
 
@@ -201,6 +224,8 @@ services:
         aliases:
           - tracking-worker
 
+  # Monitor: coleta snapshots das filas para os gauges do Actuator.
+  # Usa uma role de banco somente leitura e um pool pequeno.
   monitor:
     <<: *tracking
 
@@ -229,12 +254,15 @@ services:
           - tracking-monitor
 
 networks:
+  # Rede interna dos serviços da aplicação e do banco de desenvolvimento.
   backend:
     driver: bridge
 
+  # Rede interna do banco de testes.
   testing:
     driver: bridge
 
+  # Rede compartilhada com Prometheus/Alloy; criada pelo compose de observabilidade.
   observability:
     name: aporia-observability
     external: true
@@ -244,4 +272,5 @@ volumes:
 
   postgres-test-data:
 
+  # Guarda o arquivo de propriedade do dispatcher entre recriações do gateway.
   gateway-runtime:

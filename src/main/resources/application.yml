@@ -1,14 +1,23 @@
+# Configuração comum aos perfis gateway, worker e monitor.
+# Cada perfil complementa este arquivo com sua porta de management, seus grupos
+# de health e suas propriedades tracking.*.
+
 spring:
   application:
+    # Nome usado nos logs estruturados e na tag "application" das métricas.
     name: aporia-tracking-service
 
   profiles:
+    # O processo precisa escolher um perfil explícito (gateway, worker ou monitor).
+    # Sem isso, nenhum listener ou laço operacional é montado.
     default: none
 
   lifecycle:
+    # Tempo máximo para parar beans e concluir o ciclo corrente no shutdown.
     timeout-per-shutdown-phase: 30s
 
   datasource:
+    # JDBC do PostgreSQL. Nos contêineres, o Compose fornece TRACKING_DB_URL.
     url: ${TRACKING_DB_URL}
     username: ${TRACKING_DB_USER}
     password: ${TRACKING_DB_PASSWORD}
@@ -17,12 +26,17 @@ spring:
       pool-name: aporia-tracking-pool
       maximum-pool-size: ${TRACKING_DB_POOL_MAX:10}
       minimum-idle: ${TRACKING_DB_POOL_MIN:2}
+      # Espera máxima por uma conexão livre antes de falhar a operação.
       connection-timeout: ${TRACKING_DB_CONNECTION_TIMEOUT_MS:3000}
+      # Tempo máximo para validar uma conexão antes de entregá-la.
       validation-timeout: ${TRACKING_DB_VALIDATION_TIMEOUT_MS:1000}
       idle-timeout: 300000
+      # Recicla conexões antigas para não depender de conexões eternas no banco.
       max-lifetime: 1800000
 
   security:
+    # Usuário único do Actuator com a role MONITORING. As rotas de health são
+    # públicas; /actuator/prometheus e /actuator/info exigem esta credencial.
     user:
       name: ${TRACKING_MONITORING_USER:monitoring}
       password: ${TRACKING_MONITORING_PASSWORD}
@@ -30,12 +44,16 @@ spring:
         - MONITORING
 
 server:
+  # O perfil gateway desliga este servidor com port: -1; o monitor e o worker
+  # também não publicam API de negócio. A API futura usará estes valores.
   address: ${TRACKING_HTTP_BIND:127.0.0.1}
   port: ${TRACKING_HTTP_PORT:8080}
   shutdown: graceful
 
 management:
   server:
+    # Interface administrativa separada da API. O Compose a publica apenas em
+    # loopback e cada perfil troca a porta.
     address: ${TRACKING_MANAGEMENT_BIND:127.0.0.1}
     port: ${TRACKING_MANAGEMENT_PORT:9100}
 
@@ -49,7 +67,9 @@ management:
 
   endpoint:
     health:
+      # Não devolve detalhes internos de componentes para clientes anônimos.
       show-details: never
+      # Habilita /actuator/health/liveness e /actuator/health/readiness.
       probes:
         enabled: true
 
@@ -59,6 +79,7 @@ management:
 
 logging:
   structured:
+    # Logs em JSON (logstash) para coleta pelo Alloy/Loki.
     format:
       console: logstash
 
@@ -67,12 +88,15 @@ logging:
     "[software.aporia.tracking]": INFO
 
 sentry:
+  # DSN vazio desabilita o envio de eventos. A sanitização e a deduplicação
+  # ficam em ErrorTrackingConfiguration.
   dsn: ${TRACKING_SENTRY_DSN:}
 
   environment: ${TRACKING_SENTRY_ENVIRONMENT:development}
 
   release: ${TRACKING_SENTRY_RELEASE:1.0-SNAPSHOT}
 
+  # Não envia dados pessoais nem captura breadcrumbs/traces por padrão.
   send-default-pii: false
 
   traces-sample-rate: 0.0
@@ -84,6 +108,7 @@ sentry:
   debug: false
 
   logging:
+    # Só erros viram evento; o log comum continua no console.
     enabled: true
     minimum-event-level: ERROR
     minimum-breadcrumb-level: ERROR

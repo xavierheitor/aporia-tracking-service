@@ -5,8 +5,9 @@ import java.util.Objects;
 /**
  * Indica quais partes da mensagem devem gerar telemetria, resposta de comando ou processamento de heartbeat.
  *
- * <p>As decisões são independentes: uma resposta com posição pode ativar
- * telemetria e resposta de comando simultaneamente.</p>
+ * <p>As decisões são independentes: uma resposta com posição pode ativar telemetria e resposta de comando
+ * simultaneamente. O plano é derivado uma única vez das capacidades reconhecidas e não valida novamente o
+ * conteúdo do quadro.</p>
  *
  * @param processTelemetry indica que a mensagem contém telemetria
  * @param processCommandResponse indica que há uma resposta a registrar
@@ -23,12 +24,14 @@ public record MessageProcessingPlan(
      *
      * @param capabilities capacidades presentes na mensagem
      * @return plano com os processamentos aplicáveis à mensagem
+     * @throws NullPointerException se {@code capabilities} for nula
      */
     public static MessageProcessingPlan from(
             ProtocolMessageCapabilities capabilities
     ) {
         Objects.requireNonNull(capabilities);
 
+        // Cada capacidade vira uma flag; nenhuma delas exclui as outras.
         return new MessageProcessingPlan(
                 capabilities.hasTelemetry(),
                 capabilities.hasCommandResponse(),

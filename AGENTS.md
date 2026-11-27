@@ -59,3 +59,24 @@ Evitar uma sequência interminável de “etapas” artificiais. Organizar o tra
 Use somente `aporia_tracking_test` nos testes de integração. Antes de aplicar migrations, confirme URL, usuário e nome do banco. Os testes JDBC criam um schema isolado por JVM. Preserve o isolamento ao adicionar cenários de recuperação global ou concorrência. Nunca execute `flyway:clean` em ambiente compartilhado ou de produção.
 
 Quando faltarem evidências sobre um protocolo ou sua operação segura, identifique a lacuna e peça o manual ou a captura correspondente.
+
+
+## Engineering Workflow
+
+- Discover and load relevant skills before starting a task.
+- Use Superpowers for non-trivial implementations,
+  architectural changes, debugging and code reviews.
+- Use available code indexing tools before performing
+  broad repository searches.
+- Use Context7 to verify unfamiliar or version-specific
+  APIs and framework documentation.
+- Follow existing architectural patterns.
+- Avoid unnecessary abstractions and overengineering.
+- Document significant architectural decisions.
+- Write meaningful comments explaining why, not what.
+- Review security, performance and maintainability.
+- Run relevant tests and static analysis before
+  declaring a task complete.
+- Never claim verification without execution evidence.
+- Report which skills and tools were used.
+- Report unavailable tools and validation failures.

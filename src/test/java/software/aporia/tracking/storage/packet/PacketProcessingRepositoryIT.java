@@ -29,13 +29,28 @@ import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 import software.aporia.tracking.worker.TrackingWorker;
 
-/** Exercita o escopo da reserva e as garantias transacionais extraídas do worker. */
+/**
+ * Exercita o escopo da reserva e as garantias transacionais extraídas do worker.
+ *
+ * <p>O repositório reserva um único {@code raw_packet} com {@code FOR UPDATE SKIP LOCKED} e só
+ * confirma depois do callback. Resposta e telemetria usam a mesma conexão, com savepoint para
+ * desfazer apenas a telemetria; uma exceção do callback desfaz a transação inteira. Cada cenário
+ * cria o próprio tenant em {@link TestFixtures}, que também remove os registros ao final.</p>
+ */
 class PacketProcessingRepositoryIT {
 
+    /** Registro em memória de onde as métricas do worker são lidas. */
     private SimpleMeterRegistry meterRegistry;
+    /** Métricas observadas após a falha simulada de commit. */
     private WorkerMetrics metrics;
+    /** Decoders reais usados pelo worker nos cenários. */
     private DecoderRegistry decoderRegistry;
 
+    /**
+     * Cenário: cada teste precisa de métricas isoladas e do registro real de decoders. Ação: cria o
+     * registry em memória, as métricas do worker e os decoders Suntech e Teltonika. Resultado: o
+     * worker do cenário consegue interpretar os quadros Suntech da fixture.
+     */
     @BeforeEach
     void setUpWorkerDependencies() {
         meterRegistry = new SimpleMeterRegistry();
@@ -46,12 +61,19 @@ class PacketProcessingRepositoryIT {
                         new TeltonikaAvl()));
     }
 
+    /** Fecha o registry em memória para não acumular medidores entre testes. */
     @AfterEach
     void closeMeterRegistry() {
         meterRegistry.close();
     }
 
-    /** O filtro impede que a chamada consuma ou atualize um pacote de outro tenant. */
+    /**
+     * Cenário: um pacote pendente para cada um de dois tenants. Ação: processa apenas o tenant
+     * selecionado. Resultado: o pacote desse tenant fica {@code processed} com tentativa 1; o do
+     * outro continua {@code pending} com tentativa 0; uma segunda chamada devolve vazio.
+     *
+     * @throws Exception se a preparação ou a verificação falhar
+     */
     @Test
     void shouldOnlyProcessSelectedTenant() throws Exception {
         try (
@@ -62,6 +84,7 @@ class PacketProcessingRepositoryIT {
             UUID firstPacket = enqueue(db, first);
             UUID secondPacket = enqueue(db, second);
             var repository = new PacketProcessingRepository(db);
+            // O filtro de tenant é aplicado na própria reserva, antes de qualquer callback.
             assertEquals(
                     secondPacket,
                     repository.processNext(second.tenantId(), Set.of("suntech-ascii-v3"), processing -> {
@@ -72,6 +95,7 @@ class PacketProcessingRepositoryIT {
                     }).orElseThrow());
             assertPacket(db, first, firstPacket, "pending", 0);
             assertPacket(db, second, secondPacket, "processed", 1);
+            // Só depois do commit o estado fica visível para a leitura de verificação.
             assertTrue(repository.processNext(second.tenantId(), Set.of("suntech-ascii-v3"), _ -> {
                 fail("O tenant não tem outro pacote pendente");
                 return false;
@@ -79,7 +103,14 @@ class PacketProcessingRepositoryIT {
         }
     }
 
-    /** Mantém a reserva bloqueada até o commit, sem fazer outro consumidor esperar por ela. */
+    /**
+     * Cenário: um consumidor reserva o pacote e permanece no callback segurando a transação. Ação:
+     * um segundo consumidor tenta processar o mesmo tenant. Resultado: o segundo devolve vazio sem
+     * bloquear, pela cláusula {@code SKIP LOCKED}; após a liberação, o primeiro confirma e o pacote
+     * fica {@code processed} com tentativa 1.
+     *
+     * @throws Exception se a preparação ou a verificação falhar
+     */
     @Test
     void shouldSkipPacketLockedByAnotherProcessingTransaction() throws Exception {
         try (
@@ -90,6 +121,7 @@ class PacketProcessingRepositoryIT {
             var reserved = new CountDownLatch(1);
             var release = new CountDownLatch(1);
             try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                // A latch garante que a primeira transação já detém o lock antes da segunda tentativa.
                 var first = executor.submit(
                         () -> new PacketProcessingRepository(db).processNext(
                                 fixture.tenantId(),
@@ -108,6 +140,7 @@ class PacketProcessingRepositoryIT {
                                 }));
                 try {
                     assertTrue(reserved.await(5, TimeUnit.SECONDS));
+                    // A segunda chamada não espera: a linha bloqueada é ignorada pela reserva.
                     var second = executor.submit(
                             () -> new PacketProcessingRepository(db).processNext(
                                     fixture.tenantId(),
@@ -126,7 +159,13 @@ class PacketProcessingRepositoryIT {
         }
     }
 
-    /** Uma exceção do processamento desfaz inclusive os efeitos anteriores ao savepoint. */
+    /**
+     * Cenário: callback que grava resposta e telemetria e então lança exceção. Ação: processa o
+     * pacote. Resultado: a exceção original é propagada, o pacote volta a {@code pending} com
+     * tentativa 0 e não restam mensagens nem respostas.
+     *
+     * @throws Exception se a preparação ou a verificação falhar
+     */
     @Test
     void shouldRollbackResponseAndMessageWhenCallbackFails() throws Exception {
         try (
@@ -141,17 +180,26 @@ class PacketProcessingRepositoryIT {
                             fixture.tenantId(),
                             Set.of("suntech-ascii-v3"),
                             processing -> {
+                                // A resposta é gravada antes do savepoint; a falha desfaz os dois efeitos.
                                 processing.saveResponse("RES");
                                 assertTrue(processing.saveTelemetry(List.of()));
                                 throw failure;
                             }));
             assertSame(failure, actual);
             assertPacket(db, fixture, packetId, "pending", 0);
+            // Confirma que o rollback alcançou resposta e mensagem, não apenas o status do pacote.
             assertNoEffects(db, fixture);
         }
     }
 
-    /** O worker deve falhar, sem reportar sucesso, quando o commit não puder ser concluído. */
+    /**
+     * Cenário: worker real com uma conexão cujo {@code commit} falha. Ação: processa um pacote.
+     * Resultado: {@link IllegalStateException} com a causa SQL preservada; as métricas registram um
+     * ciclo falho, nenhum pacote processado e nenhuma duração; o pacote permanece {@code pending}
+     * sem efeitos.
+     *
+     * @throws Exception se a preparação ou a verificação falhar
+     */
     @Test
     void shouldRollbackAndPropagateCommitFailure() throws Exception {
         try (
@@ -159,6 +207,7 @@ class PacketProcessingRepositoryIT {
                 var fixture = new TestFixtures(db)
         ) {
             UUID packetId = enqueue(db, fixture);
+            // O proxy falha apenas no commit; as demais operações seguem para o pool real.
             DataSource failing = (DataSource) Proxy.newProxyInstance(
                     DataSource.class.getClassLoader(),
                     new Class<?>[] { DataSource.class },
@@ -189,18 +238,28 @@ class PacketProcessingRepositoryIT {
             var error = assertThrows(
                     IllegalStateException.class,
                     () -> new TrackingWorker(failing, fixture.tenantId(), decoderRegistry, metrics).processOne());
+            // O worker conta a falha e não publica processamento nem duração.
             assertEquals(1.0, meterRegistry.get("tracking.worker.cycles.failed").counter().count());
             assertEquals(0.0, meterRegistry.get("tracking.packets.processed").counter().count());
             assertEquals(0L, meterRegistry.get("tracking.packet.processing").timer().count());
             assertEquals(
                     "SIMULATED_COMMIT_FAILURE",
                     assertInstanceOf(SQLException.class, error.getCause()).getMessage());
+            // A causa SQL foi preservada e o rollback manteve pacote e efeitos como estavam.
             assertPacket(db, fixture, packetId, "pending", 0);
             assertNoEffects(db, fixture);
         }
     }
 
-    /** Insere bytes reais pela ingestão, com hash e escopo derivados do cadastro da fixture. */
+    /**
+     * Cenário: fixture com dispositivo habilitado. Ação: ingere um quadro ALV real pela ingestão de
+     * produção. Resultado: devolve o UUID do pacote {@code pending}, com hash e escopo derivados do
+     * cadastro.
+     *
+     * @param db pool do schema isolado
+     * @param fixture cadastro que define tenant, dispositivo e identidade
+     * @return UUID do pacote ingerido
+     */
     private UUID enqueue(DataSource db, TestFixtures fixture) {
         String identity = fixture.deviceIdentity();
         return new JdbcPacketIngestion(db).accept(
@@ -213,7 +272,18 @@ class PacketProcessingRepositoryIT {
                 fixture.deviceId());
     }
 
-    /** Confere estado e tentativas sem depender do resultado em memória do repositório. */
+    /**
+     * Cenário: verificação do estado após o processamento. Ação: consulta status e tentativas pelo
+     * tenant, dispositivo e id. Resultado: confere os valores esperados sem depender do resultado em
+     * memória do repositório.
+     *
+     * @param db pool do schema isolado
+     * @param fixture cadastro que delimita o escopo
+     * @param id identificador da recepção
+     * @param status status esperado
+     * @param attempts tentativas esperadas
+     * @throws SQLException se a operação JDBC falhar
+     */
     private void assertPacket(DataSource db, TestFixtures fixture, UUID id, String status, int attempts)
             throws SQLException {
         try (
@@ -233,7 +303,14 @@ class PacketProcessingRepositoryIT {
         }
     }
 
-    /** Confere que nenhuma mensagem ou resposta foi confirmada após uma falha. */
+    /**
+     * Cenário: verificação de que a falha não confirmou efeitos. Ação: conta mensagens e respostas
+     * do tenant. Resultado: as duas contagens são zero.
+     *
+     * @param db pool do schema isolado
+     * @param fixture cadastro que delimita o escopo
+     * @throws SQLException se a operação JDBC falhar
+     */
     private void assertNoEffects(DataSource db, TestFixtures fixture) throws SQLException {
         try (
                 var connection = db.getConnection();

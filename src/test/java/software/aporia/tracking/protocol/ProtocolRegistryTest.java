@@ -9,11 +9,19 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
-/** Exercita a seleção de adaptadores e a rejeição de registros conflitantes. */
+/**
+ * Exercita a seleção de adaptadores e a rejeição de registros conflitantes.
+ *
+ * <p>O adaptador resolve o protocolo do cadastro e define a sessão usada na conexão; uma
+ * colisão de identificadores tornaria a escolha implícita.</p>
+ */
 class ProtocolRegistryTest {
 
     /**
      * Resolve o adaptador pelo identificador registrado.
+     *
+     * <p>A busca deve devolver a mesma instância, preservando o estado de configuração do
+     * adaptador.</p>
      */
     @Test
     void shouldResolveRegisteredAdapter() {
@@ -32,6 +40,9 @@ class ProtocolRegistryTest {
 
     /**
      * Rejeita um protocolo sem adaptador disponível.
+     *
+     * <p>O identificador vem do cadastro; um valor divergente não pode escolher outro
+     * adaptador.</p>
      */
     @Test
     void shouldRejectUnknownProtocol() {
@@ -49,6 +60,8 @@ class ProtocolRegistryTest {
 
     /**
      * Impede a substituição silenciosa de um adaptador de mesmo identificador.
+     *
+     * <p>O registro falha em vez de manter apenas o último adaptador adicionado.</p>
      */
     @Test
     void shouldRejectDuplicateProtocolIds() {

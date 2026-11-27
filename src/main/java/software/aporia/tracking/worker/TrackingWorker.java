@@ -35,8 +35,14 @@ import software.aporia.tracking.storage.packet.PacketProcessingRepository.Proces
  * no rollback parcial da telemetria; uma falha de persistência, por sua vez, desfaz a transação inteira e chega ao
  * chamador.
  * </p>
+ *
+ * <p> O worker não cria threads: {@link WorkerLifecycle} chama {@link #processOne()} em uma thread dedicada.
+ * Cada chamada abre a própria conexão e a reserva usa bloqueio com {@code SKIP LOCKED}; instâncias
+ * concorrentes, portanto, não processam o mesmo pacote. Os medidores são thread-safe e o restante do estado é
+ * imutável após a construção. </p>
  */
 public class TrackingWorker {
+    /** Logger usado somente depois do commit, sem incluir os bytes do pacote. */
     private static final Logger log = LoggerFactory.getLogger(TrackingWorker.class);
 
     /** Seleciona a interpretação pela versão gravada com os bytes brutos. */
@@ -45,8 +51,22 @@ public class TrackingWorker {
     private final PacketProcessingRepository processingRepository;
     /** Restringe a seleção a um tenant; nulo habilita o consumidor global. */
     private final UUID tenantFilter;
+    /** Métricas incrementadas conforme o desfecho confirmado de cada ciclo. */
     private final WorkerMetrics metrics;
 
+    /**
+     * Cria o worker com o pool, o filtro de tenant e os colaboradores do processamento.
+     *
+     * <p>O repositório é criado aqui e usa o pool informado; ele mantém a conexão, o bloqueio e o commit de
+     * cada ciclo. O filtro nulo seleciona pacotes de qualquer tenant, formando o consumidor global do perfil
+     * worker.</p>
+     *
+     * @param dataSource      pool que fornece uma conexão por ciclo
+     * @param tenantFilter    tenant a consumir, ou nulo para o consumidor global
+     * @param decoderRegistry decodificadores indexados pela versão persistida
+     * @param metrics         métricas dos desfechos confirmados
+     * @throws NullPointerException se o pool, o registro de decodificadores ou as métricas forem nulos
+     */
     public TrackingWorker(
             DataSource dataSource,
             UUID tenantFilter,
@@ -92,6 +112,7 @@ public class TrackingWorker {
             throw error;
         }
 
+        // O repositório só retorna depois do commit; a partir daqui o desfecho é definitivo.
         switch (result.status()) {
             case EMPTY -> metrics.cycleEmpty();
             case PROCESSED -> metrics.packetProcessed();
@@ -100,6 +121,7 @@ public class TrackingWorker {
         }
 
         if (result.status() != ProcessingResult.Status.EMPTY) {
+            // Ciclos vazios não entram no timer para não diluir a latência de processamento.
             metrics.recordProcessingDuration(
                     System.nanoTime() - startedAt);
         }
@@ -137,6 +159,7 @@ public class TrackingWorker {
             processing.saveResponse(decoded.responseType());
         }
         if (!processing.saveTelemetry(decoded.readings())) {
+            // A telemetria parcial já foi desfeita; o pacote permanece pendente com novo prazo.
             return scheduleRetry(processing, "ASSIGNMENT_NOT_FOUND");
         }
         processing.markProcessed();
@@ -157,6 +180,7 @@ public class TrackingWorker {
     private DecodedPacket decode(Packet packet) {
         var decoder = decoderRegistry.get(packet.decoderVersion());
         byte[] payload = packet.payload();
+        // O hash é conferido antes de interpretar os bytes.
         validateHash(payload, packet.payloadHash());
         if (!packet.protocol().equals(decoder.protocolId())) {
             throw new InvalidPacketException("DEVICE_PROTOCOL_MISMATCH");
@@ -167,6 +191,7 @@ public class TrackingWorker {
         } catch (IllegalArgumentException error) {
             throw new InvalidPacketException("INVALID_PROTOCOL_FRAME", error);
         }
+        // A identidade decodificada precisa coincidir com o cadastro usado na reserva.
         if (!packet.registeredIdentity().equals(decoded.identity())) {
             throw new InvalidPacketException("DEVICE_IDENTITY_MISMATCH");
         }
@@ -185,6 +210,7 @@ public class TrackingWorker {
     private ProcessingResult scheduleRetry(Processing processing, String errorCode) {
         Packet packet = processing.packet();
         int attempts = packet.attempts() + 1;
+        // A quinta tentativa encerra o pacote em vez de reagendar.
         if (attempts >= RetryPolicy.MAX_ATTEMPTS) {
             processing.reject(errorCode);
             return ProcessingResult.rejected(packet.id(), errorCode, attempts);
@@ -221,6 +247,7 @@ public class TrackingWorker {
         String calculatedHex = HexFormat.of()
                 .formatHex(calculatedHash);
 
+        // O hash é comparado em hexadecimal, no mesmo formato gravado na ingestão.
         if (!calculatedHex.equals(storedHash)) {
             throw new InvalidPacketException(
                     "HASH_MISMATCH");

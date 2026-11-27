@@ -5,11 +5,16 @@ import java.util.UUID;
 /**
  * Descreve o desfecho de um ciclo do worker, incluindo o motivo e o prazo de nova tentativa
  * quando aplicáveis.
+ *
+ * <p>É um record imutável usado entre o repositório e o worker; o status determina quais campos são
+ * preenchidos. O resultado é construído depois que a transação é confirmada e não carrega conexão nem objetos
+ * JDBC.</p>
+ *
  * @param packetId UUID da recepção, ou nulo para fila vazia
  * @param status desfecho observado na transação
- * @param errorCode motivo registrado em caso de falha
- * @param attempts número de tentativas informado em caso de falha
- * @param retryDelaySeconds intervalo em segundos até a retentativa, quando agendada
+ * @param errorCode motivo registrado em caso de falha, ou nulo quando não há falha
+ * @param attempts número de tentativas informado em caso de falha; zero nos demais desfechos
+ * @param retryDelaySeconds intervalo em segundos até a retentativa; zero quando não agendada
  */
 record ProcessingResult(
         UUID packetId,

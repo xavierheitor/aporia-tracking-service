@@ -9,17 +9,22 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
 
 /**
- * Adapta o {@link TcpGateway} ao ciclo de vida do contexto Spring. A partida automática abre o listener; a parada
- * solicita o fechamento das conexões e aguarda a liberação dos recursos pertencentes ao gateway.
+ * Adapta o {@link TcpGateway} ao ciclo de vida do contexto Spring. A partida automática abre o listener; a
+ * parada solicita o fechamento das conexões e aguarda a liberação dos recursos pertencentes ao gateway.
  *
- * <p>
- * Na parada com callback, uma thread auxiliar faz a espera. O Spring só recebe a confirmação pelo callback após
- * {@link TcpGateway#awaitTermination()} retornar.
- * </p>
+ * <p> Colaboradores: delega toda a operação ao {@link TcpGateway}; este adaptador não abre sockets nem cria
+ * threads além da auxiliar usada na parada com callback. </p>
+ *
+ * <p> Concorrência: {@link #stop()} bloqueia a thread chamadora até a terminação do gateway, enquanto {@link
+ * #stop(Runnable)} delega a espera a uma thread daemon e retorna. O Spring só recebe a confirmação pelo
+ * callback depois que {@link TcpGateway#awaitTermination()} retorna, ou seja, depois da liberação dos
+ * recursos, não apenas do pedido de parada. </p>
  */
 public final class GatewayLifecycle implements SmartLifecycle {
+    /** Logger da adaptação de ciclo de vida. */
     private static final Logger log = LoggerFactory.getLogger(GatewayLifecycle.class);
 
+    /** Gateway controlado; fornecido pelo contexto e não criado aqui. */
     private final TcpGateway gateway;
 
     /**
@@ -63,6 +68,7 @@ public final class GatewayLifecycle implements SmartLifecycle {
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
 
+            // A interrupção é preservada e convertida em falha de parada visível ao Spring.
             throw new IllegalStateException(
                     "Gateway shutdown interrupted",
                     error);
@@ -70,8 +76,8 @@ public final class GatewayLifecycle implements SmartLifecycle {
     }
 
     /**
-     * Solicita a parada e delega a espera a uma thread auxiliar. Se a espera for interrompida, registra a falha sem
-     * confirmar uma terminação não observada.
+     * Solicita a parada e delega a espera a uma thread auxiliar. Se a espera for interrompida, registra a
+     * falha sem confirmar uma terminação não observada, e o callback não é executado.
      *
      * @param callback confirmação exigida pelo Spring após a terminação do gateway
      */
@@ -120,8 +126,8 @@ public final class GatewayLifecycle implements SmartLifecycle {
     }
 
     /**
-     * Define a ordem em relação aos outros componentes de ciclo de vida. Fases menores iniciam antes e encerram depois;
-     * componentes na mesma fase não têm sua ordem relativa definida apenas por este número.
+     * Define a ordem em relação aos outros componentes de ciclo de vida. Fases menores iniciam antes e
+     * encerram depois; componentes na mesma fase não têm sua ordem relativa definida apenas por este número.
      *
      * @return fase 100, também usada pelo ciclo de vida do worker
      */

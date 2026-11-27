@@ -10,14 +10,21 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Mantém a sessão atual por tenant e dispositivo e permite substituir uma
- * conexão quando o
- * rastreador reconecta.
+ * conexão quando o rastreador reconecta.
+ *
+ * <p> Invariantes: existe no máximo uma sessão por par (tenant, dispositivo), e a comparação é feita pela
+ * instância de {@link DeviceSession}, não pelo token. {@link #register} invalida a sessão anterior, mas não
+ * fecha seu socket; quem recebe o valor de retorno é responsável por fechá-lo. </p>
+ *
+ * <p> Concorrência: o mapa é um {@link ConcurrentHashMap}. O {@code compute} executa a ativação e a
+ * publicação sob o bloqueio da chave, e {@code remove(chave, sessão)} só remove se a instância ainda for a
+ * atual. Assim, uma desconexão atrasada da conexão antiga não remove a reconexão. </p>
  */
 public final class SessionRegistry {
 
     /**
-     * * Identifica a entrada de uma sessão pela combinação de tenant e dispositivo.
-     * 
+     * Identifica a entrada de uma sessão pela combinação de tenant e dispositivo.
+     *
      * @param tenantId tenant proprietário do equipamento
      * @param deviceId equipamento cuja conexão ocupa a entrada
      */
@@ -30,12 +37,12 @@ public final class SessionRegistry {
     private final Map<DeviceKey, DeviceSession> sessions = new ConcurrentHashMap<>();
 
     /**
-     * Instala a nova sessão e devolve a anterior, quando houver, para que o
-     * chamador feche o
-     * socket substituído.
+     * Instala a nova sessão sem callback de ativação e devolve a anterior, quando houver. A anterior é
+     * invalidada, mas o socket só é fechado pelo chamador.
      *
      * @param session sessão escolhida para a operação
      * @return sessão substituída, se havia outra conexão para o equipamento
+     * @throws NullPointerException se a sessão for nula
      */
     public Optional<DeviceSession> register(DeviceSession session) {
         return register(session, () -> {
@@ -43,8 +50,19 @@ public final class SessionRegistry {
     }
 
     /**
-     * Publica a sessão local na mesma ordem em que as conexões deste dispositivo
-     * são admitidas.
+     * Publica a sessão local na mesma ordem em que as conexões deste dispositivo são admitidas. O callback
+     * {@code activate} roda dentro de {@code compute}, antes da invalidação da anterior, de modo que a
+     * ativação no banco e a publicação local não se intercalam com outra admissão do mesmo par.
+     *
+     * <p> Se {@code activate} lançar uma exceção, o mapeamento não muda: a sessão anterior permanece atual e
+     * a nova não é publicada. </p>
+     *
+     * @param session  sessão escolhida para a operação
+     * @param activate ação executada antes de publicar a sessão, como a ativação
+     *                 do token no cadastro
+     * @return sessão substituída, se havia outra conexão para o equipamento
+     * @throws NullPointerException se a sessão ou o callback forem nulos
+     * @throws RuntimeException     propagada do callback, sem publicar a sessão
      */
     Optional<DeviceSession> register(DeviceSession session, Runnable activate) {
 
@@ -58,7 +76,9 @@ public final class SessionRegistry {
 
         sessions.compute(key, (_, previous) -> {
 
+            // A chave fica bloqueada durante a ativação e a troca, serializando reconexões.
             activate.run();
+            // Registrar a mesma instância de novo é inofensivo; só outra conexão é invalidada.
             if (previous != null && previous != session) {
                 previous.invalidate();
                 replaced.set(previous);
@@ -71,7 +91,8 @@ public final class SessionRegistry {
     }
 
     /**
-     * Consulta a sessão do dispositivo dentro do tenant informado.
+     * Consulta a sessão do dispositivo dentro do tenant informado. Não valida os identificadores e não filtra
+     * sessões invalidadas ou desconectadas.
      *
      * @param tenantId identificador do tenant que delimita a operação
      * @param deviceId identificador do equipamento cadastrado
@@ -85,10 +106,12 @@ public final class SessionRegistry {
     }
 
     /**
-     * Remove a sessão apenas se ela ainda ocupar a entrada, preservando uma
-     * eventual reconexão.
+     * Remove a sessão apenas se ela ainda ocupar a entrada, preservando uma eventual reconexão. A sessão
+     * recebida é invalidada mesmo quando já foi substituída; a remoção condicional é que não atinge a
+     * instância nova.
      *
      * @param session sessão escolhida para a operação
+     * @throws NullPointerException se a sessão for nula
      */
     public void unregister(DeviceSession session) {
 
@@ -98,6 +121,7 @@ public final class SessionRegistry {
                 session.tenantId(),
                 session.deviceId());
 
+        // Invalida antes de remover para que uma escrita concorrente falhe fechada.
         session.invalidate();
         // A comparação da instância preserva a sessão nova se a antiga terminar depois
         // da reconexão.
@@ -105,7 +129,8 @@ public final class SessionRegistry {
     }
 
     /**
-     * Obtém uma cópia das sessões registradas para a rodada de envio.
+     * Obtém uma cópia das sessões registradas para a rodada de envio. A cópia não filtra sessões invalidadas
+     * nem garante que o socket continue aberto.
      *
      * @return cópia das sessões registradas no momento da consulta
      */
@@ -125,11 +150,12 @@ public final class SessionRegistry {
     }
 
     /**
-     * Compara a instância recebida com a sessão atualmente registrada para o mesmo
-     * equipamento.
+     * Compara a instância recebida com a sessão atualmente registrada para o mesmo equipamento. Um resultado
+     * falso pode significar sessão removida ou substituída por outra conexão.
      *
      * @param session sessão escolhida para a operação
      * @return verdadeiro se a instância ainda é a sessão registrada sob a chave
+     * @throws NullPointerException se a sessão for nula
      */
     public boolean isCurrent(DeviceSession session) {
 

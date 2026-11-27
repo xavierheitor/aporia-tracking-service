@@ -31,10 +31,14 @@ import software.aporia.tracking.support.TestFixtures;
 /** Executa consumidores concorrentes e verifica que cada pacote produz os efeitos esperados uma única vez. */
 class TrackingWorkerConcurrencyIT {
 
+    /** Registro isolado para observar os contadores de cada cenário. */
     private SimpleMeterRegistry meterRegistry;
+    /** Métricas do worker ligadas ao registro acima. */
     private WorkerMetrics metrics;
+    /** Decodificadores Suntech e Teltonika disponíveis ao worker. */
     private DecoderRegistry decoderRegistry;
 
+    /** Prepara métricas isoladas e os dois decodificadores usados pelo worker. */
     @BeforeEach
     void setUpWorkerDependencies() {
         meterRegistry = new SimpleMeterRegistry();
@@ -43,6 +47,7 @@ class TrackingWorkerConcurrencyIT {
                 new SuntechDecoder(), new TeltonikaAvl()));
     }
 
+    /** Fecha o registro de métricas para não vazar estado entre testes. */
     @AfterEach
     void closeMeterRegistry() {
         meterRegistry.close();

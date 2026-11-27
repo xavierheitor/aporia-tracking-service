@@ -3,6 +3,10 @@ package software.aporia.tracking.worker;
 /**
  * Identifica uma falha de validação do pacote por um código que pode ser registrado no
  * processamento.
+ *
+ * <p>É uma falha permanente: o worker grava o código na recepção e não agenda nova tentativa. O código é a
+ * única informação usada na decisão; a mensagem e a causa ficam restritas ao diagnóstico local e não são
+ * persistidas no pacote.</p>
  */
 public class InvalidPacketException extends RuntimeException {
 

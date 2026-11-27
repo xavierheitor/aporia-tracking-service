@@ -43,3 +43,10 @@ Na homologação física do ST8310R, confira a versão conhecida do equipamento,
 ## Validação
 
 A suíte integra TcpGateway, worker, PostgreSQL/PostGIS e sockets locais. Testa os dois codecs na mesma porta usada por Suntech, descoberta, aprovação, recusa de IMEI desabilitado, ping, fragmentação, CRC inválido, ACK de lote, posição com índice e retransmissão. A homologação física depende dos equipamentos e da rede de teste. Consulte o [README para executar a suíte](../README.md#validação).
+
+## Documentos relacionados
+
+- [Índice da documentação](README.md)
+- [Arquitetura e fluxos](arquitetura.md)
+- [Deploy e operação](deploy.md)
+- [Primeiros passos](primeiros-passos.md)

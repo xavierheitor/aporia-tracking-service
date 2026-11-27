@@ -32,22 +32,37 @@ import software.aporia.tracking.observability.metrics.CommandMetrics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 
-/** Exercita a reserva e o resultado persistido da transmissão, inclusive quando a gravação da conclusão falha. */
+/**
+ * Exercita a reserva e o resultado persistido da transmissão contra PostgreSQL real, inclusive
+ * quando a gravação da conclusão falha.
+ *
+ * <p>Contrato protegido: a escrita TCP acontece depois do commit da autorização; falha antes do
+ * envio é delivery_failed, falha depois de uma escrita possível é delivery_unknown, e uma
+ * tentativa em andamento de outro emissor não pode ser revogada apenas por idade.</p>
+ */
 class CommandDispatcherIT {
 
+    /** Registro isolado para medir cada resultado de despacho. */
     private SimpleMeterRegistry meterRegistry;
+    /** Métricas do dispatcher ligadas ao registro acima. */
     private CommandMetrics commandMetrics;
 
     /** Diretório temporário que isola os arquivos gerados pelo cenário. */
     @TempDir
     Path directory;
 
+    /**
+     * Cria um registro de métricas isolado para medir os desfechos de cada cenário.
+     */
     @BeforeEach
     void setupMetrics() {
         meterRegistry = new SimpleMeterRegistry();
         commandMetrics = new CommandMetrics(meterRegistry);
     }
 
+    /**
+     * Fecha o registro para não compartilhar medidores entre os testes.
+     */
     @AfterEach
     void closeMetrics() {
         meterRegistry.close();
@@ -82,6 +97,16 @@ class CommandDispatcherIT {
         return dispatcher(db, owner, device, token, writer);
     }
 
+    /**
+     * Publica um token de sessão ativo para o dispositivo da fixture.
+     *
+     * <p>Somente o token mais recente do cadastro pode reservar comandos; publicar outro token
+     * invalida os emissores anteriores.</p>
+     *
+     * @param db     fonte de conexões JDBC para a operação
+     * @param device cadastro de teste utilizado no cenário
+     * @param token  token da sessão que passa a autorizar a reserva
+     */
     private void activate(DataSource db, TestFixtures device, UUID token) {
         new JdbcDeviceLookup(db).activateSession(
                 new RegisteredDevice(
@@ -92,6 +117,17 @@ class CommandDispatcherIT {
                 token);
     }
 
+    /**
+     * Monta o dispatcher com transporte que resolve apenas a fixture e delega a escrita ao
+     * comportamento do cenário.
+     *
+     * @param db     fonte de conexões JDBC para a operação
+     * @param owner  proprietário do envio ou seu identificador persistido
+     * @param device cadastro de teste utilizado no cenário
+     * @param token  token da sessão autorizada
+     * @param writer comportamento de escrita simulado na sessão
+     * @return dispatcher conectado ao canal controlado pelo cenário
+     */
     private CommandDispatcher dispatcher(
             DataSource db,
             DispatchOwner owner,
@@ -99,6 +135,11 @@ class CommandDispatcherIT {
             UUID token,
             Writer writer) {
         var endpoint = new CommandTransport.Endpoint() {
+            /**
+             * Devolve o token da sessão autorizada do cenário.
+             *
+             * @return token informado pelo teste
+             */
             @Override
             public UUID sessionToken() {
                 return token;
@@ -138,6 +179,8 @@ class CommandDispatcherIT {
         return new CommandDispatcher(
                 db,
                 new DeviceCommandDispatchRepository(),
+                // O transporte só resolve o tenant e o dispositivo da fixture; outros caem em
+                // DEVICE_OFFLINE.
                 (tenant, id) -> device.tenantId().equals(tenant) && device.deviceId().equals(id)
                         ? Optional.of(endpoint)
                         : Optional.empty(),
@@ -162,6 +205,7 @@ class CommandDispatcherIT {
                     device.deviceId(),
                     "suntech",
                     payload,
+                    // Validade de cinco minutos para o comando não expirar antes do envio.
                     Instant.now().plusSeconds(300));
         }
     }
@@ -177,6 +221,7 @@ class CommandDispatcherIT {
     private UUID requestFirmware(DataSource db, TestFixtures device) throws Exception {
         try (var c = db.getConnection()) {
             c.setAutoCommit(false);
+            // Os dois UUIDs representam o solicitante auditado e a chave de repetição do pedido.
             UUID id = new DeviceCommandRepository().enqueueFirmwareVersion(
                     c,
                     device.tenantId(),
@@ -206,6 +251,11 @@ class CommandDispatcherIT {
     /**
      * Simula escrita parcial e distingue a entrega incerta da rejeição anterior ao envio.
      *
+     * <p>Três comandos inseridos sem auditoria permanecem sem escrita: dois são negados pela
+     * política e o terceiro falha na autorização por não ter solicitante nem chave. Depois, uma
+     * consulta de firmware auditada grava três bytes e sofre perda de conexão, o que deve virar
+     * delivery_unknown sem nova tentativa automática.</p>
+     *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
     @Test
@@ -216,6 +266,7 @@ class CommandDispatcherIT {
                 var owner = DispatchOwner.open(directory.resolve("gateway"))
         ) {
             var prefix = new ByteArrayOutputStream();
+            // A escrita só é chamada depois da autorização; aqui ela grava três bytes e falha.
             var dispatcher = dispatcher(db, owner, fixture, bytes -> {
                 prefix.write(bytes, 0, 3);
                 throw new IOException("simulated connection loss");
@@ -223,17 +274,23 @@ class CommandDispatcherIT {
             byte[] valid = FirmwareVersionRequest.encode(fixture.deviceIdentity());
             byte[] programming = ("PRG;" + fixture.deviceIdentity() + ";16;70#60\r")
                     .getBytes(StandardCharsets.US_ASCII);
+            // Nem PRG nem CMD endereçado a outra identidade passam pela política de envio; o
+            // comando válido também não é autorizado por não ter solicitante nem chave de pedido.
             for (byte[] payload : new byte[][] { programming, FirmwareVersionRequest.encode("0000000001"), valid }) {
                 UUID command = enqueue(db, fixture, payload);
                 assertEquals(DELIVERY_FAILED, dispatcher.dispatchNext(fixture.tenantId(), fixture.deviceId()));
                 assertEquals("delivery_failed", status(db, fixture, command));
             }
+            // A tentativa falha antes de qualquer byte: por isso o prefixo continua vazio.
             assertEquals(0, prefix.size());
             UUID command = requestFirmware(db, fixture);
+            // A consulta enfileirada pelo fluxo auditado é a única operação liberada para envio.
             assertEquals(DELIVERY_UNKNOWN, dispatcher.dispatchNext(fixture.tenantId(), fixture.deviceId()));
             assertEquals("delivery_unknown", status(db, fixture, command));
+            // Não há segundo comando; a fila não pode repetir a tentativa incerta.
             assertEquals(NO_COMMAND, dispatcher.dispatchNext(fixture.tenantId(), fixture.deviceId()));
             assertEquals(3, prefix.size());
+            // O contador separa as três rejeições anteriores ao envio da única entrega incerta.
             assertEquals(3.0, meterRegistry.get("tracking.command.dispatch")
                     .tag("result", "delivery_failed").counter().count());
             assertEquals(1.0, meterRegistry.get("tracking.command.dispatch")
@@ -244,7 +301,11 @@ class CommandDispatcherIT {
     }
 
     /**
-     * Provoca falha no banco após a escrita e verifica que o erro continua visível sem retransmissão.
+     * Provoca falha no banco após a escrita e verifica que o erro continua visível sem
+     * retransmissão.
+     *
+     * <p>A exceção não pode ser engolida: o comando fica em transmitting e a recuperação do
+     * mesmo proprietário o classifica como entrega incerta.</p>
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -259,6 +320,7 @@ class CommandDispatcherIT {
             UUID command = requestFirmware(db, fixture);
             // O gatilho afeta somente a conclusão deste comando no schema isolado do teste.
             try (var sql = c.createStatement()) {
+                // A restrição só impede gravar 'sent' para este id, simulando falha após a escrita.
                 sql.execute(
                         "ALTER TABLE device_commands ADD CONSTRAINT it_fail_mark_sent "
                                 + "CHECK (id <> '" + command + "'::uuid OR status <> 'sent')");
@@ -272,12 +334,17 @@ class CommandDispatcherIT {
                     assertEquals(1.0, meterRegistry.get("tracking.command.dispatch.errors").counter().count());
                     assertEquals(0.0, meterRegistry.get("tracking.command.dispatch")
                             .tag("result", "sent").counter().count());
+                    // A escrita completa já ocorreu; o erro está na persistência do resultado.
                     assertArrayEquals(FirmwareVersionRequest.encode(fixture.deviceIdentity()), bytes.toByteArray());
+                    // A tentativa permanece em transmitting porque a conclusão não foi gravada.
                     assertEquals("transmitting", status(db, fixture, command));
                     dispatcher.recover();
+                    // A recuperação do mesmo proprietário classifica a transmissão interrompida como incerta.
                     assertEquals("delivery_unknown", status(db, fixture, command));
+                    // Sem comando em queued, o dispatcher não pode retransmitir.
                     assertEquals(NO_COMMAND, dispatcher.dispatchNext(fixture.tenantId(), fixture.deviceId()));
                 } finally {
+                    // Remove a restrição para não afetar os demais cenários do schema.
                     sql.execute("ALTER TABLE device_commands DROP CONSTRAINT it_fail_mark_sent");
                 }
             }
@@ -285,7 +352,11 @@ class CommandDispatcherIT {
     }
 
     /**
-     * Pausa o emissor durante a escrita, exercita a exclusão entre proprietários e recupera a tentativa após reinício.
+     * Pausa o emissor durante a escrita, exercita a exclusão entre proprietários e recupera a
+     * tentativa após reinício.
+     *
+     * <p>Envelhecer o início da transmissão não autoriza outro emissor a interromper uma escrita
+     * em curso; somente o dono do bloqueio, após reiniciar, pode classificá-la como incerta.</p>
      *
      * @throws Exception se a preparação, execução ou verificação do cenário falhar
      */
@@ -304,11 +375,13 @@ class CommandDispatcherIT {
                     var owner = DispatchOwner.open(ownerFile);
                     var executor = Executors.newVirtualThreadPerTaskExecutor()
             ) {
+                // O mesmo arquivo já bloqueado nesta JVM não pode ser aberto por outro emissor.
                 var unavailable = assertThrows(IOException.class, () -> DispatchOwner.open(ownerFile));
                 assertEquals("DISPATCH_OWNER_UNAVAILABLE", unavailable.getMessage());
                 var authorized = new CountDownLatch(1);
                 var resume = new CountDownLatch(1);
                 var dispatcher = dispatcher(db, owner, fixture, payload -> {
+                    // O writer sinaliza depois da autorização e fica pausado antes de escrever.
                     authorized.countDown();
                     try {
                         if (!resume.await(5, TimeUnit.SECONDS))
@@ -330,20 +403,25 @@ class CommandDispatcherIT {
                                     WHERE tenant_id=? AND id=? AND status='transmitting'
                                     """)
                     ) {
+                        // Envelhecer o início testa o critério por idade usado na recuperação.
                         s.setObject(1, fixture.tenantId());
                         s.setObject(2, command);
                         assertEquals(1, s.executeUpdate());
                     }
                     UUID newToken = UUID.randomUUID();
+                    // A nova sessão invalida o token anterior; o outro proprietário não pode revogar
+                    // a tentativa em curso.
                     activate(db, fixture, newToken);
                     var second = dispatcher(db, other, fixture, newToken, _ -> fail("second writer"));
                     second.recover();
+                    // A idade sozinha não autoriza outro emissor a interromper a escrita.
                     assertEquals("transmitting", status(db, fixture, command));
                     assertEquals(NO_COMMAND, second.dispatchNext(fixture.tenantId(), fixture.deviceId()));
                     assertEquals(0, bytes.size());
                 } finally {
                     resume.countDown();
                 }
+                // A morte simulada ocorre depois da escrita e vira ExecutionException no chamador.
                 var crash = assertThrows(
                         java.util.concurrent.ExecutionException.class,
                         () -> run.get(5, TimeUnit.SECONDS));
@@ -351,6 +429,7 @@ class CommandDispatcherIT {
                 assertEquals("simulated process death after write", cause.getMessage());
                 assertArrayEquals(valid, bytes.toByteArray());
             }
+            // Após o reinício, o mesmo UUID do arquivo recupera a transmissão interrompida.
             try (var restarted = DispatchOwner.open(ownerFile)) {
                 var dispatcher = dispatcher(
                         db,
@@ -360,13 +439,21 @@ class CommandDispatcherIT {
                         _ -> fail("unexpected replay"));
                 dispatcher.recover();
                 assertEquals("delivery_unknown", status(db, fixture, command));
+                // A consulta já escrita não volta para a fila.
                 assertEquals(NO_COMMAND, dispatcher.dispatchNext(fixture.tenantId(), fixture.deviceId()));
                 activate(db, fixture, UUID.randomUUID());
             }
         }
     }
 
-    /** Três gateways ainda enxergam sockets locais, mas só o último login pode consumir a fila. */
+    /**
+     * Três gateways ainda enxergam sockets locais, mas só o último login pode consumir a fila.
+     *
+     * <p>A reserva compara o token da sessão com o token ativo no cadastro; sessões substituídas
+     * não podem enviar um comando enfileirado para a nova conexão.</p>
+     *
+     * @throws Exception se a preparação, execução ou verificação do cenário falhar
+     */
     @Test
     void onlyNewestOfThreeSessionsCanClaim() throws Exception {
         try (
@@ -376,15 +463,19 @@ class CommandDispatcherIT {
                 var b = DispatchOwner.open(directory.resolve("b"));
                 var c = DispatchOwner.open(directory.resolve("c"))
         ) {
+            // Cada dispatcher publica um token novo; apenas o último token ativo pode reservar a fila.
             var first = dispatcher(db, a, device, _ -> fail("sessão antiga"));
             var second = dispatcher(db, b, device, _ -> fail("sessão substituída"));
             var output = new ByteArrayOutputStream();
             var third = dispatcher(db, c, device, output::writeBytes);
             UUID id = requestFirmware(db, device);
+            // Os dois primeiros têm sessões substituídas e não podem consumir o comando.
             assertEquals(NO_COMMAND, first.dispatchNext(device.tenantId(), device.deviceId()));
             assertEquals(NO_COMMAND, second.dispatchNext(device.tenantId(), device.deviceId()));
             assertEquals("queued", status(db, device, id));
+            // O terceiro token é o ativo no cadastro e conclui a escrita.
             assertEquals(SENT, third.dispatchNext(device.tenantId(), device.deviceId()));
+            // A métrica confirma que apenas uma tentativa terminou em SENT.
             assertEquals(1.0, meterRegistry.get("tracking.command.dispatch")
                     .tag("result", "sent").counter().count());
             assertEquals(1L, meterRegistry.get("tracking.command.dispatch.duration")

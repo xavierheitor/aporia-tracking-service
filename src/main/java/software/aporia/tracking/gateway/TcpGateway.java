@@ -34,32 +34,58 @@ import software.aporia.tracking.storage.device.JdbcDeviceLookup;
 import software.aporia.tracking.storage.packet.JdbcPacketIngestion;
 
 /**
- * Gerencia o servidor TCP de rastreamento, as conexões dos dispositivos e o polling de comandos. O ciclo de vida é
- * coordenado externamente pelo GatewayLifecycle. O DataSource é fornecido pela infraestrutura e não pertence ao
- * gateway.
+ * Gerencia o servidor TCP de rastreamento, as conexões dos dispositivos e o polling de comandos. O ciclo de
+ * vida é coordenado externamente pelo {@link GatewayLifecycle}.
+ *
+ * <p> Colaboradores: cria um {@link TcpClientHandler} por partida, um {@link SessionRegistry} compartilhado
+ * entre recepção e dispatcher e, quando há arquivo de proprietário, um {@link DispatchOwner} que mantém o
+ * bloqueio do emissor. O {@link DataSource} é fornecido pela infraestrutura e não pertence ao gateway, que
+ * não o fecha. </p>
+ *
+ * <p> Concorrência: {@link #start()} e {@link #requestStop()} são sincronizados pelo monitor da instância. A
+ * thread do gateway publica o listener antes de iniciar, e {@code running}, {@code server}, {@code
+ * gatewayThread}, {@code failure} e {@code sessionRegistry} são voláteis para que a parada observe o estado
+ * publicado. Cada partida cria um registro novo; sessões de uma execução anterior não são reaproveitadas.
+ * </p>
+ *
+ * <p> Limites: o polling de comandos usa uma única thread, agenda a primeira rodada imediatamente e as
+ * seguintes um segundo após o término da anterior, sem sobreposição. O listener usa backlog 50. {@link
+ * #start()} não abre outro listener enquanto a thread anterior estiver viva, e {@link #awaitTermination()}
+ * não tem timeout próprio. </p>
  */
 public class TcpGateway {
 
+    /** Logger do ciclo de vida do gateway. */
     private static final Logger log = LoggerFactory.getLogger(TcpGateway.class);
 
-    // O pool é externo: o gateway encerra suas tarefas antes de o chamador fechá-lo.
+    /** Pool externo usado pelo handler e pelo dispatcher; não é fechado aqui. */
     private final DataSource dataSource;
+    /** Sinal de execução consultado pelo handler, pelo polling e pela aceitação. */
     private final AtomicBoolean running = new AtomicBoolean(false);
+    /** Sockets aceitos e ainda não encerrados, usados no fechamento da parada. */
     private final Set<Socket> activeClients = ConcurrentHashMap.newKeySet();
 
+    /** Endereço local informado na configuração. */
     private final String bindAddress;
+    /** Porta configurada; zero delega a escolha ao sistema operacional. */
     private final int port;
+    /** Protocolo fixo ou {@code auto} para detectar pelo primeiro byte. */
     private final String protocolId;
+    /** Caminho do arquivo do emissor; nulo ou em branco desabilita o polling. */
     private final String dispatchOwnerFile;
 
-    // volatile publica as mudanças da thread de atendimento para quem consulta ou solicita a parada.
+    /** Listener publicado pela thread do gateway; nulo antes da primeira partida. */
     private volatile ServerSocket server;
+    /** Thread que executa aceitação e polling desta partida. */
     private volatile Thread gatewayThread;
+    /** Falha capturada pela thread, consultada por {@link #getFailure()}. */
     private volatile Throwable failure;
 
-    // Metricas e monitoramento
+    /** Métricas de conexão e ingestão do gateway. */
     private final GatewayMetrics metrics;
+    /** Registro da partida atual; nulo antes da primeira partida. */
     private volatile SessionRegistry sessionRegistry;
+    /** Métricas de despacho e recuperação de comandos. */
     private final CommandMetrics commandMetrics;
 
     /**
@@ -67,12 +93,16 @@ public class TcpGateway {
      *
      * @param dataSource        pool externo, que não será fechado pelo gateway
      * @param bindAddress       endereço local em que o listener deve escutar
-     * @param port              porta TCP; zero permite ao sistema operacional escolher uma porta livre
-     * @param protocolId        protocolo registrado ou {@code auto} para detectar pelo primeiro byte
-     * @param dispatchOwnerFile caminho do arquivo persistente do emissor; nulo ou em branco desabilita o polling de
-     *                          comandos
+     * @param port              porta TCP; zero permite ao sistema operacional
+     *                          escolher uma porta livre
+     * @param protocolId        protocolo registrado ou {@code auto} para detectar
+     *                          pelo primeiro byte
+     * @param dispatchOwnerFile caminho do arquivo persistente do emissor; nulo ou
+     *                          em branco desabilita o polling de comandos
+     * @param metrics           métricas de conexão e ingestão do gateway
      * @param commandMetrics    métricas de despacho e recuperação de comandos
-     * @throws NullPointerException se pool, endereço ou protocolo forem nulos
+     * @throws NullPointerException se pool, endereço, protocolo, métricas ou
+     *                              métricas de comando forem nulos
      */
     public TcpGateway(
             DataSource dataSource,
@@ -93,16 +123,17 @@ public class TcpGateway {
     }
 
     /**
-     * Prepara o atendimento e inicia a thread do gateway. Se ela ainda estiver viva, retorna sem iniciar outra. Uma
-     * nova partida após a terminação cria novas sessões e limpa a falha anterior.
+     * Prepara o atendimento e inicia a thread do gateway. Se ela ainda estiver viva, retorna sem iniciar
+     * outra. Uma nova partida após a terminação cria novas sessões e limpa a falha anterior.
      *
-     * <p>
-     * Listener e proprietário são abertos antes de iniciar a thread. Se essa preparação falhar, tenta fechar os
-     * recursos já adquiridos e propaga a falha. Falhas posteriores da thread são consultadas por {@link #getFailure()}.
-     * </p>
+     * <p> Listener e proprietário são abertos antes de iniciar a thread. Se essa preparação falhar, tenta
+     * fechar os recursos já adquiridos e propaga a falha. Falhas posteriores da thread são consultadas por
+     * {@link #getFailure()}. </p>
      *
-     * @throws IOException              se falhar a abertura do listener ou do arquivo do emissor
-     * @throws IllegalArgumentException se porta, protocolo ou configuração forem inválidos
+     * @throws IOException              se falhar a abertura do listener ou do
+     *                                  arquivo do emissor
+     * @throws IllegalArgumentException se porta, protocolo ou configuração forem
+     *                                  inválidos
      */
     public synchronized void start() throws IOException {
         // start e requestStop usam o mesmo monitor para serializar as mudanças do ciclo de vida.
@@ -159,14 +190,15 @@ public class TcpGateway {
     }
 
     /**
-     * Executa a aceitação e o polling com os recursos pertencentes a esta partida. Ao sair, sinaliza a parada, fecha os
-     * clientes e aguarda o fechamento dos executores. Falhas são registradas e guardadas; erros fatais também são
-     * relançados na thread.
+     * Executa a aceitação e o polling com os recursos pertencentes a esta partida. Ao sair, sinaliza a
+     * parada, fecha os clientes e aguarda o fechamento dos executores. Falhas são registradas e guardadas;
+     * erros fatais também são relançados na thread.
      *
      * @param listener socket de escuta já aberto por {@link #start()}
      * @param sessions registro compartilhado entre recepção e dispatcher
      * @param handler  responsável por atender as conexões desta partida
-     * @param owner    proprietário com bloqueio adquirido, ou nulo para não enviar comandos
+     * @param owner    proprietário com bloqueio adquirido, ou nulo para não enviar
+     *                 comandos
      */
     private void runGateway(
             ServerSocket listener,
@@ -174,8 +206,9 @@ public class TcpGateway {
             TcpClientHandler handler,
             DispatchOwner owner) {
 
-        // O fechamento ocorre em ordem inversa: polling, owner, tarefas TCP e listener. Isso mantém o bloqueio do
-        // emissor enquanto ainda houver uma rodada de envio em execução.
+        // O fechamento ocorre em ordem inversa: polling, owner, tarefas TCP e
+        // listener. Isso mantém o bloqueio do emissor enquanto ainda houver uma
+        // rodada de envio em execução.
         try (
                 listener;
                 var executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -206,9 +239,10 @@ public class TcpGateway {
     }
 
     /**
-     * Solicita a parada sem aguardar a terminação da thread. Fecha o listener para desbloquear
-     * {@link ServerSocket#accept()} e os clientes para interromper suas leituras. Falhas de fechamento são registradas
-     * e não impedem as demais tentativas. Pode ser chamado antes da partida ou repetidamente durante o encerramento.
+     * Solicita a parada sem aguardar a terminação da thread. Fecha o listener para desbloquear {@link
+     * ServerSocket#accept()} e os clientes para interromper suas leituras. Falhas de fechamento são
+     * registradas e não impedem as demais tentativas. Pode ser chamado antes da partida ou repetidamente
+     * durante o encerramento.
      */
     public synchronized void requestStop() {
         // Primeiro impede novos ciclos; fechar o listener desbloqueia o accept em andamento.
@@ -225,11 +259,12 @@ public class TcpGateway {
     }
 
     /**
-     * Aguarda, sem timeout, o fim da thread observada e do fechamento de seus recursos. Retorna imediatamente se não
-     * houver thread ou se ela for a própria chamadora. Não solicita a parada e não propaga a falha registrada pela
-     * thread.
+     * Aguarda, sem timeout, o fim da thread observada e do fechamento de seus recursos. Retorna imediatamente
+     * se não houver thread ou se ela for a própria chamadora. Não solicita a parada e não propaga a falha
+     * registrada pela thread.
      *
-     * @throws InterruptedException se a thread chamadora for interrompida durante a espera
+     * @throws InterruptedException se a thread chamadora for interrompida durante
+     *                              a espera
      */
     public void awaitTermination() throws InterruptedException {
         Thread thread = gatewayThread;
@@ -252,10 +287,11 @@ public class TcpGateway {
     }
 
     /**
-     * Consulta o sinal de execução, a thread e o estado local do listener. O resultado é uma fotografia do momento e
-     * pode mudar logo após a consulta.
+     * Consulta o sinal de execução, a thread e o estado local do listener. O resultado é uma fotografia do
+     * momento e pode mudar logo após a consulta.
      *
-     * @return verdadeiro se a execução estiver habilitada, a thread viva e o listener aberto
+     * @return verdadeiro se a execução estiver habilitada, a thread viva e o
+     *         listener aberto
      */
     public boolean isAcceptingConnections() {
         ServerSocket listener = server;
@@ -266,18 +302,19 @@ public class TcpGateway {
     }
 
     /**
-     * Obtém a falha capturada por {@code runGateway()}. Falhas síncronas de {@link #start()} são propagadas diretamente
-     * e não são armazenadas aqui.
+     * Obtém a falha capturada por {@code runGateway()}. Falhas síncronas de {@link #start()} são propagadas
+     * diretamente e não são armazenadas aqui.
      *
-     * @return falha da thread, ou nulo se nenhuma foi registrada desde a última partida
+     * @return falha da thread, ou nulo se nenhuma foi registrada desde a última
+     *         partida
      */
     public Throwable getFailure() {
         return failure;
     }
 
     /**
-     * Obtém a porta atribuída ao listener, útil quando a porta configurada é zero. A consulta não indica que o gateway
-     * ainda aceita conexões.
+     * Obtém a porta atribuída ao listener, útil quando a porta configurada é zero. A consulta não indica que
+     * o gateway ainda aceita conexões.
      *
      * @return porta do último listener publicado, ou -1 se nenhum foi publicado
      */
@@ -287,9 +324,10 @@ public class TcpGateway {
     }
 
     /**
-     * Define como escolher o adaptador no início de cada conexão. Em modo automático, a escolha depende do primeiro
-     * byte recebido. Um protocolo fixo é resolvido na inicialização para que erros de configuração apareçam antes da
-     * primeira conexão.
+     * Define como escolher o adaptador no início de cada conexão. Em modo automático, a escolha depende do
+     * primeiro byte recebido. Um protocolo fixo é resolvido na inicialização para que erros de configuração
+     * apareçam antes da primeira conexão. A comparação com {@code auto} é exata e diferencia maiúsculas de
+     * minúsculas.
      *
      * @param protocolId identificador de um protocolo registrado ou {@code auto}
      * @return função que recebe o primeiro byte da conexão como inteiro sem sinal
@@ -306,13 +344,17 @@ public class TcpGateway {
     }
 
     /**
-     * Agenda a primeira consulta à fila imediatamente e as seguintes um segundo após a conclusão da rodada anterior.
+     * Agenda a primeira consulta à fila imediatamente e as seguintes um segundo após a conclusão da rodada
+     * anterior.
      *
      * @param polling    executor de uma thread dedicado às rodadas do dispatcher
-     * @param dataSource pool usado pelo dispatcher para consultar e atualizar a fila
+     * @param dataSource pool usado pelo dispatcher para consultar e atualizar a
+     *                   fila
      * @param sessions   registro usado para localizar as sessões deste gateway
-     * @param owner      proprietário que mantém o bloqueio do emissor durante as rodadas
-     * @param running    sinal consultado antes de iniciar uma rodada ou atender outra sessão
+     * @param owner      proprietário que mantém o bloqueio do emissor durante as
+     *                   rodadas
+     * @param running    sinal consultado antes de iniciar uma rodada ou atender
+     *                   outra sessão
      */
     private void startCommandPolling(
             ScheduledExecutorService polling,
@@ -331,15 +373,20 @@ public class TcpGateway {
     }
 
     /**
-     * Aceita conexões e delega o atendimento ao executor. O fechamento do listener por {@link #requestStop()} acorda a
-     * thread bloqueada em {@link ServerSocket#accept()}.
+     * Aceita conexões e delega o atendimento ao executor. O fechamento do listener por {@link #requestStop()}
+     * acorda a thread bloqueada em {@link ServerSocket#accept()}. Um socket aceito depois da parada é fechado
+     * sem ser entregue ao handler.
      *
      * @param server        socket de escuta do gateway
      * @param executor      executor das tarefas TCP
-     * @param handler       responsável pelo protocolo e pela sessão de cada conexão
-     * @param running       sinal que distingue o encerramento solicitado de uma falha de socket
-     * @param activeClients sockets acompanhados para fechamento durante o encerramento
-     * @throws IOException se ocorrer uma falha de E/S durante a aceitação ou o fechamento
+     * @param handler       responsável pelo protocolo e pela sessão de cada
+     *                      conexão
+     * @param running       sinal que distingue o encerramento solicitado de uma
+     *                      falha de socket
+     * @param activeClients sockets acompanhados para fechamento durante o
+     *                      encerramento
+     * @throws IOException se ocorrer uma falha de E/S durante a aceitação ou o
+     *                     fechamento
      */
     private void acceptClients(
             ServerSocket server,
@@ -389,14 +436,18 @@ public class TcpGateway {
     }
 
     /**
-     * Entrega o socket ao handler em uma tarefa própria. Se a submissão falhar, a thread que aceitou o socket assume o
-     * fechamento.
+     * Entrega o socket ao handler em uma tarefa própria. Se a submissão falhar, a thread que aceitou o socket
+     * assume o fechamento.
      *
      * @param executor      executor que recebe a tarefa da conexão
-     * @param handler       responsável por atender e fechar o socket dentro da tarefa
+     * @param handler       responsável por atender e fechar o socket dentro da
+     *                      tarefa
      * @param client        socket recém-aceito
      * @param activeClients conjunto compartilhado com a rotina de encerramento
-     * @throws IOException se o fechamento do socket falhar após uma falha de submissão
+     * @throws IOException      se o fechamento do socket falhar após uma falha de
+     *                          submissão
+     * @throws RuntimeException se a submissão falhar, depois de limpar o socket e
+     *                          as métricas
      */
     private void submitClient(
             ExecutorService executor,
@@ -428,8 +479,8 @@ public class TcpGateway {
     }
 
     /**
-     * Fecha os sockets para desbloquear as leituras das tarefas TCP. Uma falha individual é registrada e o fechamento
-     * prossegue para os demais clientes.
+     * Fecha os sockets para desbloquear as leituras das tarefas TCP. Uma falha individual é registrada e o
+     * fechamento prossegue para os demais clientes.
      *
      * @param activeClients sockets das tarefas que ainda podem estar em execução
      */
@@ -444,7 +495,9 @@ public class TcpGateway {
     }
 
     /**
-     * Executa a recuperação e consulta a fila de comandos para os dispositivos com sessão registrada.
+     * Executa a recuperação e consulta a fila de comandos para os dispositivos com sessão registrada. A
+     * rodada inteira é isolada: falhas de SQL ou de runtime são registradas e não interrompem o agendamento
+     * da próxima rodada.
      *
      * @param dispatcher coordenador do envio de comandos
      * @param sessions   registro de sessões ativas do gateway
@@ -475,6 +528,7 @@ public class TcpGateway {
 
         } catch (java.sql.SQLException error) {
 
+            // A parada e o erro ficam restritos à rodada; o agendamento continua ativo.
             log.error(
                     "Command polling failed, SQLState={}",
                     error.getSQLState());
@@ -485,10 +539,22 @@ public class TcpGateway {
         }
     }
 
+    /**
+     * Conta os sockets aceitos e ainda não encerrados, incluindo conexões em fechamento. O valor é uma
+     * leitura aproximada de um conjunto concorrente.
+     *
+     * @return quantidade de sockets rastreados no momento da consulta
+     */
     public int getActiveConnectionCount() {
         return activeClients.size();
     }
 
+    /**
+     * Conta as sessões registradas na partida atual. Retorna zero antes da primeira partida ou quando a falha
+     * ocorreu antes de publicar o registro.
+     *
+     * @return quantidade de sessões registradas, ou zero sem registro
+     */
     public int getConnectedDeviceCount() {
         SessionRegistry sessions = sessionRegistry;
 

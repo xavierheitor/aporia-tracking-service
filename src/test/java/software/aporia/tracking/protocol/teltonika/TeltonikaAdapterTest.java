@@ -8,12 +8,20 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Verifica o login fragmentado e o processamento de exemplos binários dos codecs AVL suportados. */
+/**
+ * Verifica o login fragmentado e o processamento de exemplos binários dos codecs AVL suportados.
+ *
+ * <p>O adaptador só pode emitir um lote depois de validar comprimento, estrutura e CRC; o login
+ * define a identidade usada nas leituras seguintes.</p>
+ */
 class TeltonikaAdapterTest {
     // Os bytes de referência são exemplos TCP publicados em Teltonika Data Sending Protocols.
     /**
-     * Entrega o login e o lote em fragmentos, verifica os ACKs e altera o CRC para exercitar a
+     * Entrega o login e o lote byte a byte, verifica os ACKs e altera o CRC para exercitar a
      * rejeição do lote corrompido.
+     *
+     * <p>O cenário cobre os dois codecs de exemplo (Codec 8 e Codec 8 Extended) e a remontagem
+     * em todas as fronteiras do enquadramento.</p>
      *
      * @param wire lote AVL de referência em hexadecimal
      */
@@ -26,14 +34,18 @@ class TeltonikaAdapterTest {
         var hex = HexFormat.of();
         var session = new TeltonikaAdapter().newSession();
         var frames = new ArrayList<ProtocolFrame>();
+        // 000F anuncia 15 bytes de IMEI; FFFF é o sinal de presença que a sessão ignora.
         for (byte b : hex.parseHex("000F333536333037303432343431303133FFFF" + wire)) {
+            // Alimentar byte a byte força a remontagem em todas as fronteiras do enquadramento.
             frames.addAll(session.receive(new byte[]{b}));
         }
         assertEquals(2, frames.size());
         assertArrayEquals(new byte[]{1}, session.acknowledge(frames.getFirst()));
         var packet = frames.getLast();
         assertEquals("356307042441013", packet.deviceIdentity());
+        // O ACK do lote é a contagem de registros em quatro bytes big-endian.
         assertArrayEquals(new byte[]{0,0,0,1}, session.acknowledge(packet));
+        // O exemplo tem zero satélites; as coordenadas existem, mas não formam posição válida.
         assertFalse(new TeltonikaAvl().decodePacket(packet.payload(), packet.deviceIdentity()).readings().getFirst().hasPosition());
         byte[] corrupt = packet.payload();
         // A alteração de um único bit isola a verificação do CRC dos demais campos já válidos.
@@ -41,16 +53,23 @@ class TeltonikaAdapterTest {
         var error = assertThrows(IllegalArgumentException.class, () -> session.receive(corrupt));
         assertEquals("INVALID_TELTONIKA_AVL", error.getMessage());
     }
-    /** Login e dois lotes na mesma leitura devem preservar a ordem e os bytes de cada quadro. */
+    /**
+     * Login e dois lotes na mesma leitura devem preservar a ordem e os bytes de cada quadro.
+     *
+     * <p>Sem o sinal de presença entre as mensagens, o enquadrador deve reconhecer três quadros
+     * consecutivos no mesmo buffer.</p>
+     */
     @org.junit.jupiter.api.Test
     void shouldReceiveLoginAndConsecutiveBatchesInOneRead() {
         var hex = HexFormat.of();
         String wire = "000000000000003608010000016B40D8EA30010000000000000000000000000000000105021503010101425E0F01F10000601A014E0000000000000000010000C7CF";
         var session = new TeltonikaAdapter().newSession();
+        // Sem FFFF de presença: login e dois lotes chegam juntos na mesma leitura.
         var frames = session.receive(hex.parseHex("000F333536333037303432343431303133" + wire + wire));
         assertEquals(3, frames.size());
         assertTrue(frames.getFirst().isLogin());
         for (var frame : frames.subList(1, frames.size())) {
+            // A identidade do lote vem do login, não do payload binário.
             assertEquals("356307042441013", frame.deviceIdentity());
             assertArrayEquals(hex.parseHex(wire), frame.payload());
             assertArrayEquals(new byte[]{0, 0, 0, 1}, session.acknowledge(frame));

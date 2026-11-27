@@ -1,4 +1,8 @@
+# Perfil gateway: listener TCP, sessões dos equipamentos e dispatcher opcional.
+# A parte comum (pool JDBC, segurança, Actuator e Sentry) vem de application.yml.
+
 server:
+  # Sem API HTTP de negócio neste processo.
   port: -1
 
 management:
@@ -12,11 +16,13 @@ management:
   endpoint:
     health:
       group:
+        # Liveness: o processo está vivo e o gateway foi iniciado.
         liveness:
           include:
             - livenessState
             - trackingGateway
 
+        # Readiness: além do gateway, o banco precisa responder.
         readiness:
           include:
             - readinessState
@@ -25,9 +31,14 @@ management:
 
 tracking:
   gateway:
+    # Endereço e porta do ServerSocket.
     bind: ${TRACKING_TCP_BIND:0.0.0.0}
     port: ${TRACKING_TCP_PORT:5500}
+    # "auto" detecta Suntech/Teltonika pelo primeiro byte; um valor fixo força
+    # um único protocolo.
     protocol: ${TRACKING_PROTOCOL:auto}
+    # Caminho do arquivo exclusivo do emissor. Vazio desabilita o dispatcher,
+    # mantendo apenas a telemetria.
     dispatch-owner-file: ${TRACKING_DISPATCH_OWNER_FILE:}
 
 sentry:

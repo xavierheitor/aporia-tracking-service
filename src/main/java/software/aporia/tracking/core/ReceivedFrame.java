@@ -6,6 +6,13 @@ import java.util.Objects;
  * Leva os bytes recebidos e a identidade declarada pelo rastreador até a
  * ingestão.
  *
+ * <p>O payload é copiado na criação e em cada leitura, por isso o chamador pode
+ * reutilizar o buffer do socket. A versão do decodificador acompanha os bytes
+ * para que o worker aplique a mesma interpretação mesmo se o processamento
+ * acontecer depois. A identidade é apenas a declarada pelo equipamento; a
+ * ingestão ainda precisa confrontá-la com o cadastro. A instância é imutável e
+ * pode ser compartilhada entre threads.</p>
+ *
  * @param protocol identificador do protocolo no cadastro
  * @param identity identidade declarada pelo equipamento no protocolo
  * @param payload bytes originais do quadro ou comando
@@ -27,10 +34,13 @@ public record ReceivedFrame(
      * @param payload bytes do conteúdo da mensagem
      * @param decoderVersion versão do decodificador vinculada ao pacote
      * @throws NullPointerException se o payload for nulo
-     * @throws IllegalArgumentException se protocolo, identidade ou versão estiverem ausentes, ou se o tamanho for inválido
+     * @throws IllegalArgumentException se protocolo, identidade ou versão estiverem
+     * ausentes, ou se o tamanho for inválido
      */
     public ReceivedFrame {
 
+        // Protocolo, identidade e versão são textos obrigatórios: em branco não
+        // servem como chave de busca nem como versão de decodificação.
         if (protocol == null || protocol.isBlank()) {
             throw new IllegalArgumentException(
                     "Invalid protocol"
@@ -52,30 +62,31 @@ public record ReceivedFrame(
 
         Objects.requireNonNull(payload, "payload");
 
+        // Quadro vazio não tem o que decodificar; o teto de 64 KiB limita a memória por pacote.
         if (payload.length == 0 || payload.length > 65536) {
             throw new IllegalArgumentException(
                     "Invalid payload size"
             );
         }
 
+        // O array recebido pode ser reutilizado ou alterado pelo chamador; a cópia preserva o quadro.
         payload = payload.clone();
     }
 
     /**
-     * Construtor do ReceivedFrame. Obrigatório fornecer um identificador de
-     * protocolo, uma identidade de equipamento e um payload. O payload deve ser
-     * um array de bytes válido e não nulo.
+     * Cria um quadro legado assumindo a versão {@code suntech-ascii-v3}.
+     *
+     * <p>Existe apenas para compatibilidade: como não recebe a versão, só pode representar quadros
+     * Suntech.</p>
      *
      * @param protocol identificador do protocolo no cadastro
      * @param identity identidade declarada pelo equipamento no protocolo
      * @param payload bytes originais do quadro ou comando
-     * @throws IllegalArgumentException se o identificador do protocolo for nulo
-     * ou vazio
-     * @throws IllegalArgumentException se a identidade do equipamento for nula
-     * ou vazia
      * @throws NullPointerException se o payload for nulo
-     * @throws IllegalArgumentException se o protocolo não for Suntech ou o payload tiver tamanho inválido
-     * @deprecated Prefira o construtor que recebe a versão do decodificador. Esta sobrecarga aceita somente Suntech.
+     * @throws IllegalArgumentException se protocolo ou identidade estiverem
+     * ausentes, se o protocolo não for Suntech ou se o payload tiver tamanho inválido
+     * @deprecated Prefira o construtor que recebe a versão do decodificador.
+     * Esta sobrecarga aceita somente Suntech.
      */
     @Deprecated
     public ReceivedFrame(
@@ -96,10 +107,13 @@ public record ReceivedFrame(
      *
      * @param protocol identificador do protocolo do equipamento
      * @return versão usada para interpretar os bytes persistidos
+     * @throws IllegalArgumentException se o protocolo não for Suntech
      */
     private static String legacyDecoderVersion(
             String protocol
     ) {
+        // Sem uma versão conhecida o worker não teria como escolher o decodificador;
+        // por isso o construtor legado não aceita inventar uma para outro protocolo.
         if (!"suntech".equals(protocol)) {
             throw new IllegalArgumentException(
                     "Decoder version required for protocol: "

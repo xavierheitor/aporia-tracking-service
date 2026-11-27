@@ -5,6 +5,9 @@ import java.util.Set;
 /**
  * Agrupa as capacidades reconhecidas em uma mensagem para orientar o roteamento.
  *
+ * <p>O conjunto é copiado na construção e fica imutável, de modo que a classificação não muda durante o
+ * processamento. Conjunto vazio significa que o cabeçalho não foi reconhecido.</p>
+ *
  * @param values capacidades reconhecidas no quadro
  */
 public record ProtocolMessageCapabilities(
@@ -15,9 +18,11 @@ public record ProtocolMessageCapabilities(
      * Congela o conjunto de capacidades para preservar a classificação durante o processamento.
      *
      * @param values capacidades presentes na mensagem
+     * @throws NullPointerException se {@code values} for nulo ou contiver elemento nulo
      */
     public ProtocolMessageCapabilities {
 
+        // Set.copyOf rejeita null e devolve uma cópia imutável, sem expor o EnumSet do chamador.
         values = Set.copyOf(values);
     }
 

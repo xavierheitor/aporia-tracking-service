@@ -6,6 +6,10 @@ import java.time.Instant;
  * Reúne os campos de uma leitura. A presença de coordenadas permite distinguir
  * uma posição de mensagens sem localização.
  *
+ * <p>Campos ausentes ficam nulos e este record não valida faixas; a checagem é feita pelo decodificador do
+ * protocolo. Para tratar a leitura como posição, o consumidor deve usar {@link #hasPosition()}. A instância é
+ * imutável e pode ser compartilhada entre threads.</p>
+ *
  * @param deviceIdentity identidade do equipamento no protocolo
  * @param recordedAt instante da leitura no equipamento
  * @param latitude latitude em graus
@@ -35,6 +39,7 @@ public record Telemetry(
      * contrário
      */
     public boolean hasPosition() {
+        // Coordenada sem horário ou sem fix válido não forma uma posição utilizável.
         return recordedAt != null
                 && latitude != null
                 && longitude != null

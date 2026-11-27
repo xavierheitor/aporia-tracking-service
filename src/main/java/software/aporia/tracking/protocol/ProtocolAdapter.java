@@ -9,6 +9,9 @@ import org.jspecify.annotations.NonNull;
  * <p>O adaptador pode ser compartilhado entre conexões. O estado que muda a cada
  * leitura deve ficar na sessão criada por {@link #newSession()}, exclusiva do socket.
  * A detecção pelo primeiro byte seleciona um candidato; não valida a mensagem inteira.</p>
+ *
+ * <p>A versão devolvida por {@link #decoderVersion()} é gravada com o pacote e precisa encontrar um {@link
+ * TelemetryDecoder} correspondente no worker.</p>
  */
 public interface ProtocolAdapter {
 
@@ -40,6 +43,8 @@ public interface ProtocolAdapter {
      *
      * @param frame quadro recebido para interpretação ou ingestão
      * @return metadados que podem compor a pendência de autorização
+     * @throws IllegalArgumentException se o quadro não pertencer ao protocolo ou não puder ser
+     * descrito
      */
     DeviceDescription describe(ProtocolFrame frame);
 

@@ -7,6 +7,15 @@ import java.util.UUID;
  * Agrupa os bytes de um comando com seu protocolo e os identificadores de
  * comando, tenant e dispositivo.
  *
+ * <p> Invariantes: o protocolo não é vazio, o payload tem entre 1 e 8192 bytes e os bytes são copiados na
+ * construção e a cada chamada de {@link #payload()}. A instância é imutável e segura para uso concorrente.
+ * </p>
+ *
+ * <p> Limites: o record não valida se tenant e dispositivo correspondem entre si nem se o payload é aceito
+ * pelo protocolo; essa verificação cabe ao dispatcher antes da escrita. Como {@code equals}, {@code hashCode}
+ * e {@code toString} não são sobrescritos, o payload é comparado por referência do array e {@code toString}
+ * imprime a identidade do array, não seu conteúdo. </p>
+ *
  * @param commandId identificador persistido do comando
  * @param tenantId  tenant ao qual pertence o equipamento
  * @param deviceId  identificador do equipamento no cadastro
@@ -24,8 +33,8 @@ public record RawDeviceCommand(
     private static final int MAX_COMMAND_SIZE = 8192;
 
     /**
-     * Valida o destinatário e o tamanho do comando e conserva uma cópia de seus
-     * bytes.
+     * Valida o destinatário e o tamanho do comando e conserva uma cópia de seus bytes. A cópia impede que o
+     * chamador altere o conteúdo depois da construção.
      *
      * @param commandId identificador do comando na fila
      * @param tenantId  identificador do tenant que delimita a operação
@@ -34,7 +43,8 @@ public record RawDeviceCommand(
      * @param payload   bytes do conteúdo da mensagem
      * @throws NullPointerException     se algum componente for nulo
      * @throws IllegalArgumentException se o protocolo estiver em branco ou o
-     *                                  tamanho do payload for inválido
+     *                                  payload estiver vazio ou exceder 8192
+     *                                  bytes
      */
     public RawDeviceCommand {
 
@@ -59,7 +69,8 @@ public record RawDeviceCommand(
     }
 
     /**
-     * Entrega os bytes do comando em um array independente.
+     * Entrega os bytes do comando em um array independente. Alterações no array devolvido não afetam esta
+     * instância.
      *
      * @return cópia dos bytes protegidos pela instância
      */

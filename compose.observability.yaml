@@ -1,5 +1,10 @@
+# Infraestrutura de observabilidade: Prometheus, Grafana, Alertmanager, Loki,
+# Alloy e, opcionalmente, GlitchTip. Aplicação e observabilidade são projetos
+# Compose independentes que se encontram na rede externa aporia-observability.
 name: aporia-observability
 
+# Modelo comum: reinício, rede de observabilidade, limites de log e
+# no-new-privileges.
 x-observability: &observability
 
   restart: unless-stopped
@@ -19,6 +24,7 @@ x-observability: &observability
 
 services:
 
+  # Coleta as métricas do Actuator e avalia as regras versionadas.
   prometheus:
     <<: *observability
 
@@ -47,6 +53,7 @@ services:
     cpus: 1.0
 
 
+  # Painéis provisionados por arquivo; não depende de configuração manual.
   grafana:
     <<: *observability
 
@@ -77,6 +84,7 @@ services:
     cpus: 1.0
 
 
+  # Recebe os alertas do Prometheus; os canais externos são configurados no deploy.
   alertmanager:
     <<: *observability
 
@@ -96,6 +104,7 @@ services:
     mem_limit: 128m
     cpus: 0.5
 
+  # Armazena os logs JSON coletados pelo Alloy.
   loki:
     <<: *observability
 
@@ -112,6 +121,8 @@ services:
     cpus: 1.0
 
 
+  # Coleta logs dos contêineres e encaminha ao Loki. O acesso ao Docker é
+  # feito por um socket proxy somente leitura.
   alloy:
     <<: *observability
 
@@ -150,6 +161,7 @@ services:
 
     mem_limit: 512m
     cpus: 0.5
+  # Banco próprio do GlitchTip (perfil opcional glitchtip).
   glitchtip-postgres:
     <<: *observability
 
@@ -183,6 +195,7 @@ services:
     stop_grace_period: 30s
 
 
+  # Rastreamento de exceções compatível com Sentry (perfil opcional glitchtip).
   glitchtip:
     <<: *observability
 
@@ -231,6 +244,7 @@ services:
 
     stop_grace_period: 60s
 
+  # Expõe apenas leitura do Docker socket ao Alloy.
   docker-socket-proxy:
     <<: *observability
 
@@ -270,10 +284,13 @@ services:
     cpus: 0.25
 networks:
 
+  # Compartilhada com gateway, worker e monitor.
   observability:
     name: aporia-observability
     external: true
 
+  # Redes internas: sem rota para fora, usadas pelo banco do GlitchTip e pelo
+  # proxy do Docker.
   glitchtip-backend:
     driver: bridge
     internal: true

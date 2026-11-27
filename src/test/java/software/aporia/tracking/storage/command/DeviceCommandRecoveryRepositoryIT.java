@@ -19,8 +19,14 @@ import software.aporia.tracking.support.TestDatabase;
 import software.aporia.tracking.support.TestFixtures;
 
 /**
- * Verifica a recuperação de tentativas interrompidas e a expiração de comandos
- * respeitando estado e prazo.
+ * Verifica a recuperação de tentativas interrompidas e a expiração de comandos respeitando estado e
+ * prazo.
+ *
+ * <p>As rotinas de recuperação atualizam todas as linhas elegíveis do schema, não apenas as do
+ * tenant, então as asserções usam {@code >= 1}. Cada cenário cria um tenant próprio com
+ * {@link TestFixtures} e controla commit e rollback; a limpeza final é feita pela fixture. Estados
+ * históricos sem proprietário são montados por SQL de teste, pois a autorização de produção exige
+ * dono.</p>
  */
 class DeviceCommandRecoveryRepositoryIT {
 
@@ -31,7 +37,9 @@ class DeviceCommandRecoveryRepositoryIT {
         private final DeviceCommandRecoveryRepository recovery = new DeviceCommandRecoveryRepository();
 
         /**
-         * Enfileira o comando sobre o qual o teste manipulará estados e prazos.
+         * Cenário: comando em {@code queued} cujo estado e prazo o teste ajustará. Ação: insere um
+         * comando sem auditoria pela fixture de teste. Resultado: devolve o UUID; o commit depende do
+         * autocommit da conexão recebida.
          *
          * @param connection conexão JDBC usada pelo chamador
          * @param fixtures   cadastro de teste utilizado no cenário
@@ -53,13 +61,20 @@ class DeviceCommandRecoveryRepositoryIT {
         }
 
         /**
-         * Monta um registro histórico sem proprietário para testar a recuperação
-         * legada.
-         * A autorização atual exige proprietário; dados antigos são preparados
-         * explicitamente.
+         * Cenário: transmissão criada pela autorização atual, que sempre grava proprietário. Ação:
+         * muda o comando para {@code transmitting}, zera {@code dispatch_owner} e preserva o token,
+         * reproduzindo um registro anterior ao controle por proprietário. Resultado: a linha fica
+         * elegível à recuperação por idade, restrita ao tenant, dispositivo e token informados.
+         *
+         * @param connection conexão JDBC usada pelo chamador
+         * @param fixtures cadastro de teste utilizado no cenário
+         * @param commandId identificador do comando na fila
+         * @param claimToken token que identifica a reserva vigente
+         * @throws SQLException se a operação JDBC falhar
          */
         private void simulateLegacyTransmission(Connection connection, TestFixtures fixtures,
                         UUID commandId, UUID claimToken) throws SQLException {
+                // dispatch_owner nulo é o formato legado que a recuperação por idade alcança.
                 try (var update = connection.prepareStatement(
                                 """
                                                 UPDATE device_commands SET status='transmitting', transmission_started_at=now(), dispatch_owner=NULL
@@ -74,8 +89,10 @@ class DeviceCommandRecoveryRepositoryIT {
         }
 
         /**
-         * Ajusta o relógio persistido do comando para simular envelhecimento sem espera
-         * real.
+         * Cenário: necessidade de simular envelhecimento sem espera real. Ação: atualiza a coluna de
+         * tempo permitida ({@code expires_at} ou {@code claimed_at}) no comando informado. Resultado:
+         * o prazo persistido passa a ser o instante do teste; coluna fora da lista é recusada com
+         * {@code INVALID_TEST_COLUMN}.
          *
          * @param connection conexão JDBC usada pelo chamador
          * @param commandId  identificador do comando na fila
@@ -95,6 +112,7 @@ class DeviceCommandRecoveryRepositoryIT {
                                         "INVALID_TEST_COLUMN");
                 }
 
+                // Apenas o id do comando do cenário é usado; o UPDATE não recebe filtro de tenant.
                 String sql = """
                                 UPDATE device_commands
                                 SET %s = ?
@@ -114,7 +132,10 @@ class DeviceCommandRecoveryRepositoryIT {
         }
 
         /**
-         * Confere a expiração de um comando ainda na fila.
+         * Cenário: comando em {@code queued} criado há 10 minutos e expirado há 1 minuto. Ação:
+         * executa a expiração da fila. Resultado: o comando passa a {@code timeout}, estado definido
+         * pela rotina com {@code COMMAND_EXPIRED_IN_QUEUE}; a contagem é {@code >= 1} porque a
+         * varredura alcança todo o schema.
          *
          * @throws Exception se a preparação, execução ou verificação do cenário falhar
          */
@@ -168,6 +189,7 @@ class DeviceCommandRecoveryRepositoryIT {
 
                         int updated = recovery.expireQueued(connection);
 
+                        // A conexão está em autocommit: a atualização já foi confirmada pelo driver.
                         assertTrue(updated >= 1);
 
                         assertEquals(
@@ -180,7 +202,8 @@ class DeviceCommandRecoveryRepositoryIT {
         }
 
         /**
-         * Preserva o comando cujo prazo na fila ainda está vigente.
+         * Cenário: comando em {@code queued} dentro do prazo. Ação: executa a expiração da fila.
+         * Resultado: o comando permanece {@code queued}.
          *
          * @throws Exception se a preparação, execução ou verificação do cenário falhar
          */
@@ -208,7 +231,9 @@ class DeviceCommandRecoveryRepositoryIT {
         }
 
         /**
-         * Classifica como incerta uma reserva antiga interrompida em sending.
+         * Cenário: comando reservado cujo {@code claimed_at} foi envelhecido em 10 minutos. Ação:
+         * executa a recuperação de reservas antigas em {@code sending}. Resultado: o comando passa a
+         * {@code delivery_unknown}; a contagem é {@code >= 1} pela varredura global.
          *
          * @throws Exception se a preparação, execução ou verificação do cenário falhar
          */
@@ -254,6 +279,7 @@ class DeviceCommandRecoveryRepositoryIT {
                                                 connection,
                                                 Duration.ofMinutes(5));
 
+                                // A recuperação exige transação e revoga o token da reserva antiga.
                                 assertTrue(updated >= 1);
 
                                 connection.commit();
@@ -275,7 +301,9 @@ class DeviceCommandRecoveryRepositoryIT {
         }
 
         /**
-         * Preserva uma reserva recente durante a recuperação por idade.
+         * Cenário: comando reservado agora, sem envelhecimento. Ação: executa a recuperação por
+         * idade. Resultado: o comando permanece {@code sending}, porque a reserva ainda está dentro do
+         * limite.
          *
          * @throws Exception se a preparação, execução ou verificação do cenário falhar
          */
@@ -328,7 +356,9 @@ class DeviceCommandRecoveryRepositoryIT {
         }
 
         /**
-         * Exige transação explícita na recuperação de reservas.
+         * Cenário: conexão em autocommit. Ação: tenta recuperar reservas antigas. Resultado:
+         * {@link IllegalStateException} com {@code RECOVERY_REQUIRES_TRANSACTION}, sem executar o
+         * UPDATE.
          *
          * @throws Exception se a preparação, execução ou verificação do cenário falhar
          */
@@ -350,7 +380,8 @@ class DeviceCommandRecoveryRepositoryIT {
         }
 
         /**
-         * Rejeita uma duração inválida para o limite de antiguidade.
+         * Cenário: conexão em autocommit. Ação: tenta recuperar com {@link Duration#ZERO}. Resultado:
+         * {@link IllegalArgumentException} com {@code INVALID_STALE_DURATION}, antes de qualquer SQL.
          *
          * @throws Exception se a preparação, execução ou verificação do cenário falhar
          */
@@ -372,7 +403,10 @@ class DeviceCommandRecoveryRepositoryIT {
         }
 
         /**
-         * Recupera uma transmissão legada que excedeu o limite de idade.
+         * Cenário: transmissão legada sem proprietário, iniciada há 10 minutos, com reserva ainda
+         * vigente. Ação: executa a recuperação por idade e depois tenta concluir com o token antigo.
+         * Resultado: o comando passa a {@code delivery_unknown} e a conclusão do emissor obsoleto é
+         * recusada.
          *
          * @throws Exception se a preparação, execução ou verificação do cenário falhar
          */
@@ -465,7 +499,8 @@ class DeviceCommandRecoveryRepositoryIT {
         }
 
         /**
-         * Preserva uma transmissão recente.
+         * Cenário: transmissão legada sem proprietário, iniciada agora. Ação: executa a recuperação
+         * por idade. Resultado: o comando permanece {@code transmitting}, pois está dentro do limite.
          *
          * @throws Exception se a preparação, execução ou verificação do cenário falhar
          */
@@ -526,7 +561,9 @@ class DeviceCommandRecoveryRepositoryIT {
         }
 
         /**
-         * Confere a idempotência da recuperação sobre a mesma tentativa.
+         * Cenário: transmissão legada antiga. Ação: executa a recuperação duas vezes na mesma
+         * transação. Resultado: a primeira atualiza ao menos uma linha; a segunda devolve zero, porque
+         * a linha já saiu de {@code transmitting}.
          *
          * @throws Exception se a preparação, execução ou verificação do cenário falhar
          */
@@ -603,7 +640,8 @@ class DeviceCommandRecoveryRepositoryIT {
         }
 
         /**
-         * Exige transação explícita ao recuperar transmissões antigas.
+         * Cenário: conexão em autocommit. Ação: tenta recuperar transmissões antigas. Resultado:
+         * {@link IllegalStateException} com {@code RECOVERY_REQUIRES_TRANSACTION}, antes do UPDATE.
          *
          * @throws Exception se a preparação, execução ou verificação do cenário falhar
          */

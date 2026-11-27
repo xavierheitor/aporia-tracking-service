@@ -6,12 +6,24 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.UUID;
 
-/** Atualiza a posição mais recente do ativo segundo a ordem temporal das leituras. */
+/**
+ * Atualiza a posição mais recente do ativo segundo a ordem temporal das leituras.
+ *
+ * <p>Usa a conexão e a transação do chamador, restringe pelo tenant e grava uma
+ * linha por ativo ({@code PRIMARY KEY (tenant_id, asset_id)}). A posição
+ * referenciada precisa já existir no histórico, pois a chave estrangeira é
+ * validada no mesmo commit.</p>
+ */
 public class LastPositionRepository {
 
     /**
      * Insere a primeira posição ou avança o marcador para uma leitura mais recente. Retorna se
      * houve alteração.
+     *
+     * <p>A atualização condicional só vence quando o {@code recorded_at} recebido
+     * é estritamente maior que o gravado; leituras empatadas ou mais antigas não
+     * alteram a linha e produzem falso. O {@code received_at} acompanha a posição
+     * vencedora. Tudo ocorre na transação do chamador, sem confirmação própria.</p>
      *
      * @param connection conexão JDBC usada pelo chamador
      * @param tenantId identificador do tenant que delimita a operação
@@ -48,7 +60,6 @@ public class LastPositionRepository {
             WHERE EXCLUDED.recorded_at >
                   last_positions.recorded_at
             """;
-
         try (PreparedStatement statement
                 = connection.prepareStatement(sql)) {
 

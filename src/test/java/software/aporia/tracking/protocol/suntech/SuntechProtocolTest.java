@@ -9,7 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
-/** Exercita os limites de enquadramento TCP e a extração de identidade dos formatos Suntech. */
+/**
+ * Exercita os limites de enquadramento TCP e a extração de identidade dos formatos Suntech.
+ *
+ * <p>O limite de 8192 bytes evita crescimento ilimitado do buffer de uma conexão; a identidade
+ * extraída vincula o quadro à sessão autenticada.</p>
+ */
 class SuntechProtocolTest {
 
     /**
@@ -34,6 +39,7 @@ class SuntechProtocolTest {
 
         assertEquals(1, frames.size());
 
+        // O quadro emitido mantém o CR que delimita a mensagem.
         assertArrayEquals(
                 ascii("ALV;1234567890\r"),
                 frames.get(0)
@@ -47,6 +53,7 @@ class SuntechProtocolTest {
         var protocol = new SuntechProtocol();
 
         var first = protocol.receive(
+                // A identidade fica partida entre as duas leituras do mesmo socket.
                 ascii("ALV;12345")
         );
 
@@ -86,6 +93,7 @@ class SuntechProtocolTest {
 
         var protocol = new SuntechProtocol();
 
+        // A identidade é o campo seguinte ao cabeçalho ALV.
         String identity = protocol.identify(
                 ascii("ALV;1234567890\r")
         );
@@ -115,6 +123,8 @@ class SuntechProtocolTest {
 
     /**
      * Rejeita um cabeçalho que o protocolo não reconhece.
+     *
+     * <p>UNKNOWN não pertence ao conjunto de cabeçalhos suportados.</p>
      */
     @Test
     void shouldRejectUnsupportedHeader() {
@@ -136,6 +146,8 @@ class SuntechProtocolTest {
 
     /**
      * Rejeita bytes incompatíveis com o quadro textual Suntech.
+     *
+     * <p>0x01 é um byte de controle, embora o quadro comece como ALV.</p>
      */
     @Test
     void shouldRejectNonAsciiFrame() {
@@ -159,6 +171,8 @@ class SuntechProtocolTest {
 
     /**
      * Impede que um quadro ultrapasse o limite do buffer.
+     *
+     * <p>8193 bytes sem CR passam do máximo antes de qualquer delimitador.</p>
      */
     @Test
     void shouldRejectOversizedFrame() {
@@ -181,6 +195,8 @@ class SuntechProtocolTest {
 
     /**
      * Exercita a fronteira inclusiva do tamanho máximo.
+     *
+     * <p>O limite é inclusivo: 8192 bytes terminados em CR formam um quadro válido.</p>
      */
     @Test
     void shouldAcceptMaximumFrameSize() {
@@ -189,6 +205,7 @@ class SuntechProtocolTest {
 
         byte[] frame = new byte[8192];
         Arrays.fill(frame, (byte) 'A');
+        // O CR no último byte completa o quadro exatamente no limite permitido.
         frame[8191] = '\r';
 
         var frames = protocol.receive(frame);
@@ -199,6 +216,8 @@ class SuntechProtocolTest {
 
     /**
      * Extrai a identidade de uma resposta de programação.
+     *
+     * <p>RPR usa a mesma posição de identidade dos demais cabeçalhos simples.</p>
      */
     @Test
     void shouldIdentifyProgrammingResponse() {
@@ -215,6 +234,8 @@ class SuntechProtocolTest {
 
     /**
      * Localiza a identidade após o cabeçalho de telemetria embutida.
+     *
+     * <p>Em RES;STT;ID;..., a identidade está no terceiro campo, não no segundo.</p>
      */
     @Test
     void shouldIdentifyEmbeddedTelemetryResponse() {
@@ -232,6 +253,8 @@ class SuntechProtocolTest {
 
     /**
      * Confere a posição da identidade em uma resposta simples.
+     *
+     * <p>RES;ID;... mantém a identidade no segundo campo.</p>
      */
     @Test
     void shouldIdentifyNormalCommandResponse() {
@@ -248,6 +271,8 @@ class SuntechProtocolTest {
 
     /**
      * Rejeita uma resposta composta que omite a identidade.
+     *
+     * <p>O terceiro campo existe, mas está vazio; não há identidade válida para a sessão.</p>
      */
     @Test
     void shouldRejectEmbeddedResponseWithoutIdentity() {

@@ -8,7 +8,15 @@ import org.flywaydb.core.Flyway;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
-/** Fornece conexões para um schema isolado por JVM e verifica o banco de testes antes de aplicar as migrations. */
+/**
+ * Fornece conexões para um schema isolado por JVM e verifica o banco de testes antes das migrations.
+ *
+ * <p>O schema é criado uma única vez por processo e removido no encerramento da JVM. A validação exige
+ * que a URL termine em {@code /aporia_tracking_test} e que {@code current_database()} e
+ * {@code current_user} coincidam com os valores informados, impedindo que a suíte aponte para outro
+ * banco. O isolamento é por schema e por JVM, não por tenant: cada teste continua responsável por
+ * restringir e limpar os próprios registros.</p>
+ */
 public final class TestDatabase {
 
     /** URL do schema exclusivo reutilizada pelas conexões da JVM de testes. */
@@ -21,9 +29,12 @@ public final class TestDatabase {
     }
 
     /**
-     * Confere o endereço de testes e configura o pool para o schema isolado.
+     * Lê as credenciais do ambiente, confere o endereço de testes e configura o pool para o schema isolado.
      *
-     * @return pool de conexões configurado
+     * <p>Falha antes de qualquer conexão quando uma variável obrigatória está ausente ou quando a URL
+     * não aponta para {@code aporia_tracking_test}.</p>
+     *
+     * @return pool de conexões configurado para o schema reservado à JVM
      */
     public static HikariDataSource createDataSource() {
 
@@ -38,6 +49,8 @@ public final class TestDatabase {
         }
 
         if (!url.endsWith("/aporia_tracking_test")) {
+            // A suíte cria e remove schema; recusar outro banco evita operação destrutiva fora do
+            // ambiente de testes.
             throw new IllegalStateException(
                 "Integration tests must use aporia_tracking_test"
             );
@@ -57,6 +70,7 @@ public final class TestDatabase {
 
         HikariConfig config = new HikariConfig();
 
+        // O pool sempre usa o schema isolado, mesmo que a URL original aponte para o public.
         config.setJdbcUrl(isolate(url, user, password));
         config.setUsername(user);
         config.setPassword(password);
@@ -80,6 +94,7 @@ public final class TestDatabase {
         // O schema exclusivo da JVM isola a recuperação global e as identidades fixas usadas nos exemplos.
         String schema = "tracking_it_" + UUID.randomUUID().toString().replace("-", "");
         try (var c = DriverManager.getConnection(url, user, password); var s = c.createStatement()) {
+            // Confirma banco e usuário efetivos antes de criar qualquer objeto.
             try (var row = s.executeQuery("SELECT current_database(), current_user")) {
                 row.next();
                 if (!"aporia_tracking_test".equals(row.getString(1)) || !user.equals(row.getString(2))) {
@@ -92,12 +107,14 @@ public final class TestDatabase {
         }
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            // DROP CASCADE remove o schema e todos os objetos criados pelas migrations ao fim da JVM.
             try (var c = DriverManager.getConnection(url, user, password); var s = c.createStatement()) {
                 s.execute("DROP SCHEMA " + schema + " CASCADE");
             } catch (SQLException e) {
                 System.err.println("Test schema cleanup failed for " + schema + ", SQLState=" + e.getSQLState());
             }
         }));
+        // public permanece no search_path para tipos compartilhados; as tabelas vivem no schema isolado.
         String jdbc = url + "?currentSchema=" + schema + ",public";
         Flyway.configure().dataSource(jdbc, user, password).defaultSchema(schema).load().migrate();
         isolatedUrl = jdbc;

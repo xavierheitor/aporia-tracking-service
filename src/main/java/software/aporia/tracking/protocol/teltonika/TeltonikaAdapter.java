@@ -19,6 +19,9 @@ import software.aporia.tracking.protocol.ProtocolSession;
  * <p>O adaptador cria a sessão e descreve o codec para a descoberta. A sessão
  * remonta os bytes e delega a validação do lote a {@link TeltonikaAvl}, também
  * usado pelo worker para extrair as leituras dos bytes persistidos.</p>
+ *
+ * <p>O adaptador não guarda estado de conexão e pode ser compartilhado; cada {@link ProtocolSession} mantém
+ * IMEI, buffer e etapa de enquadramento e não deve ser usada por mais de uma thread ao mesmo tempo.</p>
  */
 public final class TeltonikaAdapter implements ProtocolAdapter {
     /** Valida o lote AVL completo antes de a sessão emitir o quadro. */
@@ -56,26 +59,34 @@ public final class TeltonikaAdapter implements ProtocolAdapter {
      *
      * @param frame quadro recebido para interpretação ou ingestão
      * @return metadados que podem compor a pendência de autorização
+     * @throws IllegalArgumentException se o quadro não for um lote AVL
      */
     @Override
     public DeviceDescription describe(ProtocolFrame frame) {
         // A sessão só emite um quadro AVL após verificar a estrutura do lote e seu CRC.
         if (!"AVL".equals(frame.messageType())) throw new IllegalArgumentException("AVL_BATCH_REQUIRED");
+        // O byte 8 é o codec; no fluxo normal a sessão já garantiu que ele é 8 ou 8E.
         String format = frame.payload()[8] == 8 ? "Codec 8" : "Codec 8E";
         return new DeviceDescription("Teltonika", "gps_tracker", format, null);
     }
 
     /**
      * Mantém IMEI, buffer e quantidade de bytes esperada entre leituras do mesmo socket.
+     *
+     * <p>O estado é exclusivo da conexão e não é sincronizado; a sessão deve ser usada pela thread que lê o
+     * socket.</p>
      */
     private static final class Session implements ProtocolSession {
         /** Armazena os bytes já recebidos da unidade de protocolo em montagem. */
         private final ByteBuffer buffer = ByteBuffer.allocate(TeltonikaAvl.MAX_PACKET);
         /** Identidade obtida no login desta conexão. */
         private String imei;
-        /** Quantidade de bytes esperada para concluir a etapa atual do enquadramento. */
-        // Etapas: 2 bytes de comprimento, 17 de login completo, 8 de cabeçalho
-        // AVL e, por último, o tamanho total do lote informado pelo cabeçalho.
+        /**
+         * Quantidade de bytes esperada para concluir a etapa atual do enquadramento.
+         *
+         * <p>Etapas: 2 bytes de comprimento, 17 de login completo, 8 de cabeçalho AVL e,
+         * por último, o tamanho total do lote informado pelo cabeçalho.</p>
+         */
         private int target = 2;
 
         /**
@@ -84,6 +95,7 @@ public final class TeltonikaAdapter implements ProtocolAdapter {
          *
          * @param incoming bytes disponíveis nesta leitura TCP, possivelmente um fragmento
          * @return quadros completos nesta leitura, em ordem de recepção
+         * @throws IllegalArgumentException se o login ou o lote AVL forem inválidos
          */
         @Override
         public List<ProtocolFrame> receive(byte[] incoming) {
@@ -95,7 +107,8 @@ public final class TeltonikaAdapter implements ProtocolAdapter {
                     offset++;
                     continue;
                 }
-                // Uma leitura pode terminar no meio do cabeçalho ou conter vários lotes. Copie só até o limite da etapa.
+                // Uma leitura pode terminar no meio do cabeçalho ou conter vários lotes.
+                // Copie só até o limite da etapa.
                 int amount = Math.min(incoming.length - offset, target - buffer.position());
                 buffer.put(incoming, offset, amount);
                 offset += amount;
@@ -109,7 +122,6 @@ public final class TeltonikaAdapter implements ProtocolAdapter {
                     imei = new String(buffer.array(), 2, 15, StandardCharsets.US_ASCII);
                     if (!imei.matches("[0-9]{15}")) throw new IllegalArgumentException("INVALID_IMEI");
                     frames.add(new ProtocolFrame(imei, new byte[0], "LOGIN", true));
-                    // clear reinicia os índices para o próximo lote; não apaga o array.
                     buffer.clear();
                     target = 8;
                 } else if (target == 8) {
@@ -117,7 +129,8 @@ public final class TeltonikaAdapter implements ProtocolAdapter {
                     if (buffer.getInt(0) != 0 || length < 3 || length > buffer.capacity() - 12) {
                         throw new IllegalArgumentException("INVALID_AVL_HEADER");
                     }
-                    // O comprimento do corpo exclui os oito bytes iniciais e os quatro bytes finais de CRC.
+                    // O prefixo de quatro bytes deve ser zero; o comprimento do corpo exclui os
+                    // oito bytes iniciais e os quatro bytes finais de CRC.
                     target = length + 12;
                 } else {
                     byte[] packet = java.util.Arrays.copyOf(buffer.array(), target);

@@ -6,7 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
-/** Verifica a identificação das capacidades de mensagens Suntech, inclusive respostas compostas. */
+/**
+ * Verifica a identificação das capacidades de mensagens Suntech, inclusive respostas compostas.
+ *
+ * <p>Uma resposta pode conter uma posição embutida; reconhecer as duas capacidades evita perder
+ * a telemetria ou deixar de registrar a resposta.</p>
+ */
 class SuntechMessageCapabilitiesTest {
 
     /**
@@ -23,6 +28,8 @@ class SuntechMessageCapabilitiesTest {
 
     /**
      * Confere a capacidade de telemetria de uma mensagem STT.
+     *
+     * <p>O conteúdo após o cabeçalho não participa da classificação neste estágio.</p>
      */
     @Test
     void shouldClassifySttAsTelemetry() {
@@ -35,6 +42,8 @@ class SuntechMessageCapabilitiesTest {
 
     /**
      * Confere que ASTT também ativa o processamento de telemetria.
+     *
+     * <p>ASTT é a variante estendida de posição e deve seguir o mesmo caminho de STT.</p>
      */
     @Test
     void shouldClassifyAsttAsTelemetry() {
@@ -46,6 +55,8 @@ class SuntechMessageCapabilitiesTest {
 
     /**
      * Identifica a mensagem de presença ALV.
+     *
+     * <p>ALV não carrega posição; por isso só o processamento de presença é ativado.</p>
      */
     @Test
     void shouldClassifyHeartbeat() {
@@ -58,6 +69,8 @@ class SuntechMessageCapabilitiesTest {
 
     /**
      * Reconhece o conteúdo de resposta a comando.
+     *
+     * <p>RES sem STT/ASTT é apenas resposta; não há leitura a extrair.</p>
      */
     @Test
     void shouldClassifyCommandResponse() {
@@ -72,6 +85,8 @@ class SuntechMessageCapabilitiesTest {
 
     /**
      * Confere que uma resposta com posição ativa ambos os processamentos.
+     *
+     * <p>O prefixo RES pede o registro da resposta e o STT embutido pede telemetria.</p>
      */
     @Test
     void shouldClassifyResponseWithTelemetry() {
@@ -87,6 +102,8 @@ class SuntechMessageCapabilitiesTest {
 
     /**
      * Reconhece a resposta de programação pelo cabeçalho RPR.
+     *
+     * <p>RPR reporta o resultado da programação e não contém posição.</p>
      */
     @Test
     void shouldClassifyRprAsCommandResponse() {
@@ -101,6 +118,8 @@ class SuntechMessageCapabilitiesTest {
 
     /**
      * Confere a ausência de capacidades para um cabeçalho desconhecido.
+     *
+     * <p>Cabeçalho não mapeado não ativa nenhum processamento, em vez de assumir telemetria.</p>
      */
     @Test
     void shouldReturnEmptyForUnknownMessage() {
@@ -112,6 +131,8 @@ class SuntechMessageCapabilitiesTest {
 
     /**
      * Confere a ausência de capacidades quando nenhum conteúdo chega.
+     *
+     * <p>Sem bytes não há cabeçalho para classificar.</p>
      */
     @Test
     void shouldReturnEmptyForEmptyPayload() {

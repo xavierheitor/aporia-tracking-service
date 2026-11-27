@@ -1,4 +1,12 @@
 #!/bin/sh
+# Consulta e aprova descobertas de equipamentos.
+#
+# Uso:
+#   equipamentos listar
+#   equipamentos autorizar UUID_DA_DESCOBERTA UUID_DO_TENANT
+#
+# Usa a conexão padrão do psql (PGHOST/PGUSER/PGDATABASE). A aprovação é uma
+# única chamada à função transacional do banco.
 set -eu
 
 case "${1:-}" in

@@ -28,10 +28,14 @@ import software.aporia.tracking.support.TestFixtures;
 /** Verifica a consistência entre histórico de posições, última posição e evento na outbox. */
 class TrackingWorkerPositionIT {
 
+    /** Registro isolado para observar os contadores de cada cenário. */
     private SimpleMeterRegistry meterRegistry;
+    /** Métricas do worker ligadas ao registro acima. */
     private WorkerMetrics metrics;
+    /** Decodificadores Suntech e Teltonika disponíveis ao worker. */
     private DecoderRegistry decoderRegistry;
 
+    /** Prepara métricas isoladas e os dois decodificadores usados pelo worker. */
     @BeforeEach
     void setUpWorkerDependencies() {
         meterRegistry = new SimpleMeterRegistry();
@@ -40,6 +44,7 @@ class TrackingWorkerPositionIT {
                 new SuntechDecoder(), new TeltonikaAvl()));
     }
 
+    /** Fecha o registro de métricas para não vazar estado entre testes. */
     @AfterEach
     void closeMeterRegistry() {
         meterRegistry.close();

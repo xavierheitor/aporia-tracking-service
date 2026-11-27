@@ -8,6 +8,9 @@ import org.jspecify.annotations.NonNull;
 /**
  * Identifica o equipamento cadastrado, seu tenant e o par protocolo e identidade usado na conexão.
  *
+ * <p>O par protocolo e identidade é único no cadastro e delimita a consulta que resolve o tenant; a instância
+ * é imutável e não carrega estado de sessão.</p>
+ *
  * @param tenantId tenant ao qual pertence o equipamento
  * @param deviceId identificador do equipamento no cadastro
  * @param protocol identificador do protocolo no cadastro
@@ -27,6 +30,7 @@ public record RegisteredDevice(
      * @param deviceId identificador do equipamento cadastrado
      * @param protocol identificador do protocolo do equipamento
      * @param identity identidade declarada pelo rastreador no protocolo
+     * @throws NullPointerException se qualquer componente for nulo
      */
     public RegisteredDevice {
         Objects.requireNonNull(tenantId);

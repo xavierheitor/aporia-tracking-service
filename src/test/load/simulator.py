@@ -1,3 +1,13 @@
+"""Motor assíncrono do simulador de carga multiprotocolo.
+
+O script provisiona uma frota no schema `tracking_load`, abre uma conexão TCP
+por dispositivo, envia posições Suntech ou Teltonika no intervalo configurado e
+grava um relatório JSON em `runtime/load-testing`.
+
+O simulador não pertence ao runtime da aplicação. Ele exige o gateway e o
+worker apontando para o banco de testes; `verify_gateway()` confirma a URL e a
+porta publicada antes de iniciar qualquer envio.
+"""
 
 import argparse
 import asyncio
@@ -12,7 +22,6 @@ from database import (
     Device,
     provision_fleet,
     snapshot,
-    cleanup,
 )
 
 from metrics import Statistics
@@ -28,14 +37,27 @@ CLOSE_TIMEOUT = 3
 
 
 class LoginError(Exception):
-    pass
+    """Login Teltonika recusado ou com resposta diferente de 0x01."""
 
 
 class AckError(Exception):
-    pass
+    """ACK Teltonika ausente ou diferente do valor esperado."""
 
 
 def coordinates(index: int, sequence: int):
+    """Gera coordenadas determinísticas e suaves para cada dispositivo.
+
+    A posição varia em um pequeno círculo ao redor de -16,67/-49,25. O índice
+    separa os dispositivos no espaço e a sequência move cada um ao longo do
+    tempo, sem saltos bruscos.
+
+    Args:
+        index: posição do dispositivo na frota.
+        sequence: número do envio daquele dispositivo.
+
+    Returns:
+        Par (latitude, longitude) em graus.
+    """
     angle = index * 0.01 + sequence * 0.002
 
     latitude = -16.67 + math.sin(angle) * 0.05
@@ -45,6 +67,15 @@ def coordinates(index: int, sequence: int):
 
 
 async def close_connection(writer):
+    """Fecha uma conexão sem deixar o encerramento preso.
+
+    Tenta `wait_closed()` por até `CLOSE_TIMEOUT`; se o socket não responder,
+    aborta o transporte. O fechamento é melhor esforço e nunca derruba o
+    benchmark.
+
+    Args:
+        writer: `StreamWriter` da conexão, ou None.
+    """
     if writer is None:
         return
 
@@ -68,12 +99,32 @@ async def simulate_device(
     initial_delay: float,
     stats: Statistics,
 ):
+    """Executa o ciclo completo de um dispositivo simulado.
+
+    O ciclo é: esperar o ramp-up, conectar, fazer login (Teltonika), enviar
+    posições até o prazo, contabilizar o resultado e fechar o socket.
+
+    Args:
+        device: dispositivo provisionado, com identidade e codec.
+        index: posição na frota, usada para gerar coordenadas.
+        start_at: instante de referência do benchmark no relógio do loop.
+        end_at: prazo para parar de enviar.
+        interval: segundos entre envios.
+        initial_delay: atraso de ramp-up deste dispositivo.
+        stats: contadores compartilhados por toda a frota.
+
+    Raises:
+        Não propaga falhas de rede: cada uma é contabilizada em `stats` e
+        encerra apenas este dispositivo. Erros de programação continuam visíveis.
+    """
     loop = asyncio.get_running_loop()
 
     writer = None
     connected = False
     sequence = 0
 
+    # O ramp-up espalha as conexões dentro da janela inicial; um dispositivo que
+    # já passou do prazo nem tenta conectar.
     await asyncio.sleep(
         max(0, start_at + initial_delay - loop.time())
     )
@@ -102,6 +153,7 @@ async def simulate_device(
         stats.connected()
         connected = True
 
+        # Teltonika exige login antes do primeiro lote AVL.
         if device.protocol == "teltonika":
             started = loop.time()
 
@@ -129,6 +181,8 @@ async def simulate_device(
         next_send = start_at + initial_delay
 
         while loop.time() < end_at:
+            # Espera até o próximo envio agendado, não um sleep fixo: o
+            # intervalo não acumula atraso de processamento.
             await asyncio.sleep(
                 max(0, next_send - loop.time())
             )
@@ -170,6 +224,8 @@ async def simulate_device(
                     timeout=IO_TIMEOUT,
                 )
 
+                # Escrita local concluída. Para Suntech não há ACK de dados;
+                # para Teltonika o ACK é lido antes de contar o pacote.
                 stats.packets_written += 1
 
                 stats.write_latency.record(
@@ -203,6 +259,8 @@ async def simulate_device(
             sequence += 1
             next_send += interval
 
+            # Se a rodada atrasou mais de um intervalo, pula os horários
+            # perdidos e registra a quantidade para o relatório.
             now = loop.time()
 
             if next_send < now:
@@ -233,6 +291,13 @@ async def simulate_device(
 
 
 async def progress(stats, start_at, end_at):
+    """Imprime uma linha de progresso a cada cinco segundos.
+
+    Args:
+        stats: contadores compartilhados.
+        start_at: instante inicial do benchmark.
+        end_at: instante em que o progresso deve parar.
+    """
     loop = asyncio.get_running_loop()
 
     while loop.time() < end_at:
@@ -256,6 +321,16 @@ async def progress(stats, start_at, end_at):
 
 
 async def run_simulation(fleet, args):
+    """Executa todas as conexões e devolve o resumo do cenário.
+
+    Args:
+        fleet: frota provisionada por `provision_fleet`.
+        args: argumentos validados de `parse_args`.
+
+    Returns:
+        Dicionário com contadores, latências e tempos do cenário. As taxas são
+        calculadas sobre o tempo total observado.
+    """
     stats = Statistics()
     loop = asyncio.get_running_loop()
 
@@ -265,6 +340,7 @@ async def run_simulation(fleet, args):
     tasks = []
 
     for index, device in enumerate(fleet.devices):
+        # Distribui as partidas ao longo do ramp-up, sem esperar a anterior.
         delay = (
             args.ramp_up * index / len(fleet.devices)
         )
@@ -291,6 +367,8 @@ async def run_simulation(fleet, args):
         await asyncio.gather(*tasks)
 
     finally:
+        # Cancelamento defensivo: em interrupção ou erro, nenhuma tarefa fica
+        # pendente segurando sockets.
         for task in tasks:
             if not task.done():
                 task.cancel()
@@ -309,7 +387,28 @@ async def run_simulation(fleet, args):
 
     elapsed = loop.time() - start_at
 
-    return stats.summary(elapsed)
+    result = stats.summary(elapsed)
+
+    # Separa a duração programada do ramp-up e do tempo total, para não
+    # comparar cenários com janelas diferentes.
+    result["timing"] = {
+        "configured_duration_seconds": args.duration,
+        "ramp_up_seconds": args.ramp_up,
+        "configured_steady_state_seconds": (
+            args.duration - args.ramp_up
+        ),
+        "total_elapsed_seconds": elapsed,
+        "elapsed_after_deadline_seconds": max(
+            0.0,
+            elapsed - args.duration,
+        ),
+    }
+
+    result["packets"]["written_per_scheduled_second"] = (
+        stats.packets_written / args.duration
+    )
+
+    return result
 
 
 def wait_for_processing(
@@ -317,6 +416,20 @@ def wait_for_processing(
     expected,
     timeout=60,
 ):
+    """Aguarda a persistência alcançar os pacotes escritos.
+
+    Consulta o banco a cada 2 s até `expected` pacotes crus e posições
+    aparecerem, ou até o timeout. Devolve o último snapshot mesmo em timeout:
+    a reconciliação agregada mostra a diferença.
+
+    Args:
+        tenant_id: tenant do benchmark.
+        expected: quantidade de pacotes escritos.
+        timeout: prazo máximo de espera em segundos.
+
+    Returns:
+        Último snapshot do banco.
+    """
     deadline = time.monotonic() + timeout
 
     while True:
@@ -340,6 +453,14 @@ def wait_for_processing(
 
 
 def parse_args():
+    """Lê e valida os argumentos da linha de comando.
+
+    Returns:
+        Namespace com dispositivos, protocolo, intervalo e tempos.
+
+    Raises:
+        SystemExit: se algum valor violar os limites do simulador.
+    """
     parser = argparse.ArgumentParser(
         description="Aporia Tracking load simulator"
     )
@@ -397,6 +518,8 @@ def parse_args():
     if not math.isfinite(args.ramp_up):
         parser.error("Invalid ramp-up")
 
+    # O ramp-up precisa caber na duração e sobrar pelo menos um intervalo para
+    # medir o regime com pelo menos um envio.
     if not 0 < args.ramp_up < args.duration:
         parser.error("Ramp-up must be less than duration")
 
@@ -413,6 +536,15 @@ def parse_args():
 
 
 def verify_gateway():
+    """Confirma que o gateway em execução aponta para o banco de benchmark.
+
+    Consulta a variável `TRACKING_DB_URL` do contêiner e a porta publicada do
+    serviço. Sem essas duas checagens, um `.env` errado misturaria a carga com
+    dados de desenvolvimento.
+
+    Raises:
+        RuntimeError: se a URL ou a porta não forem as esperadas.
+    """
     import subprocess
 
     result = subprocess.run(
@@ -465,6 +597,7 @@ def verify_gateway():
 
 
 def main():
+    """Fluxo principal: validar, provisionar, simular, reconciliar e relatar."""
     args = parse_args()
 
     verify_gateway()
@@ -491,6 +624,7 @@ def main():
 
         written = result["packets"]["written"]
 
+        # Espera o worker drenar a fila antes de comparar as contagens.
         persisted = wait_for_processing(
             fleet.tenant_id,
             written,
@@ -501,6 +635,8 @@ def main():
         result["scenario"] = vars(args)
         result["persistence"] = persisted
 
+        # Diferença zero significa que tudo que foi escrito chegou ao banco e
+        # virou posição. Um valor positivo pode indicar atraso ou falha.
         result["reconciliation"] = {
             "raw_packets_delta": (
                 persisted["raw_packets"] - written
@@ -529,6 +665,7 @@ def main():
         print(json.dumps(result, indent=2))
         print(f"Report: {report}")
 
+        # O tenant fica no banco para inspeção; a limpeza é um passo separado.
         print(
             "Tenant retained for verification:",
             fleet.tenant_id,

@@ -30,10 +30,14 @@ import software.aporia.tracking.support.TestFixtures;
 /** Acompanha um pacote pelas tentativas de processamento até sua rejeição definitiva. */
 class TrackingWorkerRetryIT {
 
+    /** Registro isolado para observar os contadores de cada cenário. */
     private SimpleMeterRegistry meterRegistry;
+    /** Métricas do worker ligadas ao registro acima. */
     private WorkerMetrics metrics;
+    /** Decodificadores Suntech e Teltonika disponíveis ao worker. */
     private DecoderRegistry decoderRegistry;
 
+    /** Prepara métricas isoladas e os dois decodificadores usados pelo worker. */
     @BeforeEach
     void setUpWorkerDependencies() {
         meterRegistry = new SimpleMeterRegistry();
@@ -42,6 +46,7 @@ class TrackingWorkerRetryIT {
                 new SuntechDecoder(), new TeltonikaAvl()));
     }
 
+    /** Fecha o registro de métricas para não vazar estado entre testes. */
     @AfterEach
     void closeMeterRegistry() {
         meterRegistry.close();

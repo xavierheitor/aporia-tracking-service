@@ -4,6 +4,11 @@ package software.aporia.tracking.worker;
 /**
  * Sinaliza uma condição de processamento que permite desfazer os efeitos parciais e reagendar o
  * pacote.
+ *
+ * <p>É uma exceção não verificada que carrega apenas um código estável; a quantidade de tentativas e o atraso
+ * são decididos por {@link RetryPolicy}. O fluxo atual do {@link TrackingWorker} não a lança: a retentativa é
+ * decidida pelo retorno de {@code saveTelemetry} e pelo código {@code ASSIGNMENT_NOT_FOUND}. A classe
+ * permanece como contrato para extensões do processamento.</p>
  */
 public class RetryableProcessingException
         extends RuntimeException {
@@ -16,7 +21,7 @@ public class RetryableProcessingException
     private final String errorCode;
 
     /**
-     * Preserva a causa operacional usada no agendamento de nova tentativa.
+     * Preserva o motivo usado no agendamento de nova tentativa.
      *
      * @param errorCode código que identifica o motivo da falha
      */

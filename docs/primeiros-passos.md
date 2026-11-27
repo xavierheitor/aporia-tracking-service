@@ -12,31 +12,31 @@ mvn -version
 mvn -Plint clean test
 ```
 
-Abra primeiro o ponto de entrada do gateway e localize a chamada a `server.accept()`. Depois abra o ponto de entrada do worker e localize a chamada a `processOne()`. Cada classe inicia uma JVM diferente. Elas encontram o mesmo pacote por meio da tabela `raw_packets`. [TcpGateway.java](../src/main/java/software/aporia/tracking/gateway/TcpGateway.java) · [WorkerApplication.java](../src/main/java/software/aporia/tracking/worker/WorkerApplication.java)
+Abra primeiro o ponto de entrada do gateway e localize a chamada a `server.accept()`. Depois abra o `WorkerLifecycle` e localize a chamada a `processOne()`. Cada perfil inicia uma JVM diferente. Elas encontram o mesmo pacote por meio da tabela `raw_packets`. [TcpGateway.java](../src/main/java/software/aporia/tracking/gateway/TcpGateway.java) · [WorkerLifecycle.java](../src/main/java/software/aporia/tracking/worker/WorkerLifecycle.java)
 
 ## 2. Preparar o banco do primeiro teste
 
-Se já existe um banco dedicado a testes na porta 55433, use essa instância. Em uma instalação nova, reutilize o Compose do banco com outro nome de projeto; o volume e a rede ficam isolados do desenvolvimento. Configure em `.env` as credenciais da instância local. O exemplo usa o usuário `tracking`.
+Se já existe um banco dedicado a testes na porta 15437, use essa instância. Em uma instalação nova, reutilize o Compose do banco com outro nome de projeto; o volume e a rede ficam isolados do desenvolvimento. Configure em `.env` as credenciais da instância local. O exemplo usa o usuário `tracking_test_admin`.
 
 ```sh
 testdb() {
-  TRACKING_DATABASE_NAME=aporia_tracking_test TRACKING_DATABASE_PORT=55433 \
-    docker compose -p aporia-tracking-tests -f compose.database.yaml "$@"
+  docker compose -p aporia-tracking-tests --profile test -f compose.yaml "$@"
 }
 testdb up -d --build --wait
-testdb exec -T postgres psql -X -v ON_ERROR_STOP=1 -U tracking -d aporia_tracking_test \
+testdb exec -T postgres-test psql -X -v ON_ERROR_STOP=1 \
+  -U tracking_test_admin -d aporia_tracking_test \
   -c 'SELECT current_database(), current_user' \
   -c 'CREATE EXTENSION IF NOT EXISTS postgis' \
   -c 'CREATE EXTENSION IF NOT EXISTS btree_gist'
 ```
 
-Em volume vazio, a imagem cria `aporia_tracking_test` no primeiro boot. Se um volume antigo já estiver inicializado, confirme a lista com `testdb exec -T postgres psql -X -U tracking -d postgres -c '\l'`. Crie o banco com `testdb exec -T postgres createdb -U tracking aporia_tracking_test` somente se ele estiver ausente.
+Em volume vazio, a imagem cria `aporia_tracking_test` no primeiro boot. Se um volume antigo já estiver inicializado, confirme a lista com `testdb exec -T postgres-test psql -X -U tracking_test_admin -d postgres -c '\l'`. Crie o banco com `testdb exec -T postgres-test createdb -U tracking_test_admin aporia_tracking_test` somente se ele estiver ausente.
 
 Exporte as variáveis abaixo no terminal do Maven e informe em `TRACKING_TEST_DB_PASSWORD` a senha do usuário da instância de teste. Em Bash ou Zsh, o exemplo lê a senha sem gravá-la no histórico.
 
 ```sh
-export TRACKING_TEST_DB_URL=jdbc:postgresql://localhost:55433/aporia_tracking_test
-export TRACKING_TEST_DB_USER=tracking
+export TRACKING_TEST_DB_URL=jdbc:postgresql://localhost:15437/aporia_tracking_test
+export TRACKING_TEST_DB_USER=tracking_test_admin
 printf 'Senha do banco de testes: '
 IFS= read -rs TRACKING_TEST_DB_PASSWORD
 printf '\n'
@@ -67,3 +67,11 @@ mvn -Plint clean verify '-Dtest=*Test,*IT'
 | Quem escreve um comando no socket? | Acompanhe a reserva, a autorização e a sessão selecionada em [CommandDispatcher.java](../src/main/java/software/aporia/tracking/command/dispatcher/CommandDispatcher.java). |
 
 Para entender os limites entre essas etapas, leia a [arquitetura](arquitetura.md). Antes de alterar o comportamento, consulte as [instruções de desenvolvimento](../AGENTS.md). Para manter os processos ativos fora do teste, siga o [guia de deploy](deploy.md).
+
+## Documentos relacionados
+
+- [Índice da documentação](README.md)
+- [Arquitetura e fluxos](arquitetura.md)
+- [Gateway TCP e protocolos](gateway-tcp.md)
+- [Deploy e operação](deploy.md)
+- [Instruções de desenvolvimento](../AGENTS.md)

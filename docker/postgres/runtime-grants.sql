@@ -1,5 +1,8 @@
--- Aplicar como proprietário após o Flyway no schema da aplicação.
--- Interrompe a instalação se um login existente herdou acesso administrativo.
+-- Aplicar como proprietário do schema depois do Flyway.
+--
+-- Cria o mínimo de privilégios para gateway e worker. O bloco inicial falha se
+-- qualquer login já tiver privilégios administrativos, para não mascarar uma
+-- configuração insegura. O script pode ser reaplicado.
 DO $$
 DECLARE
     runtime_role name;
@@ -13,11 +16,13 @@ BEGIN
            OR has_function_privilege(runtime_role, 'approve_device_discovery(uuid,uuid)', 'EXECUTE') THEN
             RAISE EXCEPTION 'Login de serviço com privilégios administrativos: %', runtime_role;
         END IF;
+        -- Sem USAGE no schema, os GRANTs de tabela abaixo não teriam efeito.
         EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', current_schema(), runtime_role);
     END LOOP;
 END
 $$;
 
+-- Gateway: lê o cadastro, publica o token da sessão e ingere pacotes crus.
 GRANT SELECT ON devices TO tracking_gateway, tracking_worker;
 GRANT UPDATE (command_session_token) ON devices TO tracking_gateway;
 GRANT INSERT (id, tenant_id, device_id, payload, payload_hash, decoder_version, status, correlation_id)
@@ -25,12 +30,15 @@ GRANT INSERT (id, tenant_id, device_id, payload, payload_hash, decoder_version, 
 GRANT SELECT, INSERT (protocol, identity, manufacturer, device_type, wire_format, reported_model),
     UPDATE (last_seen_at, observations, wire_format, reported_model)
     ON device_discoveries TO tracking_gateway;
+-- Gateway/dispatcher: altera apenas as colunas do ciclo de envio do comando.
 GRANT SELECT, UPDATE (status, attempts, claimed_at, claim_token, error_code, dispatch_owner,
     transmission_started_at, delivery_unknown_at, sent_at) ON device_commands TO tracking_gateway;
 
+-- Worker: consome a fila, consulta associações e grava o resultado.
 GRANT SELECT, UPDATE (status, attempts, available_at, processed_at, error_code)
     ON raw_packets TO tracking_worker;
 GRANT SELECT ON assignments TO tracking_worker;
 GRANT SELECT, INSERT ON messages, device_command_responses TO tracking_worker;
+-- last_positions é upsert: o worker pode inserir e atualizar a linha do ativo.
 GRANT INSERT ON positions, outbox_events TO tracking_worker;
 GRANT SELECT, INSERT, UPDATE (position_id, recorded_at, received_at) ON last_positions TO tracking_worker;

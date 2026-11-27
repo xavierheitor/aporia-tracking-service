@@ -1,18 +1,24 @@
+# Perfil worker: consome raw_packets e grava o resultado transacional.
+# A parte comum (pool JDBC, segurança, Actuator e Sentry) vem de application.yml.
+
 server:
+  # Sem API HTTP de negócio neste processo.
   port: -1
 
 management:
   server:
     port: ${TRACKING_MANAGEMENT_PORT:9102}
-  
+
   endpoint:
     health:
       group:
+        # Liveness: o processo está vivo e o laço do worker iniciou.
         liveness:
           include:
             - livenessState
             - trackingWorker
 
+        # Readiness: o worker e o banco precisam estar disponíveis.
         readiness:
           include:
             - readinessState
@@ -25,6 +31,8 @@ management:
 
 tracking:
   worker:
+    # Se o heartbeat ficar mais velho que este limite, o health indicator
+    # considera o worker travado.
     heartbeat-timeout-seconds: ${TRACKING_WORKER_HEARTBEAT_TIMEOUT_SECONDS:60}
 
 sentry:
